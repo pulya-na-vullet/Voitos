@@ -39,6 +39,32 @@ class IntentRulesTests(TestCase):
         self.assertIsNotNone(due)
         self.assertEqual(due.day, 20)
 
+    def test_parse_in_one_minute(self):
+        from django.utils import timezone as tz
+
+        before = tz.localtime()
+        due = _parse_due("У меня сегодня через 1 минуту звонок напиши мне об этом")
+        self.assertIsNotNone(due)
+        delta = (due - before).total_seconds()
+        self.assertGreater(delta, 30)
+        self.assertLess(delta, 90)
+        self.assertEqual(due.year, before.year)
+
+    def test_resolve_rejects_past_llm_date(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from ai.intent import resolve_reminder_due
+        from django.utils import timezone as tz
+
+        bad = datetime(2023, 5, 10, 12, 1, tzinfo=ZoneInfo("Europe/Moscow"))
+        due = resolve_reminder_due(
+            "сегодня через 1 минуту звонок",
+            llm_due=bad,
+        )
+        self.assertGreaterEqual(due.year, tz.localtime().year)
+        self.assertGreater(due, tz.localtime() - timedelta(seconds=5))
+
 
 class ServicesTests(TestCase):
     def setUp(self) -> None:

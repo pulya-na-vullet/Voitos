@@ -113,22 +113,15 @@ class MessagePipeline:
             return "Запомнил." if intent.confidence >= 0.6 else "Сохранил."
 
         if intent.intent == "create_reminder":
-            due = intent.due_at
-            if not due:
-                from ai.intent import _parse_due
+            from ai.intent import resolve_reminder_due
 
-                due = _parse_due(text, intent.due_hint)
-            if not due:
-                due = timezone.localtime() + timedelta(days=1)
-                due = due.replace(hour=10, minute=0, second=0, microsecond=0)
+            due = resolve_reminder_due(text, intent.due_at, intent.due_hint)
             body = (intent.reminder_text or text).strip()
             # Clean command words a bit
-            for prefix in ("напомни", "Напомни"):
-                if body.lower().startswith("напомни"):
-                    import re
+            if body.lower().startswith("напомни"):
+                import re
 
-                    body = re.sub(r"^напомни\s+", "", body, flags=re.IGNORECASE).strip()
-                    break
+                body = re.sub(r"^напомни\s+", "", body, flags=re.IGNORECASE).strip()
             rem = self.reminders.create(user, body or text, due)
             when = timezone.localtime(rem.due_at).strftime("%d.%m.%Y %H:%M")
             return f"Готово. Напомню {when}."

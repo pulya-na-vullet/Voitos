@@ -122,37 +122,112 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 
 def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
-    raw = (value or hint or "").strip()
+    """Parse reminder due time from Russian / ISO text. Never trust fuzzy junk dates."""
+    raw = " ".join(p for p in [(value or "").strip(), (hint or "").strip()] if p)
     if not raw:
         return None
     now = timezone.localtime()
+    lower = raw.lower().replace("ё", "е")
 
-    lower = raw.lower()
-    # Relative helpers
+    # --- Relative: через N единиц ---
     if "через полгода" in lower or "через 6 месяцев" in lower:
         return now + timedelta(days=182)
-    m = re.search(r"через\s+(\d+)\s*(час|часа|часов|день|дня|дней|недел|месяц)", lower)
+
+    # через минуту / через час / через день (без числа = 1)
+    m = re.search(
+        r"через\s+(?:(\d+)\s*)?(минут[уыа]?|мин\.?|час(?:а|ов)?|день|дня|дней|недел[июяь]|месяц(?:а|ев)?)",
+        lower,
+    )
     if m:
-        n = int(m.group(1))
+        n = int(m.group(1) or "1")
         unit = m.group(2)
+        if unit.startswith("мин"):
+            return now + timedelta(minutes=n)
         if unit.startswith("час"):
             return now + timedelta(hours=n)
-        if unit.startswith("день") or unit.startswith("дня") or unit.startswith("дней"):
+        if unit.startswith(("день", "дня", "дней")):
             return now + timedelta(days=n)
         if unit.startswith("недел"):
             return now + timedelta(weeks=n)
         if unit.startswith("месяц"):
             return now + timedelta(days=30 * n)
 
-    # "20 числа" / "20-го"
+    # --- сегодня / завтра / послезавтра + optional time ---
+    hour, minute = 10, 0
+    am_pm = re.search(
+        r"(?:в\s+)?(\d{1,2})(?:[:\.](\d{2}))?\s*(утра|вечера|дня)?",
+        lower,
+    )
+    if am_pm:
+        hour = int(am_pm.group(1))
+        minute = int(am_pm.group(2) or 0)
+        period = am_pm.group(3)
+        if period == "вечера" and hour < 12:
+            hour += 12
+        if period == "утра" and hour == 12:
+            hour = 0
+        if period == "дня" and hour < 12:
+            hour += 12
+
+    base_day = None
+    if "послезавтра" in lower:
+        base_day = now + timedelta(days=2)
+    elif "завтра" in lower:
+        base_day = now + timedelta(days=1)
+    elif "сегодня" in lower:
+        base_day = now
+
+    if base_day is not None:
+        # If only relative minutes already handled above; here set clock time on day
+        # When "сегодня" + "через N минут" already returned. If plain сегодня/завтра:
+        if not re.search(r"через\s+\d*\s*мин", lower):
+            candidate = base_day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if "сегодня" in lower and candidate <= now:
+                # If time already passed today, push to tomorrow unless user said "через"
+                if am_pm:
+                    candidate = candidate + timedelta(days=1)
+                else:
+                    candidate = now + timedelta(minutes=1)
+            return candidate
+
+    # --- Explicit DD.MM.YYYY or DD.MM ---
+    m = re.search(
+        r"(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?:\s+[вв]?\s*(\d{1,2})[:\.](\d{2}))?",
+        lower,
+    )
+    if m:
+        day, month = int(m.group(1)), int(m.group(2))
+        year = int(m.group(3)) if m.group(3) else now.year
+        if year < 100:
+            year += 2000
+        hh = int(m.group(4)) if m.group(4) else (hour if am_pm else 10)
+        mm = int(m.group(5)) if m.group(5) else (minute if am_pm else 0)
+        try:
+            candidate = now.replace(
+                year=year, month=month, day=day, hour=hh, minute=mm, second=0, microsecond=0
+            )
+        except ValueError:
+            candidate = None
+        if candidate is not None:
+            if candidate.year < now.year - 1:
+                # Refuse absurd past years from bad parsers
+                candidate = candidate.replace(year=now.year)
+            if candidate <= now and not m.group(3):
+                # DD.MM without year already passed → next year
+                try:
+                    candidate = candidate.replace(year=now.year + 1)
+                except ValueError:
+                    pass
+            return candidate
+
+    # --- "20 числа" / "20-го" ---
     m = re.search(r"(\d{1,2})\s*(-?го|числа)", lower)
     if m:
         day = int(m.group(1))
-        candidate = now.replace(day=min(day, 28), hour=10, minute=0, second=0, microsecond=0)
         try:
             candidate = now.replace(day=day, hour=10, minute=0, second=0, microsecond=0)
         except ValueError:
-            pass
+            candidate = now.replace(day=min(day, 28), hour=10, minute=0, second=0, microsecond=0)
         if candidate <= now:
             month = candidate.month + 1
             year = candidate.year
@@ -162,14 +237,44 @@ def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
             candidate = candidate.replace(year=year, month=month)
         return candidate
 
-    try:
-        dt = date_parser.parse(raw, dayfirst=True, fuzzy=True)
-        if timezone.is_naive(dt):
-            dt = timezone.make_aware(dt, timezone.get_current_timezone())
-        return dt
-    except (ValueError, OverflowError, TypeError):
-        logger.warning("Could not parse due date: %s", raw)
-        return None
+    # --- Strict ISO / numeric only (no fuzzy Russian free-text) ---
+    iso_like = raw.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}[T ].*", iso_like) or re.fullmatch(
+        r"\d{1,2}[./]\d{1,2}[./]\d{2,4}.*", iso_like
+    ):
+        try:
+            dt = date_parser.parse(iso_like, dayfirst=True, fuzzy=False)
+            if timezone.is_naive(dt):
+                dt = timezone.make_aware(dt, timezone.get_current_timezone())
+            return dt
+        except (ValueError, OverflowError, TypeError):
+            pass
+
+    logger.warning("Could not parse due date reliably: %s", raw[:120])
+    return None
+
+
+def resolve_reminder_due(user_text: str, llm_due: datetime | None = None, hint: str | None = None) -> datetime:
+    """Prefer parsing the user's words; discard LLM dates that are in the past."""
+    now = timezone.localtime()
+    parsed = _parse_due(user_text, hint)
+    if parsed and parsed > now - timedelta(seconds=30):
+        return parsed
+
+    if llm_due is not None:
+        due = llm_due
+        if timezone.is_naive(due):
+            due = timezone.make_aware(due, timezone.get_current_timezone())
+        # Ignore clearly wrong LLM dates (past year or far past)
+        if due.year >= now.year and due > now - timedelta(minutes=1):
+            return due
+
+    # Fallback: 1 minute from now for "через …"/urgent phrasing, else tomorrow 10:00
+    lower = user_text.lower()
+    if "через" in lower or "минут" in lower:
+        return now + timedelta(minutes=1)
+    due = now + timedelta(days=1)
+    return due.replace(hour=10, minute=0, second=0, microsecond=0)
 
 
 class IntentAnalyzer:
@@ -221,10 +326,20 @@ class IntentAnalyzer:
 
     def _llm_based(self, text: str) -> IntentResult:
         llm = get_llm_provider()
-        raw_text = llm.complete_text(INTENT_SYSTEM_PROMPT, text, temperature=0.1, max_tokens=600)
+        now = timezone.localtime()
+        system = (
+            INTENT_SYSTEM_PROMPT
+            + f"\n\nСейчас: {now.strftime('%Y-%m-%d %H:%M')} (Europe/Moscow). "
+            "Для due_at всегда используй реальный будущий момент в ISO-8601 от этой даты. "
+            "«через 1 минуту» = сейчас+1 минута. Не выдумывай прошлые годы."
+        )
+        raw_text = llm.complete_text(system, text, temperature=0.1, max_tokens=600)
         data = _extract_json(raw_text)
         intent = (data.get("intent") or "chat").strip()
-        due = _parse_due(data.get("due_at"), data.get("due_hint"))
+        # Always prefer deterministic parse from user text for reminders
+        due = _parse_due(text, data.get("due_hint") or data.get("due_at"))
+        if due is None:
+            due = _parse_due(data.get("due_at"), data.get("due_hint"))
         return IntentResult(
             intent=intent,
             should_save=bool(data.get("should_save")),
