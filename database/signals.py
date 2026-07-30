@@ -6,6 +6,7 @@ from django.dispatch import receiver
 def ensure_settings_singleton(sender, **kwargs) -> None:
     if sender.name != "database":
         return
-    from database.models import AppSettings
+    from database.models import AppSettings, BotRuntimeStatus
 
     AppSettings.load()
+    BotRuntimeStatus.load()

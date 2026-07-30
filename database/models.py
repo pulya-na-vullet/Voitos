@@ -241,3 +241,29 @@ class PendingAction(models.Model):
     class Meta:
         verbose_name = "Ожидающее действие"
         verbose_name_plural = "Ожидающие действия"
+
+
+class BotRuntimeStatus(models.Model):
+    """Live status of the MAX long-polling worker (singleton)."""
+
+    state = models.CharField(max_length=64, default="stopped")
+    detail = models.TextField(blank=True, default="")
+    bot_name = models.CharField(max_length=255, blank=True, default="")
+    bot_username = models.CharField(max_length=255, blank=True, default="")
+    last_marker = models.BigIntegerField(null=True, blank=True)
+    last_poll_at = models.DateTimeField(null=True, blank=True)
+    last_update_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Статус бота"
+        verbose_name_plural = "Статус бота"
+
+    def __str__(self) -> str:
+        return f"{self.state}: {self.detail[:60]}"
+
+    @classmethod
+    def load(cls) -> "BotRuntimeStatus":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

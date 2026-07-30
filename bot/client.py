@@ -10,17 +10,28 @@ logger = logging.getLogger(__name__)
 
 
 class MaxApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None, body: str = "") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
 
 
 class MaxClient:
     """Thin client for MAX Bot API (platform-api2.max.ru)."""
 
     def __init__(self, token: str, base_url: str | None = None) -> None:
-        self.token = token
+        self.token = token.strip()
         self.base_url = (base_url or settings.MAX_API_BASE_URL).rstrip("/")
         self.session = requests.Session()
-        self.session.headers.update({"Authorization": token})
+        # MAX expects the raw access token in Authorization (no Bearer prefix).
+        self.session.headers.update(
+            {
+                "Authorization": self.token,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "VoitosBot/0.1",
+            }
+        )
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
@@ -29,8 +40,18 @@ class MaxClient:
         timeout = kwargs.pop("timeout", 60)
         response = self.session.request(method, self._url(path), timeout=timeout, **kwargs)
         if response.status_code >= 400:
-            logger.error("MAX API %s %s -> %s: %s", method, path, response.status_code, response.text[:500])
-            raise MaxApiError(f"MAX API error {response.status_code}: {response.text[:300]}")
+            logger.error(
+                "MAX API %s %s -> %s: %s",
+                method,
+                path,
+                response.status_code,
+                response.text[:500],
+            )
+            raise MaxApiError(
+                f"MAX API error {response.status_code}: {response.text[:300]}",
+                status_code=response.status_code,
+                body=response.text[:1000],
+            )
         if not response.content:
             return {}
         try:
@@ -40,6 +61,35 @@ class MaxClient:
 
     def get_me(self) -> dict[str, Any]:
         return self._request("GET", "/me")
+
+    def get_subscriptions(self) -> list[dict[str, Any]]:
+        data = self._request("GET", "/subscriptions")
+        if isinstance(data, list):
+            return data
+        return list(data.get("subscriptions") or [])
+
+    def unsubscribe(self, url: str) -> dict[str, Any]:
+        return self._request("DELETE", "/subscriptions", params={"url": url})
+
+    def clear_webhooks(self) -> int:
+        """Remove webhook subscriptions so long-polling can receive updates."""
+        removed = 0
+        try:
+            subs = self.get_subscriptions()
+        except MaxApiError as exc:
+            logger.warning("Could not list subscriptions: %s", exc)
+            return 0
+        for sub in subs:
+            url = (sub.get("url") or "").strip()
+            if not url:
+                continue
+            try:
+                self.unsubscribe(url)
+                removed += 1
+                logger.info("Removed MAX webhook subscription: %s", url)
+            except MaxApiError:
+                logger.exception("Failed to remove webhook %s", url)
+        return removed
 
     def get_updates(
         self,
@@ -53,9 +103,9 @@ class MaxClient:
         if marker is not None:
             params["marker"] = marker
         if types:
+            # Docs example uses comma-separated values.
             params["types"] = ",".join(types)
-        # Long poll can wait up to `timeout` seconds
-        return self._request("GET", "/updates", params=params, timeout=timeout + 15)
+        return self._request("GET", "/updates", params=params, timeout=timeout + 20)
 
     def send_message(
         self,

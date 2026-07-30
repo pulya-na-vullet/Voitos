@@ -3,6 +3,7 @@ from django.contrib import admin
 from database.models import (
     ActivityLog,
     AppSettings,
+    BotRuntimeStatus,
     BotUser,
     ChatMessage,
     MemoryItem,
@@ -15,6 +16,11 @@ from database.models import (
 @admin.register(AppSettings)
 class AppSettingsAdmin(admin.ModelAdmin):
     list_display = ("id", "bot_display_name", "yandex_model", "updated_at")
+
+
+@admin.register(BotRuntimeStatus)
+class BotRuntimeStatusAdmin(admin.ModelAdmin):
+    list_display = ("state", "bot_name", "last_poll_at", "last_update_at", "updated_at")
 
 
 @admin.register(BotUser)

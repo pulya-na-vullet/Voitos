@@ -7,6 +7,7 @@ from ai.factory import AINotConfiguredError, get_stt_provider
 from bot.access import AccessDenied, resolve_or_create_user
 from bot.client import MaxClient
 from bot.pipeline import MessagePipeline
+from bot.status import normalize_sender
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,6 @@ def _find_audio_url(message: dict[str, Any]) -> str | None:
             url = payload.get("url") or att.get("url")
             if url:
                 return url
-            # Some payloads only have token — skip if no URL
-        # nested
         if payload.get("url") and att_type in {"audio", "voice"}:
             return payload["url"]
     return None
@@ -49,13 +48,21 @@ class UpdateHandler:
 
     def handle_update(self, update: dict[str, Any]) -> None:
         update_type = update.get("update_type") or update.get("type")
+        logger.info("Handling update_type=%s", update_type)
+
         if update_type == "bot_started":
             self._on_bot_started(update)
             return
         if update_type != "message_created":
+            logger.debug("Ignoring update_type=%s", update_type)
             return
+
         message = update.get("message") or {}
-        sender = message.get("sender") or update.get("user") or {}
+        sender = normalize_sender(message.get("sender") or update.get("user") or {})
+        if sender.get("is_bot"):
+            logger.info("Skip message from bot sender")
+            return
+
         recipient = message.get("recipient") or {}
         chat_id = (
             update.get("chat_id")
@@ -82,7 +89,6 @@ class UpdateHandler:
             try:
                 audio = self.client.download(audio_url)
                 stt = get_stt_provider()
-                # Try oggopus first (typical for voice), then mp3
                 transcript = stt.transcribe(audio, audio_format="oggopus")
                 if not transcript:
                     transcript = stt.transcribe(audio, audio_format="mp3")
@@ -99,8 +105,10 @@ class UpdateHandler:
                 return
 
         if not text:
+            logger.info("Empty text message ignored")
             return
 
+        logger.info("Incoming message from %s: %s", user.max_user_id, text[:120])
         try:
             reply = self.pipeline.handle(
                 user,
@@ -115,7 +123,7 @@ class UpdateHandler:
         self._reply(user, reply)
 
     def _on_bot_started(self, update: dict[str, Any]) -> None:
-        payload_user = update.get("user") or {}
+        payload_user = normalize_sender(update.get("user") or {})
         chat_id = update.get("chat_id")
         try:
             user = resolve_or_create_user(payload_user, chat_id=chat_id)
@@ -137,9 +145,9 @@ class UpdateHandler:
                 self.client.send_message(text, chat_id=user.chat_id)
             else:
                 self.client.send_message(text, user_id=user.max_user_id)
+            logger.info("Reply sent to %s", user.max_user_id)
         except Exception:
             logger.exception("Failed to send reply to user %s", user.max_user_id)
-            # Fallback to user_id
             try:
                 self.client.send_message(text, user_id=user.max_user_id)
             except Exception:

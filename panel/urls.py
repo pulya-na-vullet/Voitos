@@ -14,6 +14,7 @@ urlpatterns = [
     path("reminders/", views.reminders_view, name="reminders"),
     path("logs/", views.logs_view, name="logs"),
     path("settings/", views.settings_view, name="settings"),
+    path("check-max/", views.check_max, name="check_max"),
     path("api/activity/", views.activity_api, name="activity_api"),
     path("delete/memory/<int:pk>/", views.delete_memory, name="delete_memory"),
     path("delete/task/<int:pk>/", views.delete_task, name="delete_task"),

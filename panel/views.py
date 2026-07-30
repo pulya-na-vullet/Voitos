@@ -18,6 +18,7 @@ from database.models import (
     ActivityKind,
     ActivityLog,
     AppSettings,
+    BotRuntimeStatus,
     BotUser,
     ChatMessage,
     MemoryItem,
@@ -25,6 +26,20 @@ from database.models import (
     TaskItem,
 )
 from logs.service import log_activity
+
+YANDEX_MODEL_HINTS = ("yandexgpt-lite", "yandexgpt", "yandexgpt-5-pro", "yandexgpt-32k")
+
+
+def _model_warning(model: str) -> str:
+    m = (model or "").strip().lower()
+    if not m:
+        return ""
+    if "deepseek" in m or m not in {x.lower() for x in YANDEX_MODEL_HINTS} and not m.startswith("yandex"):
+        return (
+            f"Модель «{model}» может не работать через Yandex Foundation Models. "
+            "Укажите, например: yandexgpt-lite или yandexgpt."
+        )
+    return ""
 
 
 def login_view(request: HttpRequest) -> HttpResponse:
@@ -51,6 +66,7 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 @login_required
 def dashboard(request: HttpRequest) -> HttpResponse:
     cfg = AppSettings.load()
+    bot_status = BotRuntimeStatus.load()
     since = timezone.now() - timedelta(days=14)
     activity_qs = (
         ActivityLog.objects.filter(created_at__gte=since)
@@ -61,9 +77,12 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     )
     chart_labels = [row["day"].strftime("%d.%m") for row in activity_qs]
     chart_values = [row["count"] for row in activity_qs]
+    model_warn = _model_warning(cfg.yandex_model)
 
     context = {
         "cfg": cfg,
+        "bot_status": bot_status,
+        "model_warning": model_warn,
         "stats": {
             "messages": ChatMessage.objects.count(),
             "memories": MemoryItem.objects.count(),
@@ -139,9 +158,14 @@ def logs_view(request: HttpRequest) -> HttpResponse:
 def settings_view(request: HttpRequest) -> HttpResponse:
     cfg = AppSettings.load()
     if request.method == "POST":
-        cfg.max_bot_token = request.POST.get("max_bot_token", "").strip()
+        # Keep existing secrets if password fields submitted empty
+        new_token = request.POST.get("max_bot_token", "").strip()
+        new_key = request.POST.get("yandex_api_key", "").strip()
+        if new_token:
+            cfg.max_bot_token = new_token
+        if new_key:
+            cfg.yandex_api_key = new_key
         cfg.allowed_max_user_id = request.POST.get("allowed_max_user_id", "").strip()
-        cfg.yandex_api_key = request.POST.get("yandex_api_key", "").strip()
         cfg.yandex_folder_id = request.POST.get("yandex_folder_id", "").strip()
         cfg.yandex_model = request.POST.get("yandex_model", "yandexgpt-lite").strip() or "yandexgpt-lite"
         cfg.bot_display_name = request.POST.get("bot_display_name", "Voitos").strip() or "Voitos"
@@ -152,9 +176,58 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             detail="Из панели администратора",
             user=None,
         )
-        messages.success(request, "Настройки сохранены. Бот подхватит их автоматически.")
+        warn = _model_warning(cfg.yandex_model)
+        if warn:
+            messages.warning(request, warn)
+        messages.success(request, "Настройки сохранены. Бот подхватит токен автоматически.")
         return redirect("panel:settings")
-    return render(request, "panel/settings.html", {"cfg": cfg})
+    return render(
+        request,
+        "panel/settings.html",
+        {
+            "cfg": cfg,
+            "model_warning": _model_warning(cfg.yandex_model),
+            "has_token": bool(cfg.max_bot_token),
+            "has_api_key": bool(cfg.yandex_api_key),
+        },
+    )
+
+
+@login_required
+@require_POST
+def check_max(request: HttpRequest) -> HttpResponse:
+    """Manual connectivity check: GET /me + clear webhooks."""
+    from bot.client import MaxApiError, MaxClient
+    from bot.status import set_bot_error, set_bot_status
+
+    cfg = AppSettings.load()
+    if not cfg.max_bot_token:
+        messages.error(request, "Сначала сохраните токен MAX")
+        return redirect("panel:settings")
+    try:
+        client = MaxClient(cfg.max_bot_token)
+        me = client.get_me()
+        removed = client.clear_webhooks()
+        name = me.get("name") or me.get("username") or me
+        set_bot_status(
+            state="connected",
+            detail=f"Проверка OK: {name}. Webhook снято: {removed}",
+            bot_name=str(me.get("name") or ""),
+            bot_username=str(me.get("username") or ""),
+            clear_error=True,
+        )
+        messages.success(
+            request,
+            f"Связь с MAX OK: {name}. Снято webhook-подписок: {removed}. "
+            "Теперь напишите боту «привет» ещё раз.",
+        )
+    except MaxApiError as exc:
+        set_bot_error(str(exc))
+        messages.error(request, f"MAX API ошибка: {exc}")
+    except Exception as exc:
+        set_bot_error(str(exc))
+        messages.error(request, f"Ошибка проверки: {exc}")
+    return redirect("panel:dashboard")
 
 
 @login_required
