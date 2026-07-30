@@ -99,3 +99,4 @@ python manage.py runserver   # только панель, без бота
 - Для production за файрволом смените `SECRET_KEY` и пароль админа.
 - Модель в настройках — только YandexGPT (`yandexgpt-lite` / `yandexgpt`), не DeepSeek.
 - Если бот молчит: нажмите **Проверить MAX** на обзоре, убедитесь что статус `polling`, затем напишите боту снова. При старте webhook-подписки снимаются автоматически (иначе long polling не получает сообщения).
+- Ошибка `CERTIFICATE_VERIFY_FAILED` к `platform-api2.max.ru` — нужен сертификат Минцифры. Он уже лежит в `certs/`. Обновите проект и перезапустите. В крайнем случае в `.env`: `MAX_SSL_VERIFY=false`.

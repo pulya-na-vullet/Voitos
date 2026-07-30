@@ -6,6 +6,8 @@ from typing import Any
 import requests
 from django.conf import settings
 
+from bot.ssl_utils import apply_session_ssl
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,6 +25,7 @@ class MaxClient:
         self.token = token.strip()
         self.base_url = (base_url or settings.MAX_API_BASE_URL).rstrip("/")
         self.session = requests.Session()
+        apply_session_ssl(self.session)
         # MAX expects the raw access token in Authorization (no Bearer prefix).
         self.session.headers.update(
             {
@@ -38,7 +41,17 @@ class MaxClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         timeout = kwargs.pop("timeout", 60)
-        response = self.session.request(method, self._url(path), timeout=timeout, **kwargs)
+        kwargs.setdefault("verify", self.session.verify)
+        try:
+            response = self.session.request(method, self._url(path), timeout=timeout, **kwargs)
+        except requests.exceptions.SSLError as exc:
+            logger.error(
+                "SSL error talking to MAX. Certs of Минцифры are required. "
+                "Voitos ships them in certs/. Or set MAX_SSL_VERIFY=false in .env as a temporary workaround. "
+                "Details: %s",
+                exc,
+            )
+            raise
         if response.status_code >= 400:
             logger.error(
                 "MAX API %s %s -> %s: %s",
@@ -103,7 +116,6 @@ class MaxClient:
         if marker is not None:
             params["marker"] = marker
         if types:
-            # Docs example uses comma-separated values.
             params["types"] = ",".join(types)
         return self._request("GET", "/updates", params=params, timeout=timeout + 20)
 
@@ -122,7 +134,7 @@ class MaxClient:
         return self._request("POST", "/messages", params=params, json={"text": text})
 
     def download(self, url: str) -> bytes:
-        response = self.session.get(url, timeout=60)
+        response = self.session.get(url, timeout=60, verify=self.session.verify)
         if response.status_code >= 400:
             raise MaxApiError(f"Failed to download media: {response.status_code}")
         return response.content

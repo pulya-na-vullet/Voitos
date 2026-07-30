@@ -49,6 +49,13 @@ def run_migrations() -> None:
     from django.core.management import call_command
 
     django.setup()
+    # Prepare TLS bundle for MAX (certifi + Минцифры)
+    try:
+        from bot.ssl_utils import ensure_ca_bundle
+
+        ensure_ca_bundle()
+    except Exception:
+        logger.exception("Could not prepare SSL CA bundle")
     logger.info("Running migrations...")
     call_command("migrate", interactive=False, verbosity=1)
     # Ensure dirs exist
