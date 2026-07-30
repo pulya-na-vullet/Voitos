@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Voitos Admin{% endblock %}</title>
+  <link rel="stylesheet" href="/static/panel/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+{% if request.user.is_authenticated %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">Voi<span>tos</span></div>
+    <div class="brand-sub">Панель администратора</div>
+    <nav class="nav">
+      <a href="{% url 'panel:dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">Обзор</a>
+      <a href="{% url 'panel:messages' %}" class="{% if request.resolver_match.url_name == 'messages' %}active{% endif %}">Сообщения</a>
+      <a href="{% url 'panel:memories' %}" class="{% if request.resolver_match.url_name == 'memories' %}active{% endif %}">Память</a>
+      <a href="{% url 'panel:tasks' %}" class="{% if request.resolver_match.url_name == 'tasks' %}active{% endif %}">Задачи</a>
+      <a href="{% url 'panel:reminders' %}" class="{% if request.resolver_match.url_name == 'reminders' %}active{% endif %}">Напоминания</a>
+      <a href="{% url 'panel:logs' %}" class="{% if request.resolver_match.url_name == 'logs' %}active{% endif %}">Лог работы</a>
+      <a href="{% url 'panel:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">Настройки ИИ / MAX</a>
+      <a href="{% url 'panel:logout' %}">Выйти</a>
+    </nav>
+  </aside>
+  <main class="content">
+    {% if messages %}
+      {% for message in messages %}
+        <div class="flash">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% else %}
+  {% block public %}{% endblock %}
+{% endif %}
+</body>
+</html>

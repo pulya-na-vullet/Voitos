@@ -1,0 +1,27 @@
+{% extends "panel/base.html" %}
+{% block title %}Память — Voitos{% endblock %}
+{% block content %}
+<div class="topbar"><h1>Память</h1></div>
+<div class="card">
+  <table>
+    <thead><tr><th>Дата</th><th>Категория</th><th>Текст</th><th></th></tr></thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.created_at|date:"d.m.Y H:i" }}</td>
+        <td>{{ item.get_category_display }}</td>
+        <td>{{ item.text }}</td>
+        <td>
+          <form method="post" action="{% url 'panel:delete_memory' item.id %}">
+            {% csrf_token %}
+            <button class="btn danger small" type="submit">Удалить</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Память пуста</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

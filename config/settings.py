@@ -1,0 +1,164 @@
+"""Django settings for Voitos MVP."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import environ
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+env = environ.Env(
+    DEBUG=(bool, True),
+    HOST=(str, "0.0.0.0"),
+    PORT=(int, 8000),
+    ALLOWED_HOSTS=(list, ["*"]),
+)
+
+environ.Env.read_env(BASE_DIR / ".env")
+
+SECRET_KEY = env("SECRET_KEY", default="voitos-dev-secret-change-me")
+DEBUG = env("DEBUG")
+ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+
+INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "database",
+    "panel",
+    "bot",
+    "ai",
+    "memory",
+    "reminders",
+    "tasks",
+    "logs",
+]
+
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+ROOT_URLCONF = "config.urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "templates"],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = "config.wsgi.application"
+
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(exist_ok=True)
+DUMPS_DIR = DATA_DIR / "dumps"
+DUMPS_DIR.mkdir(exist_ok=True)
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": DATA_DIR / "voitos.sqlite3",
+        "OPTIONS": {
+            "timeout": 30,
+        },
+    }
+}
+
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+LANGUAGE_CODE = "ru-ru"
+TIME_ZONE = "Europe/Moscow"
+USE_I18N = True
+USE_TZ = True
+
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+LOGIN_URL = "/panel/login/"
+LOGIN_REDIRECT_URL = "/panel/"
+LOGOUT_REDIRECT_URL = "/panel/login/"
+
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "voitos.log",
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console", "file"],
+        "level": "INFO",
+    },
+}
+
+# Bootstrap admin credentials (created on first launch)
+ADMIN_USERNAME = env("ADMIN_USERNAME", default="admin")
+ADMIN_PASSWORD = env("ADMIN_PASSWORD", default="admin")
+ADMIN_EMAIL = env("ADMIN_EMAIL", default="admin@localhost")
+
+HOST = env("HOST")
+PORT = env("PORT")
+
+# Optional env overrides for runtime settings
+MAX_BOT_TOKEN = env("MAX_BOT_TOKEN", default="")
+ALLOWED_MAX_USER_ID = env("ALLOWED_MAX_USER_ID", default="")
+YANDEX_API_KEY = env("YANDEX_API_KEY", default="")
+YANDEX_FOLDER_ID = env("YANDEX_FOLDER_ID", default="")
+YANDEX_MODEL = env("YANDEX_MODEL", default="yandexgpt-lite")
+
+MAX_API_BASE_URL = "https://platform-api2.max.ru"
+YANDEX_LLM_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+YANDEX_STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
+
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=[f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"],
+)

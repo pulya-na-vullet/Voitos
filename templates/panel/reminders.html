@@ -1,0 +1,28 @@
+{% extends "panel/base.html" %}
+{% block title %}Напоминания — Voitos{% endblock %}
+{% block content %}
+<div class="topbar"><h1>Напоминания</h1></div>
+<div class="card">
+  <table>
+    <thead><tr><th>Создано</th><th>Когда</th><th>Статус</th><th>Текст</th><th></th></tr></thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.created_at|date:"d.m.Y H:i" }}</td>
+        <td class="mono">{{ item.due_at|date:"d.m.Y H:i" }}</td>
+        <td>{% if item.is_done %}Отправлено{% else %}Ожидает{% endif %}</td>
+        <td>{{ item.text }}</td>
+        <td>
+          <form method="post" action="{% url 'panel:delete_reminder' item.id %}">
+            {% csrf_token %}
+            <button class="btn danger small" type="submit">Удалить</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="muted">Напоминаний нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

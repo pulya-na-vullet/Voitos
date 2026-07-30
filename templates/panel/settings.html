@@ -1,0 +1,39 @@
+{% extends "panel/base.html" %}
+{% block title %}Настройки — Voitos{% endblock %}
+{% block content %}
+<div class="topbar"><h1>Настройки ИИ и MAX</h1></div>
+<div class="card" style="max-width:720px;">
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-row">
+      <label>Имя помощника</label>
+      <input type="text" name="bot_display_name" value="{{ cfg.bot_display_name }}">
+    </div>
+    <div class="form-row">
+      <label>Токен бота MAX</label>
+      <input type="password" name="max_bot_token" value="{{ cfg.max_bot_token }}" placeholder="access token из кабинета MAX">
+      <div class="hint">platform-api2.max.ru · Authorization header</div>
+    </div>
+    <div class="form-row">
+      <label>Разрешённый MAX user_id</label>
+      <input type="text" name="allowed_max_user_id" value="{{ cfg.allowed_max_user_id }}" placeholder="оставьте пустым — закрепится первый пользователь">
+    </div>
+    <hr style="border:0; border-top:1px solid var(--line); margin:22px 0;">
+    <h3 style="margin-top:0;">Yandex AI</h3>
+    <div class="form-row">
+      <label>API Key</label>
+      <input type="password" name="yandex_api_key" value="{{ cfg.yandex_api_key }}">
+    </div>
+    <div class="form-row">
+      <label>Folder ID</label>
+      <input type="text" name="yandex_folder_id" value="{{ cfg.yandex_folder_id }}">
+    </div>
+    <div class="form-row">
+      <label>Модель</label>
+      <input type="text" name="yandex_model" value="{{ cfg.yandex_model }}" placeholder="yandexgpt-lite">
+      <div class="hint">Например: yandexgpt-lite, yandexgpt, yandexgpt-5-pro</div>
+    </div>
+    <button class="btn" type="submit">Сохранить</button>
+  </form>
+</div>
+{% endblock %}

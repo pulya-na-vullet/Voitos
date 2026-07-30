@@ -1,0 +1,7 @@
+Django>=5.0,<7
+requests>=2.31
+httpx>=0.27
+python-dateutil>=2.9
+apscheduler>=3.10
+waitress>=3.0
+django-environ>=0.11

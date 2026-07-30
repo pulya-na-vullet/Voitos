@@ -1,0 +1,89 @@
+{% extends "panel/base.html" %}
+{% block title %}Обзор — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Обзор</h1>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <span class="badge {% if ai_ok %}ok{% else %}bad{% endif %}">ИИ {% if ai_ok %}настроен{% else %}не настроен{% endif %}</span>
+    <span class="badge {% if bot_ok %}ok{% else %}bad{% endif %}">MAX {% if bot_ok %}токен есть{% else %}нет токена{% endif %}</span>
+    <form method="post" action="{% url 'panel:dump_now' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Снять дамп БД</button></form>
+  </div>
+</div>
+
+<div class="grid stats">
+  <div class="card"><div class="stat-label">Сообщения</div><div class="stat-value">{{ stats.messages }}</div></div>
+  <div class="card"><div class="stat-label">Память</div><div class="stat-value">{{ stats.memories }}</div></div>
+  <div class="card"><div class="stat-label">Задачи</div><div class="stat-value">{{ stats.tasks }}</div></div>
+  <div class="card"><div class="stat-label">Напоминания</div><div class="stat-value">{{ stats.reminders }}</div></div>
+  <div class="card"><div class="stat-label">Пользователи</div><div class="stat-value">{{ stats.users }}</div></div>
+</div>
+
+<div class="grid two" style="margin-top:16px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Активность за 14 дней</h3>
+    <canvas id="activityChart" height="120"></canvas>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Последние события</h3>
+    <table>
+      <thead><tr><th>Время</th><th>Событие</th></tr></thead>
+      <tbody>
+      {% for log in recent_logs %}
+        <tr>
+          <td class="mono">{{ log.created_at|date:"d.m H:i" }}</td>
+          <td>{{ log.title }}<div class="muted">{{ log.detail|truncatechars:80 }}</div></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="2" class="muted">Пока пусто</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h3 style="margin-top:0;">Последние сообщения</h3>
+  <table>
+    <thead><tr><th>Время</th><th>Роль</th><th>Текст</th></tr></thead>
+    <tbody>
+    {% for m in recent_messages %}
+      <tr>
+        <td class="mono">{{ m.created_at|date:"d.m H:i" }}</td>
+        <td>{{ m.get_role_display }}</td>
+        <td>{{ m.text|truncatechars:140 }}{% if m.is_voice %} <span class="badge">голос</span>{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="3" class="muted">Сообщений ещё нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+const labels = {{ chart_labels_json|safe }};
+const values = {{ chart_values_json|safe }};
+const ctx = document.getElementById('activityChart');
+new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: labels,
+    datasets: [{
+      label: 'События',
+      data: values,
+      borderColor: '#3d9cfd',
+      backgroundColor: 'rgba(61,156,253,0.18)',
+      fill: true,
+      tension: 0.35,
+      pointRadius: 3,
+    }]
+  },
+  options: {
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#8b9bb0' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+      y: { beginAtZero: true, ticks: { color: '#8b9bb0', precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } }
+    }
+  }
+});
+</script>
+{% endblock %}
