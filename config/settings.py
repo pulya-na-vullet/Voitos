@@ -12,7 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 env = environ.Env(
     DEBUG=(bool, True),
     HOST=(str, "0.0.0.0"),
-    PORT=(int, 8000),
+    PORT=(int, 18765),
     ALLOWED_HOSTS=(list, ["*"]),
 )
 
