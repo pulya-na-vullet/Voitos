@@ -99,33 +99,39 @@ def ensure_admin_user() -> None:
     AppSettings.load()
 
 
+def _ensure_env_file() -> None:
+    """Create .env from .env.example when missing (common on Windows unzip)."""
+    env_path = BASE_DIR / ".env"
+    example = BASE_DIR / ".env.example"
+    if env_path.exists():
+        return
+    if example.exists():
+        env_path.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+        logger.info("Created .env from .env.example — заполните ключи или настройте в панели")
+    else:
+        env_path.write_text(
+            "SECRET_KEY=voitos-local-dev-secret-change-me\n"
+            "DEBUG=True\nALLOWED_HOSTS=*\n"
+            "ADMIN_USERNAME=admin\nADMIN_PASSWORD=admin\n"
+            "HOST=0.0.0.0\nPORT=18765\n"
+            "YANDEX_MODEL=yandexgpt-lite\n"
+            "MAX_SSL_VERIFY=true\n",
+            encoding="utf-8",
+        )
+        logger.info("Created default .env")
+
+
 def sync_env_into_settings() -> None:
-    """Seed DB settings from environment on first boot if empty."""
-    from django.conf import settings
+    """Seed DB settings from environment and repair bad model names (e.g. deepseek)."""
+    from ai.factory import repair_ai_settings
 
-    from database.models import AppSettings
-
-    cfg = AppSettings.load()
-    dirty = False
-    if not cfg.max_bot_token and settings.MAX_BOT_TOKEN:
-        cfg.max_bot_token = settings.MAX_BOT_TOKEN
-        dirty = True
-    if not cfg.allowed_max_user_id and settings.ALLOWED_MAX_USER_ID:
-        cfg.allowed_max_user_id = settings.ALLOWED_MAX_USER_ID
-        dirty = True
-    if not cfg.yandex_api_key and settings.YANDEX_API_KEY:
-        cfg.yandex_api_key = settings.YANDEX_API_KEY
-        dirty = True
-    if not cfg.yandex_folder_id and settings.YANDEX_FOLDER_ID:
-        cfg.yandex_folder_id = settings.YANDEX_FOLDER_ID
-        dirty = True
-    if settings.YANDEX_MODEL and (not cfg.yandex_model or cfg.yandex_model == "yandexgpt-lite"):
-        if settings.YANDEX_MODEL != cfg.yandex_model:
-            cfg.yandex_model = settings.YANDEX_MODEL
-            dirty = True
-    if dirty:
-        cfg.save()
-        logger.info("Seeded AppSettings from environment variables")
+    cfg = repair_ai_settings()
+    logger.info(
+        "AI settings: model=%s folder_set=%s key_set=%s",
+        cfg.yandex_model,
+        bool(cfg.yandex_folder_id),
+        bool(cfg.yandex_api_key),
+    )
 
 
 @dataclass
@@ -166,9 +172,6 @@ def run_web_server(stop_event: threading.Event) -> None:
     host = settings.HOST
     port = int(settings.PORT)
     logger.info("Web panel listening on http://%s:%s/panel/", host, port)
-
-    # Waitress blocks; poll stop_event in a side thread to close later.
-    # For MVP we rely on process kill / daemon thread exit.
     serve(application, host=host, port=port, threads=8, channel_timeout=120)
 
 
@@ -196,6 +199,7 @@ def _handle_signal(signum, frame) -> None:  # noqa: ARG001
 
 
 def main() -> int:
+    _ensure_env_file()
     _ensure_dependencies()
     run_migrations()
     ensure_admin_user()
@@ -232,7 +236,6 @@ def main() -> int:
 
     try:
         while not STOP.is_set():
-            # Watchdog: restart dead threads
             for proc in processes:
                 if proc.thread is not None and not proc.thread.is_alive() and not STOP.is_set():
                     logger.error("Process thread dead: %s — restarting", proc.name)

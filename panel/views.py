@@ -168,6 +168,9 @@ def settings_view(request: HttpRequest) -> HttpResponse:
         cfg.allowed_max_user_id = request.POST.get("allowed_max_user_id", "").strip()
         cfg.yandex_folder_id = request.POST.get("yandex_folder_id", "").strip()
         cfg.yandex_model = request.POST.get("yandex_model", "yandexgpt-lite").strip() or "yandexgpt-lite"
+        from ai.yandex import normalize_yandex_model
+
+        cfg.yandex_model = normalize_yandex_model(cfg.yandex_model)
         cfg.bot_display_name = request.POST.get("bot_display_name", "Voitos").strip() or "Voitos"
         cfg.save()
         log_activity(
