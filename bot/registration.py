@@ -11,9 +11,21 @@ from database.models import (
     PendingAction,
     ProfileStatus,
 )
+from panel.admin_tasks import task_family_claim, task_profile_review
+from services.address_overlap import heuristic_candidates
 from subscriptions.receipts import normalize_phone
 
 REG_KIND = "registration"
+
+_FAMILY_PROMPT = (
+    "По этому адресу уже есть зарегистрированный житель.\n"
+    "Вы проживаете вместе / являетесь членом семьи по этому адресу?\n"
+    "Ответьте «да» или «нет».\n"
+    "(Данные других жителей не показываются.)"
+)
+
+_YES = {"да", "yes", "y", "+", "ага", "угу", "именно", "верно", "являюсь"}
+_NO = {"нет", "no", "n", "-", "не", "не являюсь", "нету"}
 
 PROFILE_FIELD_LABELS = {
     "real_name": "Имя",
@@ -158,6 +170,10 @@ def _finish_if_complete(user: BotUser, pending: PendingAction) -> str | None:
         title="Анкета отправлена на проверку",
         detail=f"{user.real_name}, {user.phone}, {user.address}",
     )
+    try:
+        task_profile_review(user)
+    except Exception:
+        pass
     return (
         "Анкета сохранена. Администратор проверит данные.\n\n"
         f"Имя: {user.real_name}\n"
@@ -166,6 +182,17 @@ def _finish_if_complete(user: BotUser, pending: PendingAction) -> str | None:
         f"Населённый пункт: {user.locality}\n\n"
         "Напишите «помощь», чтобы увидеть возможности бота."
     )
+
+
+def _begin_family_check(user: BotUser, pending: PendingAction, candidates: list[BotUser]) -> str:
+    pending.pending_kind = REG_KIND
+    pending.pending_payload = {
+        "step": "family_check",
+        "candidate_ids": [c.id for c in candidates],
+        "address": user.address,
+    }
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    return _FAMILY_PROMPT
 
 
 def handle_registration_step(user: BotUser, text: str, pending: PendingAction) -> str:
@@ -206,16 +233,57 @@ def handle_registration_step(user: BotUser, text: str, pending: PendingAction) -
         if not (user.locality or "").strip():
             user.locality = _extract_locality(value)
         user.save(update_fields=["address", "locality", "last_seen_at"])
+        candidates = heuristic_candidates(user)
+        if candidates:
+            return _begin_family_check(user, pending, candidates)
         nxt = _finish_if_complete(user, pending)
         if nxt and nxt.startswith("Анкета сохранена"):
             return nxt
         return f"Принято. {nxt}"
+
+    if step == "family_check":
+        answer = value.lower().strip().rstrip(".!")
+        candidate_ids = list(payload.get("candidate_ids") or [])
+        address = payload.get("address") or user.address
+        if answer not in _YES and answer not in _NO:
+            return "Ответьте «да» или «нет» — без данных других жителей."
+        claimed = answer in _YES
+        try:
+            task_family_claim(
+                user,
+                candidate_ids=candidate_ids,
+                claimed_family=claimed,
+                address=address,
+            )
+        except Exception:
+            pass
+        ActivityLog.objects.create(
+            user=user,
+            kind=ActivityKind.PROFILE_SUBMITTED,
+            title="Ответ по семейной заявке",
+            detail="да" if claimed else "нет",
+            meta={"candidate_ids": candidate_ids, "claimed_family": claimed},
+        )
+        nxt = _finish_if_complete(user, pending)
+        if nxt and nxt.startswith("Анкета сохранена"):
+            prefix = (
+                "Спасибо. Администратор проверит семейную заявку.\n\n"
+                if claimed
+                else "Спасибо. Администратор при необходимости уточнит адрес.\n\n"
+            )
+            return prefix + nxt
+        return f"Спасибо. {nxt}"
 
     if step == "locality":
         if len(value) < 2:
             return "Укажите населённый пункт."
         user.locality = value
         user.save(update_fields=["locality", "last_seen_at"])
+        # Address may already be set; check family before finish
+        if (user.address or "").strip():
+            candidates = heuristic_candidates(user)
+            if candidates and not payload.get("family_asked"):
+                return _begin_family_check(user, pending, candidates)
         nxt = _finish_if_complete(user, pending)
         if nxt and nxt.startswith("Анкета сохранена"):
             return nxt

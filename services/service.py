@@ -776,6 +776,12 @@ def submit_service_receipt(
         detail=f"{invite.campaign.title}: {parsed.amount}",
         meta={"receipt_id": receipt.id, "invite_id": invite.id},
     )
+    try:
+        from panel.admin_tasks import task_service_receipt
+
+        task_service_receipt(receipt)
+    except Exception:
+        logger.exception("Failed to create admin task for service receipt")
     return receipt
 
 
@@ -820,6 +826,12 @@ def approve_service_receipt(
     close_campaign_goal_reached(campaign, send_fn=send_fn)
     # Surplus after all receipts verified → general budget notice
     maybe_notify_surplus(campaign, send_fn=send_fn)
+    try:
+        from panel.admin_tasks import task_service_receipt
+
+        task_service_receipt(receipt)
+    except Exception:
+        logger.exception("Failed to close admin task for service receipt")
     return receipt
 
 
@@ -828,6 +840,12 @@ def reject_service_receipt(receipt: ServiceReceipt, comment: str = "") -> Servic
     receipt.admin_comment = comment
     receipt.reviewed_at = timezone.now()
     receipt.save()
+    try:
+        from panel.admin_tasks import task_service_receipt
+
+        task_service_receipt(receipt)
+    except Exception:
+        logger.exception("Failed to close admin task for rejected service receipt")
     return receipt
 
 

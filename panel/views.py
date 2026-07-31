@@ -165,6 +165,9 @@ def users_list(request: HttpRequest) -> HttpResponse:
     pending_receipts = PaymentReceipt.objects.filter(status=ReceiptStatus.PENDING).count()
     pending_profiles = BotUser.objects.filter(profile_status=ProfileStatus.PENDING_REVIEW).count()
     pending_service = ServiceReceipt.objects.filter(status=ReceiptStatus.PENDING).count()
+    from database.models import AdminTask, AdminTaskStatus
+
+    open_admin_tasks = AdminTask.objects.filter(status=AdminTaskStatus.OPEN).count()
     return render(
         request,
         "panel/users.html",
@@ -178,6 +181,7 @@ def users_list(request: HttpRequest) -> HttpResponse:
             "pending_receipts": pending_receipts,
             "pending_profiles": pending_profiles,
             "pending_service": pending_service,
+            "open_admin_tasks": open_admin_tasks,
             "tax_warning": AppSettings.load().tax_limit_warning(),
             "stats": {
                 "users": BotUser.objects.count(),
@@ -294,6 +298,12 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
         )
         messages.success(request, "Анкета отклонена, пользователь уведомлён.")
     bot_user.save()
+    try:
+        from panel.admin_tasks import task_profile_review
+
+        task_profile_review(bot_user)
+    except Exception:
+        pass
     return redirect("panel:user_dashboard", user_id=user_id)
 
 
@@ -968,3 +978,80 @@ def services_ranking(request: HttpRequest) -> HttpResponse:
             "sort": sort,
         },
     )
+
+
+@login_required
+def admin_tasks_today(request: HttpRequest) -> HttpResponse:
+    from collections import defaultdict
+
+    from database.models import AdminTaskKind
+    from panel.admin_tasks import list_today_tasks, sync_admin_tasks
+
+    sync_admin_tasks()
+    tasks = list(list_today_tasks())
+    grouped: dict[str, list] = defaultdict(list)
+    for t in tasks:
+        grouped[t.kind].append(t)
+    kind_order = [k for k, _ in AdminTaskKind.choices]
+    sections = []
+    for kind in kind_order:
+        if kind in grouped:
+            sections.append(
+                {
+                    "kind": kind,
+                    "label": dict(AdminTaskKind.choices).get(kind, kind),
+                    "tasks": grouped[kind],
+                }
+            )
+    return render(
+        request,
+        "panel/admin_tasks_today.html",
+        {
+            "sections": sections,
+            "total": len(tasks),
+            "kind_choices": AdminTaskKind.choices,
+        },
+    )
+
+
+@login_required
+@require_POST
+def admin_task_done(request: HttpRequest, pk: int) -> HttpResponse:
+    from database.models import AdminTask
+
+    task = get_object_or_404(AdminTask, pk=pk)
+    task.mark_done()
+    messages.success(request, f"Задача «{task.title}» выполнена.")
+    return redirect("panel:admin_tasks_today")
+
+
+@login_required
+@require_POST
+def admin_task_dismiss(request: HttpRequest, pk: int) -> HttpResponse:
+    from database.models import AdminTask
+
+    task = get_object_or_404(AdminTask, pk=pk)
+    task.dismiss()
+    messages.success(request, f"Задача «{task.title}» скрыта.")
+    return redirect("panel:admin_tasks_today")
+
+
+@login_required
+@require_POST
+def admin_address_scan(request: HttpRequest) -> HttpResponse:
+    from services.address_overlap import scan_all_addresses
+
+    use_ai = request.POST.get("use_ai", "1") != "0"
+    try:
+        groups = scan_all_addresses(use_ai=use_ai)
+        if groups:
+            messages.success(
+                request,
+                f"Сканирование адресов: найдено групп совпадений — {len(groups)}. "
+                "Смотрите задачи «Совпадение адреса».",
+            )
+        else:
+            messages.info(request, "Сканирование завершено: явных пересечений адресов не найдено.")
+    except Exception as exc:
+        messages.error(request, f"Ошибка сканирования: {exc}")
+    return redirect("panel:admin_tasks_today")

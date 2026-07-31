@@ -116,6 +116,20 @@ class ReminderRepeat(models.TextChoices):
     DAILY = "daily", "Каждый день"
 
 
+class AdminTaskStatus(models.TextChoices):
+    OPEN = "open", "Открыта"
+    DONE = "done", "Выполнена"
+    DISMISSED = "dismissed", "Скрыта"
+
+
+class AdminTaskKind(models.TextChoices):
+    PAYMENT_RECEIPT = "payment_receipt", "Чек подписки"
+    SERVICE_RECEIPT = "service_receipt", "Сервис-чек"
+    PROFILE_REVIEW = "profile_review", "Проверка анкеты"
+    FAMILY_CLAIM = "family_claim", "Семейная заявка"
+    ADDRESS_OVERLAP = "address_overlap", "Совпадение адреса"
+
+
 class AppSettings(models.Model):
     """Singleton runtime settings editable from the admin panel."""
 
@@ -601,6 +615,65 @@ class TaskItem(models.Model):
         self.status = TaskStatus.DONE
         self.completed_at = timezone.now()
         self.save(update_fields=["status", "completed_at"])
+
+
+class AdminTask(models.Model):
+    """Unified admin inbox item («Задачи на сегодня»)."""
+
+    kind = models.CharField(max_length=32, choices=AdminTaskKind.choices)
+    status = models.CharField(
+        max_length=16,
+        choices=AdminTaskStatus.choices,
+        default=AdminTaskStatus.OPEN,
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="admin_tasks",
+    )
+    priority = models.PositiveSmallIntegerField(default=50)
+    due_at = models.DateTimeField(null=True, blank=True)
+    action_url = models.CharField(max_length=512, blank=True, default="")
+    source_model = models.CharField(max_length=64, blank=True, default="")
+    source_id = models.PositiveIntegerField(null=True, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Админ-задача"
+        verbose_name_plural = "Админ-задачи"
+        ordering = ["priority", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["kind", "source_model", "source_id"],
+                name="uniq_admin_task_source",
+                condition=models.Q(source_id__isnull=False)
+                & ~models.Q(source_model=""),
+            )
+        ]
+        indexes = [
+            models.Index(fields=["status", "priority", "created_at"]),
+            models.Index(fields=["kind", "status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"[{self.get_kind_display()}] {self.title}"
+
+    def mark_done(self) -> None:
+        self.status = AdminTaskStatus.DONE
+        self.completed_at = timezone.now()
+        self.save(update_fields=["status", "completed_at", "updated_at"])
+
+    def dismiss(self) -> None:
+        self.status = AdminTaskStatus.DISMISSED
+        self.completed_at = timezone.now()
+        self.save(update_fields=["status", "completed_at", "updated_at"])
 
 
 class Reminder(models.Model):

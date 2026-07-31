@@ -7,6 +7,9 @@ from django.test import TestCase
 from django.utils import timezone
 
 from database.models import (
+    AdminTask,
+    AdminTaskKind,
+    AdminTaskStatus,
     BotUser,
     CampaignNoticeKind,
     CampaignStatus,
@@ -67,6 +70,44 @@ class RegistrationTests(TestCase):
         self.assertIn("Администратор проверил", text)
         self.assertIn("Телефон", text)
         self.assertIn("нужен телефон", text)
+
+    def test_family_check_on_duplicate_address_without_leaking_data(self):
+        BotUser.objects.create(
+            max_user_id="neighbor",
+            real_name="Секретный Сосед",
+            phone="89001112233",
+            address="Казань, ул. Баумана, 1",
+            locality="Казань",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+        start_registration(self.user, self.pending)
+        handle_registration_step(self.user, "Иван Петров", self.pending)
+        handle_registration_step(self.user, "89625501111", self.pending)
+        reply = handle_registration_step(
+            self.user, "Казань, ул. Баумана, 1", self.pending
+        )
+        self.assertIn("членом семьи", reply.lower())
+        self.assertNotIn("Секретный", reply)
+        self.assertNotIn("89001112233", reply)
+        self.pending.refresh_from_db()
+        self.assertEqual(self.pending.pending_payload.get("step"), "family_check")
+
+        final = handle_registration_step(self.user, "да", self.pending)
+        self.assertIn("Администратор", final)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.profile_status, ProfileStatus.PENDING_REVIEW)
+        task = AdminTask.objects.filter(
+            kind=AdminTaskKind.FAMILY_CLAIM,
+            user=self.user,
+            status=AdminTaskStatus.OPEN,
+        ).first()
+        self.assertIsNotNone(task)
+        self.assertTrue(task.meta.get("claimed_family"))
+        self.assertTrue(
+            AdminTask.objects.filter(
+                kind=AdminTaskKind.PROFILE_REVIEW, user=self.user
+            ).exists()
+        )
 
 
 class ServiceCampaignTests(TestCase):

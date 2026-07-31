@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from database.models import (
     ActivityLog,
+    AdminTask,
     AppSettings,
     BotRuntimeStatus,
     BotUser,
@@ -16,6 +17,13 @@ from database.models import (
     ServiceReceipt,
     TaskItem,
 )
+
+
+@admin.register(AdminTask)
+class AdminTaskAdmin(admin.ModelAdmin):
+    list_display = ("id", "kind", "status", "title", "user", "priority", "created_at")
+    list_filter = ("kind", "status")
+    search_fields = ("title", "description")
 
 
 @admin.register(AppSettings)

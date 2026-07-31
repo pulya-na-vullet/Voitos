@@ -141,6 +141,12 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
         detail=f"Сумма={parsed.amount} match={parsed.details_match}",
         meta={"receipt_id": receipt.id, "months": months},
     )
+    try:
+        from panel.admin_tasks import task_payment_receipt
+
+        task_payment_receipt(receipt)
+    except Exception:
+        logger.exception("Failed to create admin task for payment receipt")
     return receipt
 
 
@@ -202,6 +208,12 @@ def approve_receipt(
             "days": days,
         },
     )
+    try:
+        from panel.admin_tasks import task_payment_receipt
+
+        task_payment_receipt(receipt)
+    except Exception:
+        logger.exception("Failed to close admin task for payment receipt")
     return receipt
 
 
@@ -217,6 +229,12 @@ def reject_receipt(receipt: PaymentReceipt, comment: str = "") -> PaymentReceipt
         detail=comment or "Без комментария",
         meta={"receipt_id": receipt.id},
     )
+    try:
+        from panel.admin_tasks import task_payment_receipt
+
+        task_payment_receipt(receipt)
+    except Exception:
+        logger.exception("Failed to close admin task for rejected receipt")
     return receipt
 
 

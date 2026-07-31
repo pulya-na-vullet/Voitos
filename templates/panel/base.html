@@ -14,6 +14,7 @@
     <div class="brand">Voi<span>tos</span></div>
     <div class="brand-sub">Панель администратора</div>
     <nav class="nav">
+      <a href="{% url 'panel:admin_tasks_today' %}" class="{% if request.resolver_match.url_name == 'admin_tasks_today' or request.resolver_match.url_name == 'admin_task_done' or request.resolver_match.url_name == 'admin_address_scan' %}active{% endif %}">Задачи на сегодня</a>
       <a href="{% url 'panel:users' %}" class="{% if request.resolver_match.url_name == 'users' %}active{% endif %}">Пользователи</a>
       <a href="{% url 'panel:receipts' %}" class="{% if request.resolver_match.url_name == 'receipts' or request.resolver_match.url_name == 'user_receipts' or request.resolver_match.url_name == 'receipt_approve' or request.resolver_match.url_name == 'receipt_reject' %}active{% endif %}">Чеки подписки</a>
       <a href="{% url 'panel:services' %}" class="{% if 'service' in request.resolver_match.url_name %}active{% endif %}">Сервисные мероприятия</a>

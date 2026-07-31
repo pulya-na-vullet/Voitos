@@ -8,6 +8,7 @@
     {% if pending_receipts %}<span class="badge bad">Чеков подписки: {{ pending_receipts }}</span>{% endif %}
     {% if pending_service %}<span class="badge bad">Сервис-чеков: {{ pending_service }}</span>{% endif %}
     {% if pending_profiles %}<span class="badge">Анкет на проверку: {{ pending_profiles }}</span>{% endif %}
+    {% if open_admin_tasks %}<a class="badge bad" href="{% url 'panel:admin_tasks_today' %}">Задач: {{ open_admin_tasks }}</a>{% endif %}
     <form method="post" action="{% url 'panel:check_max' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Проверить MAX</button></form>
     <form method="post" action="{% url 'panel:dump_now' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Дамп БД</button></form>
   </div>
