@@ -2,7 +2,7 @@
 {% block title %}Сообщения — Voitos{% endblock %}
 {% block content %}
 <div class="topbar">
-  <h1>Сообщения клиента</h1>
+  <h1>Сообщения{% if bot_user %}: {{ bot_user }}{% endif %}</h1>
   <form method="get" style="display:flex; gap:8px;">
     <input type="text" name="q" value="{{ q }}" placeholder="Поиск..." style="min-width:220px; padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
     <button class="btn secondary small" type="submit">Найти</button>
@@ -23,7 +23,7 @@
         <td>
           <form method="post" action="{% url 'panel:delete_message' m.id %}">
             {% csrf_token %}
-            <input type="hidden" name="next" value="{% url 'panel:messages' %}">
+            <input type="hidden" name="next" value="{{ request.path }}">
             <button class="btn danger small" type="submit">Удалить</button>
           </form>
         </td>

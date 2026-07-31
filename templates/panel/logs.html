@@ -2,7 +2,7 @@
 {% block title %}Лог — Voitos{% endblock %}
 {% block content %}
 <div class="topbar">
-  <h1>Лог работы пользователя</h1>
+  <h1>Лог работы{% if bot_user %}: {{ bot_user }}{% endif %}</h1>
   <form method="get">
     <select name="kind" onchange="this.form.submit()" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
       <option value="">Все типы</option>

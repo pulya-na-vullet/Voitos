@@ -7,6 +7,7 @@ from database.models import (
     BotUser,
     ChatMessage,
     MemoryItem,
+    PaymentReceipt,
     PendingAction,
     Reminder,
     TaskItem,
@@ -15,7 +16,7 @@ from database.models import (
 
 @admin.register(AppSettings)
 class AppSettingsAdmin(admin.ModelAdmin):
-    list_display = ("id", "bot_display_name", "yandex_model", "updated_at")
+    list_display = ("id", "bot_display_name", "yandex_model", "payment_phone", "updated_at")
 
 
 @admin.register(BotRuntimeStatus)
@@ -25,8 +26,21 @@ class BotRuntimeStatusAdmin(admin.ModelAdmin):
 
 @admin.register(BotUser)
 class BotUserAdmin(admin.ModelAdmin):
-    list_display = ("max_user_id", "display_name", "username", "is_active", "last_seen_at")
+    list_display = (
+        "max_user_id",
+        "display_name",
+        "subscription_until",
+        "grace_until",
+        "is_active",
+        "last_seen_at",
+    )
     search_fields = ("max_user_id", "display_name", "username")
+
+
+@admin.register(PaymentReceipt)
+class PaymentReceiptAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "amount", "status", "details_match", "months_granted", "created_at")
+    list_filter = ("status", "details_match")
 
 
 @admin.register(MemoryItem)

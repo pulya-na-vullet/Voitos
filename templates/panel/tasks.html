@@ -1,7 +1,7 @@
 {% extends "panel/base.html" %}
 {% block title %}Задачи — Voitos{% endblock %}
 {% block content %}
-<div class="topbar"><h1>Задачи</h1></div>
+<div class="topbar"><h1>Задачи{% if bot_user %}: {{ bot_user }}{% endif %}</h1></div>
 <div class="card">
   <table>
     <thead><tr><th>Дата</th><th>Статус</th><th>Задача</th><th></th></tr></thead>
@@ -14,6 +14,7 @@
         <td>
           <form method="post" action="{% url 'panel:delete_task' item.id %}">
             {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
             <button class="btn danger small" type="submit">Удалить</button>
           </form>
         </td>

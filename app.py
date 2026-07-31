@@ -124,10 +124,18 @@ def _ensure_env_file() -> None:
 def sync_env_into_settings() -> None:
     """Seed DB settings from environment and repair bad model names (e.g. deepseek)."""
     from ai.factory import repair_ai_settings
+    from database.models import AppSettings
 
     cfg = repair_ai_settings()
+    # Multi-user mode: do not keep single-user lock
+    if cfg.allowed_max_user_id:
+        cfg.allowed_max_user_id = ""
+        cfg.save(update_fields=["allowed_max_user_id", "updated_at"])
+    if not cfg.payment_phone:
+        cfg.payment_phone = "89625507832"
+        cfg.save(update_fields=["payment_phone", "updated_at"])
     logger.info(
-        "AI settings: model=%s folder_set=%s key_set=%s",
+        "AI settings: model=%s folder_set=%s key_set=%s multi_user=on",
         cfg.yandex_model,
         bool(cfg.yandex_folder_id),
         bool(cfg.yandex_api_key),

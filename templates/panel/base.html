@@ -14,13 +14,19 @@
     <div class="brand">Voi<span>tos</span></div>
     <div class="brand-sub">Панель администратора</div>
     <nav class="nav">
-      <a href="{% url 'panel:dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">Обзор</a>
-      <a href="{% url 'panel:messages' %}" class="{% if request.resolver_match.url_name == 'messages' %}active{% endif %}">Сообщения</a>
-      <a href="{% url 'panel:memories' %}" class="{% if request.resolver_match.url_name == 'memories' %}active{% endif %}">Память</a>
-      <a href="{% url 'panel:tasks' %}" class="{% if request.resolver_match.url_name == 'tasks' %}active{% endif %}">Задачи</a>
-      <a href="{% url 'panel:reminders' %}" class="{% if request.resolver_match.url_name == 'reminders' %}active{% endif %}">Напоминания</a>
-      <a href="{% url 'panel:logs' %}" class="{% if request.resolver_match.url_name == 'logs' %}active{% endif %}">Лог работы</a>
-      <a href="{% url 'panel:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">Настройки ИИ / MAX</a>
+      <a href="{% url 'panel:users' %}" class="{% if request.resolver_match.url_name == 'users' %}active{% endif %}">Пользователи</a>
+      <a href="{% url 'panel:receipts' %}" class="{% if 'receipt' in request.resolver_match.url_name %}active{% endif %}">Чеки</a>
+      <a href="{% url 'panel:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">Настройки</a>
+      {% if bot_user %}
+      <div class="brand-sub" style="margin-top:18px;">Пользователь</div>
+      <a href="{% url 'panel:user_dashboard' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_dashboard' %}active{% endif %}">Обзор</a>
+      <a href="{% url 'panel:user_messages' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_messages' %}active{% endif %}">Сообщения</a>
+      <a href="{% url 'panel:user_memories' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_memories' %}active{% endif %}">Память</a>
+      <a href="{% url 'panel:user_tasks' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_tasks' %}active{% endif %}">Задачи</a>
+      <a href="{% url 'panel:user_reminders' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_reminders' %}active{% endif %}">Напоминания</a>
+      <a href="{% url 'panel:user_logs' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_logs' %}active{% endif %}">Лог работы</a>
+      <a href="{% url 'panel:user_receipts' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_receipts' %}active{% endif %}">Чеки пользователя</a>
+      {% endif %}
       <a href="{% url 'panel:logout' %}">Выйти</a>
     </nav>
   </aside>

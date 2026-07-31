@@ -1,9 +1,16 @@
 {% extends "panel/base.html" %}
 {% block title %}Настройки — Voitos{% endblock %}
 {% block content %}
-<div class="topbar"><h1>Настройки ИИ и MAX</h1></div>
+<div class="topbar"><h1>Настройки</h1>
+  <form method="post" action="{% url 'panel:check_max' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Проверить MAX</button></form>
+</div>
 {% if model_warning %}
 <div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ model_warning }}</div>
+{% endif %}
+{% if bot_status %}
+<div class="card" style="margin-bottom:16px;">
+  <strong>Статус бота:</strong> {{ bot_status.state }} — {{ bot_status.detail }}
+</div>
 {% endif %}
 <div class="card" style="max-width:720px;">
   <form method="post">
@@ -14,18 +21,13 @@
     </div>
     <div class="form-row">
       <label>Токен бота MAX</label>
-      <input type="password" name="max_bot_token" value="" placeholder="{% if has_token %}•••• сохранён — вставьте новый, чтобы заменить{% else %}access token из кабинета MAX{% endif %}" autocomplete="off">
-      <div class="hint">platform-api2.max.ru · заголовок Authorization без Bearer</div>
-    </div>
-    <div class="form-row">
-      <label>Разрешённый MAX user_id</label>
-      <input type="text" name="allowed_max_user_id" value="{{ cfg.allowed_max_user_id }}" placeholder="оставьте пустым — закрепится первый пользователь">
+      <input type="password" name="max_bot_token" value="" placeholder="{% if has_token %}•••• сохранён{% else %}access token{% endif %}" autocomplete="off">
     </div>
     <hr style="border:0; border-top:1px solid var(--line); margin:22px 0;">
     <h3 style="margin-top:0;">Yandex AI</h3>
     <div class="form-row">
       <label>API Key</label>
-      <input type="password" name="yandex_api_key" value="" placeholder="{% if has_api_key %}•••• сохранён — вставьте новый, чтобы заменить{% else %}Api-Key из Yandex Cloud{% endif %}" autocomplete="off">
+      <input type="password" name="yandex_api_key" value="" placeholder="{% if has_api_key %}•••• сохранён{% else %}Api-Key{% endif %}" autocomplete="off">
     </div>
     <div class="form-row">
       <label>Folder ID</label>
@@ -34,7 +36,25 @@
     <div class="form-row">
       <label>Модель YandexGPT</label>
       <input type="text" name="yandex_model" value="{{ cfg.yandex_model }}" placeholder="yandexgpt-lite">
-      <div class="hint">Только модели Yandex: <code>yandexgpt-lite</code>, <code>yandexgpt</code>, <code>yandexgpt-5-pro</code>. Не пишите deepseek — это другой API.</div>
+      <div class="hint">Только Yandex: yandexgpt-lite / yandexgpt</div>
+    </div>
+    <hr style="border:0; border-top:1px solid var(--line); margin:22px 0;">
+    <h3 style="margin-top:0;">Подписка / оплата</h3>
+    <div class="form-row">
+      <label>Телефон для перевода</label>
+      <input type="text" name="payment_phone" value="{{ cfg.payment_phone }}">
+    </div>
+    <div class="form-row">
+      <label>ФИО получателя</label>
+      <input type="text" name="payment_name" value="{{ cfg.payment_name }}">
+    </div>
+    <div class="form-row">
+      <label>Цена, ₽ / месяц</label>
+      <input type="number" name="subscription_price_rub" value="{{ cfg.subscription_price_rub }}" min="1">
+    </div>
+    <div class="form-row">
+      <label>Дней ожидания оплаты после истечения</label>
+      <input type="number" name="grace_days" value="{{ cfg.grace_days }}" min="1">
     </div>
     <button class="btn" type="submit">Сохранить</button>
   </form>
