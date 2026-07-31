@@ -57,8 +57,8 @@ class TaskItemAdmin(admin.ModelAdmin):
 
 @admin.register(Reminder)
 class ReminderAdmin(admin.ModelAdmin):
-    list_display = ("text", "due_at", "is_done", "user", "created_at")
-    list_filter = ("is_done",)
+    list_display = ("text", "due_at", "repeat", "is_done", "user", "created_at")
+    list_filter = ("is_done", "repeat")
 
 
 @admin.register(ChatMessage)

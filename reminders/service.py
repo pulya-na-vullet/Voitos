@@ -1,23 +1,41 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.utils import timezone
 
-from database.models import ActivityKind, ActivityLog, BotUser, Reminder
+from database.models import ActivityKind, ActivityLog, BotUser, Reminder, ReminderRepeat
 
 
 class ReminderService:
-    def create(self, user: BotUser, text: str, due_at: datetime) -> Reminder:
+    def create(
+        self,
+        user: BotUser,
+        text: str,
+        due_at: datetime,
+        *,
+        repeat: str = ReminderRepeat.NONE,
+    ) -> Reminder:
         if timezone.is_naive(due_at):
             due_at = timezone.make_aware(due_at, timezone.get_current_timezone())
-        reminder = Reminder.objects.create(user=user, text=text.strip(), due_at=due_at)
+        if repeat not in {ReminderRepeat.NONE, ReminderRepeat.DAILY, "none", "daily"}:
+            repeat = ReminderRepeat.NONE
+        reminder = Reminder.objects.create(
+            user=user,
+            text=text.strip(),
+            due_at=due_at,
+            repeat=repeat,
+        )
         ActivityLog.objects.create(
             user=user,
             kind=ActivityKind.REMINDER_CREATE,
             title="Создано напоминание",
-            detail=f"{reminder.text} → {reminder.due_at}",
-            meta={"id": reminder.id, "due_at": reminder.due_at.isoformat()},
+            detail=f"{reminder.text} → {reminder.due_at} [{reminder.repeat}]",
+            meta={
+                "id": reminder.id,
+                "due_at": reminder.due_at.isoformat(),
+                "repeat": reminder.repeat,
+            },
         )
         return reminder
 
@@ -33,15 +51,27 @@ class ReminderService:
         )
 
     def mark_sent(self, reminder: Reminder) -> None:
-        reminder.is_done = True
-        reminder.sent_at = timezone.now()
-        reminder.save(update_fields=["is_done", "sent_at"])
+        now = timezone.now()
+        reminder.sent_at = now
+        if reminder.repeat == ReminderRepeat.DAILY:
+            next_due = reminder.due_at + timedelta(days=1)
+            # Keep wall-clock time; skip missed days if the process was down
+            while next_due <= now:
+                next_due += timedelta(days=1)
+            reminder.due_at = next_due
+            reminder.is_done = False
+            reminder.save(update_fields=["is_done", "sent_at", "due_at"])
+            detail = f"{reminder.text} (след. {timezone.localtime(next_due):%d.%m.%Y %H:%M})"
+        else:
+            reminder.is_done = True
+            reminder.save(update_fields=["is_done", "sent_at"])
+            detail = reminder.text
         ActivityLog.objects.create(
             user=reminder.user,
             kind=ActivityKind.REMINDER_SENT,
             title="Напоминание отправлено",
-            detail=reminder.text,
-            meta={"id": reminder.id},
+            detail=detail,
+            meta={"id": reminder.id, "repeat": reminder.repeat},
         )
 
     def delete_by_query(self, user: BotUser, query: str) -> Reminder | None:
@@ -84,5 +114,6 @@ class ReminderService:
         lines = []
         for item in items:
             local = timezone.localtime(item.due_at).strftime("%d.%m.%Y %H:%M")
-            lines.append(f"• {item.text} — {local}")
+            suffix = " · каждый день" if item.repeat == ReminderRepeat.DAILY else ""
+            lines.append(f"• {item.text} — {local}{suffix}")
         return "\n".join(lines)

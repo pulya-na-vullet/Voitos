@@ -63,6 +63,11 @@ class AccessState(models.TextChoices):
     BLOCKED = "blocked", "Доступ закрыт"
 
 
+class ReminderRepeat(models.TextChoices):
+    NONE = "none", "Один раз"
+    DAILY = "daily", "Каждый день"
+
+
 class AppSettings(models.Model):
     """Singleton runtime settings editable from the admin panel."""
 
@@ -280,6 +285,12 @@ class Reminder(models.Model):
     user = models.ForeignKey(BotUser, on_delete=models.CASCADE, related_name="reminders")
     text = models.TextField("Текст")
     due_at = models.DateTimeField("Когда напомнить")
+    repeat = models.CharField(
+        "Повтор",
+        max_length=16,
+        choices=ReminderRepeat.choices,
+        default=ReminderRepeat.NONE,
+    )
     is_done = models.BooleanField("Выполнено", default=False)
     sent_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -293,7 +304,8 @@ class Reminder(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.text[:60]} @ {self.due_at}"
+        suffix = " (ежедневно)" if self.repeat == ReminderRepeat.DAILY else ""
+        return f"{self.text[:60]} @ {self.due_at}{suffix}"
 
 
 class ChatMessage(models.Model):
@@ -354,15 +366,22 @@ class ActivityLog(models.Model):
 
 
 class PendingAction(models.Model):
-    """Stores last user text for explicit 'Запомни это' / 'Не запоминай'."""
+    """Stores last user text and short clarification dialogs (e.g. reminder time)."""
 
     user = models.OneToOneField(BotUser, on_delete=models.CASCADE, related_name="pending")
     last_user_text = models.TextField(blank=True, default="")
+    pending_kind = models.CharField(max_length=64, blank=True, default="")
+    pending_payload = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "Ожидающее действие"
         verbose_name_plural = "Ожидающие действия"
+
+    def clear_pending(self) -> None:
+        self.pending_kind = ""
+        self.pending_payload = {}
+        self.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
 
 
 class BotRuntimeStatus(models.Model):

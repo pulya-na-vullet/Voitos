@@ -23,7 +23,7 @@ INTENT_SYSTEM_PROMPT = """Ты классификатор намерений п�
 - force_remember — пользователь явно просит запомнить (Запомни это / Запомни: ...)
 - force_forget — пользователь явно просит НЕ запоминать (Не запоминай)
 - save_memory — сообщение содержит важную личную информацию, которую стоит сохранить
-- create_reminder — просьба напомнить о чём-то в будущем
+- create_reminder — просьба напомнить о чём-то в будущем (в т.ч. ежедневно)
 - create_task — формулировка задачи / дела, которое нужно сделать
 - complete_task — пользователь сообщает, что задачу выполнил
 - delete_task — удалить задачу
@@ -40,8 +40,11 @@ INTENT_SYSTEM_PROMPT = """Ты классификатор намерений п�
 - Погода, новости, сиюминутные факты без личной ценности → should_save=false, intent=chat
 - "Купила холодильник Bosch" → save_memory, category=purchases или home
 - "Напомни 20 числа оплатить коммуналку" → create_reminder
+- "Сделай каждодневное напоминание..." / "каждый день" / "каждое утро" → create_reminder, repeat=daily
 - "Нужно купить подарок маме" → create_task
 - "Выполнил подарок" / "Сделал ..." → complete_task
+- Если время неясно — due_at=null, needs_time_clarify=true (НЕ ставь ночь 01:00 и не выдумывай)
+- «Утро» / завтрак без часа → due_hint="утро", НЕ 01:00
 - Короткие спокойные ответы потом даст система, тебе нужна только классификация
 
 JSON схема:
@@ -52,12 +55,19 @@ JSON схема:
   "category": "preferences|...",
   "task_text": "текст задачи или null",
   "reminder_text": "текст напоминания или null",
+  "repeat": "none|daily",
   "due_at": "ISO-8601 дата/время или относительное описание или null",
   "due_hint": "человекочитаемая дата или null",
+  "needs_time_clarify": false,
   "query": "поисковый запрос или фрагмент для удаления/выполнения или null",
   "confidence": 0.0-1.0
 }
 """
+
+
+DEFAULT_MORNING_HOUR = 9
+DEFAULT_DAY_HOUR = 14
+DEFAULT_EVENING_HOUR = 19
 
 
 @dataclass
@@ -70,9 +80,20 @@ class IntentResult:
     reminder_text: str | None = None
     due_at: datetime | None = None
     due_hint: str | None = None
+    repeat: str = "none"
+    needs_time_clarify: bool = False
     query: str | None = None
     confidence: float = 0.0
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ReminderSchedule:
+    due_at: datetime | None
+    repeat: str = "none"
+    needs_clarification: bool = False
+    clarify_question: str = ""
+    time_known: bool = False
 
 
 FORCE_REMEMBER_RE = re.compile(
@@ -121,6 +142,96 @@ def _extract_json(text: str) -> dict[str, Any]:
         raise
 
 
+def detect_reminder_repeat(text: str) -> str:
+    lower = (text or "").lower().replace("ё", "е")
+    if re.search(
+        r"кажд\w*|ежедневн\w*|каждый\s+день|каждое\s+утро|по\s+утрам|каждый\s+день",
+        lower,
+    ):
+        return "daily"
+    return "none"
+
+
+def extract_reminder_body(user_text: str, llm_text: str | None = None) -> str:
+    text = (user_text or "").strip()
+    m = re.search(
+        r"(?:с\s+)?текст(?:ом)?\s*:\s*[«\"'](.+?)[»\"']",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"[«\"](.+?)[»\"]", text, flags=re.DOTALL)
+    if m and len(m.group(1).strip()) >= 3:
+        return m.group(1).strip()
+    body = (llm_text or text).strip()
+    body = re.sub(
+        r"^(сделай\s+мне\s+|сделай\s+|создай\s+)?(кажд\w+\s+|ежедневн\w+\s+)?"
+        r"напоминани[ея]\s*",
+        "",
+        body,
+        flags=re.IGNORECASE,
+    ).strip()
+    body = re.sub(r"^напомни\s+", "", body, flags=re.IGNORECASE).strip()
+    body = re.sub(r"^(что\s+)?с\s+текстом\s*:\s*", "", body, flags=re.IGNORECASE).strip()
+    return body or text
+
+
+def _extract_clock(lower: str) -> tuple[int, int] | None:
+    """Extract explicit clock time; ignore bare digits without time context."""
+    m = re.search(
+        r"(?:^|[^\d])(?:в\s+)?(\d{1,2})[:\.](\d{2})\s*(утра|вечера|дня)?",
+        lower,
+    )
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        period = m.group(3)
+    else:
+        m = re.search(
+            r"(?:^|[^\d])в\s+(\d{1,2})(?:\s*(утра|вечера|дня))?(?!\s*(?:числа|-го|[./]\d))",
+            lower,
+        )
+        if not m:
+            # bare "9 утра" / "9 вечера"
+            m = re.search(r"(?:^|[^\d])(\d{1,2})\s*(утра|вечера|дня)\b", lower)
+            if not m:
+                return None
+            hour = int(m.group(1))
+            minute = 0
+            period = m.group(2)
+        else:
+            hour = int(m.group(1))
+            minute = 0
+            period = m.group(2)
+    if hour > 23 or minute > 59:
+        return None
+    if period == "вечера" and hour < 12:
+        hour += 12
+    if period == "утра" and hour == 12:
+        hour = 0
+    if period == "дня" and hour < 12:
+        hour += 12
+    return hour, minute
+
+
+def _daypart_hour(lower: str) -> int | None:
+    if re.search(r"\bутром\b|\bутра\b|доброе\s+утро|на\s+завтрак|завтрак|по\s+утрам|каждое\s+утро", lower):
+        return DEFAULT_MORNING_HOUR
+    if re.search(r"\bвечером\b|\bвечера\b", lower):
+        return DEFAULT_EVENING_HOUR
+    if re.search(r"\bднем\b|\bднём\b", lower):
+        return DEFAULT_DAY_HOUR
+    return None
+
+
+def _next_at_clock(now: datetime, hour: int, minute: int = 0) -> datetime:
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate = candidate + timedelta(days=1)
+    return candidate
+
+
 def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
     """Parse reminder due time from Russian / ISO text. Never trust fuzzy junk dates."""
     raw = " ".join(p for p in [(value or "").strip(), (hint or "").strip()] if p)
@@ -152,22 +263,11 @@ def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
         if unit.startswith("месяц"):
             return now + timedelta(days=30 * n)
 
-    # --- сегодня / завтра / послезавтра + optional time ---
-    hour, minute = 10, 0
-    am_pm = re.search(
-        r"(?:в\s+)?(\d{1,2})(?:[:\.](\d{2}))?\s*(утра|вечера|дня)?",
-        lower,
-    )
-    if am_pm:
-        hour = int(am_pm.group(1))
-        minute = int(am_pm.group(2) or 0)
-        period = am_pm.group(3)
-        if period == "вечера" and hour < 12:
-            hour += 12
-        if period == "утра" and hour == 12:
-            hour = 0
-        if period == "дня" and hour < 12:
-            hour += 12
+    clock = _extract_clock(lower)
+    daypart = _daypart_hour(lower)
+    hour = clock[0] if clock else (daypart if daypart is not None else 10)
+    minute = clock[1] if clock else 0
+    time_known = clock is not None or daypart is not None
 
     base_day = None
     if "послезавтра" in lower:
@@ -178,17 +278,27 @@ def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
         base_day = now
 
     if base_day is not None:
-        # If only relative minutes already handled above; here set clock time on day
-        # When "сегодня" + "через N минут" already returned. If plain сегодня/завтра:
         if not re.search(r"через\s+\d*\s*мин", lower):
             candidate = base_day.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if "сегодня" in lower and candidate <= now:
-                # If time already passed today, push to tomorrow unless user said "через"
-                if am_pm:
+                if time_known:
                     candidate = candidate + timedelta(days=1)
                 else:
                     candidate = now + timedelta(minutes=1)
             return candidate
+
+    # Daily / daypart-only without explicit day → next occurrence
+    if clock is None and daypart is not None and detect_reminder_repeat(lower) == "daily":
+        return _next_at_clock(now, daypart, 0)
+    if clock is not None and detect_reminder_repeat(lower) == "daily":
+        return _next_at_clock(now, clock[0], clock[1])
+    if clock is None and daypart is not None and not base_day:
+        # "напомни утром ..." without day → next morning
+        return _next_at_clock(now, daypart, 0)
+    if clock is not None and not base_day and re.search(r"\b(в\s+\d|утра|вечера|дня)\b", lower):
+        # "напомни в 9:00 ..." without day
+        if not re.search(r"\d{1,2}[./]\d{1,2}", lower) and not re.search(r"\d{1,2}\s*(-?го|числа)", lower):
+            return _next_at_clock(now, clock[0], clock[1])
 
     # --- Explicit DD.MM.YYYY or DD.MM ---
     m = re.search(
@@ -200,8 +310,8 @@ def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
         year = int(m.group(3)) if m.group(3) else now.year
         if year < 100:
             year += 2000
-        hh = int(m.group(4)) if m.group(4) else (hour if am_pm else 10)
-        mm = int(m.group(5)) if m.group(5) else (minute if am_pm else 0)
+        hh = int(m.group(4)) if m.group(4) else hour
+        mm = int(m.group(5)) if m.group(5) else minute
         try:
             candidate = now.replace(
                 year=year, month=month, day=day, hour=hh, minute=mm, second=0, microsecond=0
@@ -210,10 +320,8 @@ def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
             candidate = None
         if candidate is not None:
             if candidate.year < now.year - 1:
-                # Refuse absurd past years from bad parsers
                 candidate = candidate.replace(year=now.year)
             if candidate <= now and not m.group(3):
-                # DD.MM without year already passed → next year
                 try:
                     candidate = candidate.replace(year=now.year + 1)
                 except ValueError:
@@ -224,10 +332,13 @@ def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
     m = re.search(r"(\d{1,2})\s*(-?го|числа)", lower)
     if m:
         day = int(m.group(1))
+        hh = hour if time_known else 10
         try:
-            candidate = now.replace(day=day, hour=10, minute=0, second=0, microsecond=0)
+            candidate = now.replace(day=day, hour=hh, minute=minute, second=0, microsecond=0)
         except ValueError:
-            candidate = now.replace(day=min(day, 28), hour=10, minute=0, second=0, microsecond=0)
+            candidate = now.replace(
+                day=min(day, 28), hour=hh, minute=minute, second=0, microsecond=0
+            )
         if candidate <= now:
             month = candidate.month + 1
             year = candidate.year
@@ -254,27 +365,122 @@ def _parse_due(value: str | None, hint: str | None = None) -> datetime | None:
     return None
 
 
-def resolve_reminder_due(user_text: str, llm_due: datetime | None = None, hint: str | None = None) -> datetime:
-    """Prefer parsing the user's words; discard LLM dates that are in the past."""
+def _llm_due_acceptable(due: datetime, user_text: str, reminder_text: str = "") -> bool:
+    """Reject hallucinated night times when user meant morning / gave no clock."""
     now = timezone.localtime()
-    parsed = _parse_due(user_text, hint)
-    if parsed and parsed > now - timedelta(seconds=30):
-        return parsed
+    if timezone.is_naive(due):
+        due = timezone.make_aware(due, timezone.get_current_timezone())
+    if due.year < now.year or due <= now - timedelta(minutes=1):
+        return False
+    blob = f"{user_text} {reminder_text}".lower().replace("ё", "е")
+    clock = _extract_clock(blob)
+    if clock is not None:
+        return True
+    # Night hours without explicit request are almost always LLM junk for «утро»
+    if 0 <= due.hour <= 5:
+        if re.search(r"\bноч\w*|\bчас\s+ноч|\bв\s+[01]?\d[:\.]", blob):
+            return True
+        return False
+    if _daypart_hour(blob) is not None:
+        # Prefer our daypart defaults over LLM clock
+        return False
+    return True
 
-    if llm_due is not None:
+
+def resolve_reminder_schedule(
+    user_text: str,
+    llm_due: datetime | None = None,
+    hint: str | None = None,
+    reminder_text: str = "",
+    llm_repeat: str | None = None,
+    time_answer_only: bool = False,
+) -> ReminderSchedule:
+    """
+    Build a reminder schedule from user words.
+
+    If time is unclear — needs_clarification=True (do not invent 01:00 / tomorrow silently).
+    """
+    now = timezone.localtime()
+    blob = " ".join(
+        p for p in [user_text or "", reminder_text or "", hint or ""] if p
+    ).lower().replace("ё", "е")
+    repeat = detect_reminder_repeat(blob)
+    if llm_repeat == "daily":
+        repeat = "daily"
+
+    clock = _extract_clock(blob)
+    daypart = _daypart_hour(blob)
+    parsed = _parse_due(user_text, hint)
+    if parsed is None and reminder_text:
+        parsed = _parse_due(reminder_text, hint)
+    if parsed is None and time_answer_only:
+        parsed = _parse_due(user_text, None)
+
+    time_known = clock is not None or daypart is not None
+    if parsed and ("через" in blob or re.search(r"\d{1,2}[./]\d{1,2}", blob) or re.search(r"\d{1,2}\s*(-?го|числа)", blob)):
+        time_known = True
+    if parsed and "через" in (user_text or "").lower():
+        time_known = True
+
+    # Daily morning / breakfast without explicit hour → 09:00 every day
+    if repeat == "daily" and daypart is not None and clock is None:
+        due = _next_at_clock(now, daypart, 0)
+        return ReminderSchedule(due_at=due, repeat=repeat, time_known=True)
+
+    if repeat == "daily" and clock is not None:
+        due = _next_at_clock(now, clock[0], clock[1])
+        return ReminderSchedule(due_at=due, repeat=repeat, time_known=True)
+
+    if parsed and time_known and parsed > now - timedelta(seconds=30):
+        return ReminderSchedule(due_at=parsed, repeat=repeat, time_known=True)
+
+    if parsed and "через" in (user_text or "").lower() and parsed > now - timedelta(seconds=30):
+        return ReminderSchedule(due_at=parsed, repeat=repeat, time_known=True)
+
+    # One-shot with clear day+time from parser (20 числа, завтра в 15:00, etc.)
+    if parsed and parsed > now - timedelta(seconds=30):
+        # Day-of-month / date without clock still counts as scheduled (default 10:00)
+        if re.search(r"\d{1,2}\s*(-?го|числа)|\d{1,2}[./]\d{1,2}|завтра|послезавтра|сегодня", blob):
+            return ReminderSchedule(due_at=parsed, repeat=repeat, time_known=True)
+
+    if llm_due is not None and _llm_due_acceptable(llm_due, user_text, reminder_text):
         due = llm_due
         if timezone.is_naive(due):
             due = timezone.make_aware(due, timezone.get_current_timezone())
-        # Ignore clearly wrong LLM dates (past year or far past)
-        if due.year >= now.year and due > now - timedelta(minutes=1):
-            return due
+        return ReminderSchedule(due_at=due, repeat=repeat, time_known=True)
 
-    # Fallback: 1 minute from now for "через …"/urgent phrasing, else tomorrow 10:00
-    lower = user_text.lower()
-    if "через" in lower or "минут" in lower:
+    # Relative "через" without successful parse → +1 min
+    if "через" in blob and ("мин" in blob or "час" in blob):
+        return ReminderSchedule(
+            due_at=now + timedelta(minutes=1),
+            repeat=repeat,
+            time_known=True,
+        )
+
+    if repeat == "daily":
+        q = "Во сколько напоминать каждый день? Например: «в 9 утра» или «в 8:30»."
+    else:
+        q = "Когда напомнить? Укажи день и время, например: «завтра в 10:00» или «каждый день в 9 утра»."
+    return ReminderSchedule(
+        due_at=None,
+        repeat=repeat,
+        needs_clarification=True,
+        clarify_question=q,
+        time_known=False,
+    )
+
+
+def resolve_reminder_due(
+    user_text: str, llm_due: datetime | None = None, hint: str | None = None
+) -> datetime:
+    """Backward-compatible helper: returns a due datetime or raises if unclear."""
+    schedule = resolve_reminder_schedule(user_text, llm_due=llm_due, hint=hint)
+    if schedule.due_at is not None:
+        return schedule.due_at
+    now = timezone.localtime()
+    if "через" in (user_text or "").lower() or "минут" in (user_text or "").lower():
         return now + timedelta(minutes=1)
-    due = now + timedelta(days=1)
-    return due.replace(hour=10, minute=0, second=0, microsecond=0)
+    return _next_at_clock(now, 10, 0)
 
 
 class IntentAnalyzer:
@@ -331,7 +537,8 @@ class IntentAnalyzer:
             INTENT_SYSTEM_PROMPT
             + f"\n\nСейчас: {now.strftime('%Y-%m-%d %H:%M')} (Europe/Moscow). "
             "Для due_at всегда используй реальный будущий момент в ISO-8601 от этой даты. "
-            "«через 1 минуту» = сейчас+1 минута. Не выдумывай прошлые годы."
+            "«через 1 минуту» = сейчас+1 минута. Не выдумывай прошлые годы. "
+            "Не ставь 01:00 для «утро» — пиши due_hint=утро или needs_time_clarify=true."
         )
         raw_text = llm.complete_text(system, text, temperature=0.1, max_tokens=600)
         data = _extract_json(raw_text)
@@ -340,6 +547,9 @@ class IntentAnalyzer:
         due = _parse_due(text, data.get("due_hint") or data.get("due_at"))
         if due is None:
             due = _parse_due(data.get("due_at"), data.get("due_hint"))
+        repeat = data.get("repeat") or detect_reminder_repeat(text)
+        if repeat not in {"none", "daily"}:
+            repeat = detect_reminder_repeat(text)
         return IntentResult(
             intent=intent,
             should_save=bool(data.get("should_save")),
@@ -349,6 +559,8 @@ class IntentAnalyzer:
             reminder_text=data.get("reminder_text") or None,
             due_at=due,
             due_hint=data.get("due_hint"),
+            repeat=repeat,
+            needs_time_clarify=bool(data.get("needs_time_clarify")),
             query=data.get("query"),
             confidence=float(data.get("confidence") or 0.5),
             raw=data,
@@ -356,12 +568,14 @@ class IntentAnalyzer:
 
     def _heuristic_fallback(self, text: str) -> IntentResult:
         lower = text.lower()
-        if "напомн" in lower:
+        if "напомн" in lower or "напоминани" in lower:
             due = _parse_due(text, None)
             return IntentResult(
                 intent="create_reminder",
-                reminder_text=text,
-                due_at=due or (timezone.localtime() + timedelta(days=1)),
+                reminder_text=extract_reminder_body(text),
+                due_at=due,
+                repeat=detect_reminder_repeat(text),
+                needs_time_clarify=due is None,
                 confidence=0.4,
             )
         task_markers = ("нужно", "надо", "купить", "позвонить", "сделать", "записаться")

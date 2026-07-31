@@ -65,6 +65,32 @@ class IntentRulesTests(TestCase):
         self.assertGreaterEqual(due.year, tz.localtime().year)
         self.assertGreater(due, tz.localtime() - timedelta(seconds=5))
 
+    def test_daily_morning_breakfast_reminder(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from ai.intent import resolve_reminder_schedule
+
+        text = (
+            'Сделай мне каждодневное напоминание с текстом: '
+            '"Доброе утро! Приятного завтрака и полюби свою семью!)"'
+        )
+        # LLM wrongly suggests 01:00 — must be ignored for morning wording
+        bad = datetime(2026, 7, 31, 1, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+        schedule = resolve_reminder_schedule(text, llm_due=bad, reminder_text="Доброе утро! …")
+        self.assertFalse(schedule.needs_clarification)
+        self.assertEqual(schedule.repeat, "daily")
+        self.assertIsNotNone(schedule.due_at)
+        self.assertEqual(schedule.due_at.hour, 9)
+        self.assertEqual(schedule.due_at.minute, 0)
+
+    def test_unclear_reminder_asks_clarify(self):
+        from ai.intent import resolve_reminder_schedule
+
+        schedule = resolve_reminder_schedule("Напомни про важное")
+        self.assertTrue(schedule.needs_clarification)
+        self.assertIsNone(schedule.due_at)
+
 
 class ServicesTests(TestCase):
     def setUp(self) -> None:
@@ -92,6 +118,17 @@ class ServicesTests(TestCase):
         rem = svc.create(self.user, "Оплатить коммуналку", due)
         self.assertFalse(rem.is_done)
         self.assertEqual(Reminder.objects.count(), 1)
+
+    def test_daily_reminder_reschedules_after_send(self):
+        svc = ReminderService()
+        due = timezone.now() - timedelta(minutes=1)
+        rem = svc.create(self.user, "Доброе утро!", due, repeat="daily")
+        before = rem.due_at
+        svc.mark_sent(rem)
+        rem.refresh_from_db()
+        self.assertFalse(rem.is_done)
+        self.assertGreater(rem.due_at, before)
+        self.assertGreater(rem.due_at, timezone.now())
 
 
 class PipelineTests(TestCase):
@@ -142,3 +179,46 @@ class PipelineTests(TestCase):
         TaskService().create(self.user, "Позвонить стоматологу")
         reply = self.pipeline.handle(self.user, "Что мне нужно сделать?")
         self.assertIn("стоматологу", reply)
+
+    @patch("bot.pipeline.IntentAnalyzer.analyze")
+    def test_reminder_clarification_then_time(self, analyze):
+        from ai.intent import IntentResult
+
+        analyze.return_value = IntentResult(
+            intent="create_reminder",
+            reminder_text="Важная встреча",
+            due_at=None,
+            needs_time_clarify=True,
+            confidence=0.9,
+        )
+        reply = self.pipeline.handle(self.user, "Напомни про важную встречу")
+        self.assertIn("Когда", reply)
+        self.assertEqual(Reminder.objects.count(), 0)
+
+        # Second message answers the time — pending handler, no analyze needed
+        reply2 = self.pipeline.handle(self.user, "завтра в 15:00")
+        self.assertIn("Готово", reply2)
+        rem = Reminder.objects.get()
+        self.assertEqual(rem.text, "Важная встреча")
+        self.assertEqual(timezone.localtime(rem.due_at).hour, 15)
+
+    @patch("bot.pipeline.IntentAnalyzer.analyze")
+    def test_daily_morning_creates_repeating(self, analyze):
+        from ai.intent import IntentResult
+
+        text = (
+            'Сделай мне каждодневное напоминание с текстом: '
+            '"Доброе утро! Приятного завтрака и полюби свою семью!)"'
+        )
+        analyze.return_value = IntentResult(
+            intent="create_reminder",
+            reminder_text="Доброе утро! Приятного завтрака и полюби свою семью!)",
+            repeat="daily",
+            confidence=0.9,
+        )
+        reply = self.pipeline.handle(self.user, text)
+        self.assertIn("каждый день", reply.lower())
+        rem = Reminder.objects.get()
+        self.assertEqual(rem.repeat, "daily")
+        self.assertEqual(timezone.localtime(rem.due_at).hour, 9)
+        self.assertIn("Доброе утро", rem.text)
