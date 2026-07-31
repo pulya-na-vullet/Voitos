@@ -1,6 +1,6 @@
 """Клиентская карта: графы групп, родственники в одной вершине.
 
-Вершина = платящее домохозяйство (плательщик подписки).
+Вершина = семья / домохозяйство (плательщик + прикреплённые).
 Название группы только в заголовке карточки — хаб-узел не рисуем.
 """
 from __future__ import annotations
@@ -57,14 +57,11 @@ def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
         uniq: dict[int, BotUser] = {}
         for m in members:
             uniq[int(m.id)] = m
-        root = by_id.get(root_id) or next(iter(uniq.values()))
-        # Вершина только у тех, кто платит.
-        if not is_paying_user(root):
-            continue
         ordered = sorted(
             uniq.values(),
             key=lambda u: (0 if int(u.id) == root_id else 1, _display_name(u).lower(), int(u.id)),
         )
+        root = by_id.get(root_id) or ordered[0]
         labels = [_display_name(u) for u in ordered]
         households[root_id] = {
             "id": f"h{root_id}",
@@ -74,7 +71,8 @@ def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
             "labels": labels,
             "member_count": len(ordered),
             "has_family": len(ordered) > 1,
-            "active_subscription": True,
+            "is_paying": is_paying_user(root),
+            "active_subscription": any(u.has_feature_access() for u in ordered),
         }
     return households
 
@@ -96,9 +94,13 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] |
         labels = household["labels"]
         cy_label = "\n".join(labels)
         href = reverse("panel:user_dashboard", args=[household["root_id"]])
-        classes = ["household", "active-sub"]
+        classes = ["household"]
         if household["has_family"]:
             classes.append("family")
+        if household["is_paying"]:
+            classes.append("paying")
+        if household["active_subscription"]:
+            classes.append("active-sub")
         elements.append(
             {
                 "data": {
@@ -108,6 +110,7 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] |
                     "href": href,
                     "root_id": household["root_id"],
                     "member_count": household["member_count"],
+                    "is_paying": household["is_paying"],
                 },
                 "classes": " ".join(classes),
             }
@@ -121,10 +124,11 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] |
                 "has_family": household["has_family"],
                 "member_count": household["member_count"],
                 "root_id": household["root_id"],
+                "is_paying": household["is_paying"],
             }
         )
 
-    # Связи между платящими вершинами одной группы (без хаба).
+    # Связи между семейными вершинами одной группы (без хаба с названием).
     n = len(households)
     if n >= 2:
         ring_steps = n if n > 2 else 1
@@ -143,11 +147,13 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] |
                 }
             )
 
+    payer_count = sum(1 for h in households if h["is_paying"])
     return {
         "group_id": group.id,
         "group_name": group.name,
-        "payer_count": len(households),
-        "household_count": len(households),  # alias: вершины = платящие
+        "vertex_count": len(households),
+        "payer_count": payer_count,
+        "household_count": len(households),
         "user_count": sum(h["member_count"] for h in households),
         "nodes": nodes,
         "elements": elements,

@@ -25,7 +25,6 @@ class ClientsMapTests(TestCase):
         self.ivan = BotUser.objects.create(
             max_user_id="map-iv",
             real_name="Иван",
-            # без подписки — не вершина (не платит)
         )
         self.rocker = BotUser.objects.create(
             max_user_id="map-rk",
@@ -41,31 +40,31 @@ class ClientsMapTests(TestCase):
         self.client = Client()
         self.client.login(username="mapadm", password="pass")
 
-    def test_household_merges_relatives_only_payers(self):
+    def test_household_merges_relatives(self):
         self.elena.refresh_from_db()
         self.dmitry.refresh_from_db()
         self.assertEqual(household_root_id(self.elena), self.dmitry.id)
         households = build_households([self.elena, self.dmitry, self.ivan])
-        # Иван без подписки не платит → 1 вершина (семья)
-        self.assertEqual(len(households), 1)
+        # Семья Дмитрий+Елена + Иван = 2 вершины
+        self.assertEqual(len(households), 2)
         family = households[self.dmitry.id]
         self.assertTrue(family["has_family"])
         self.assertIn("Елена", family["label"])
         self.assertIn("Дмитрий", family["label"])
 
-    def test_build_clients_map_payer_vertices_no_hub(self):
+    def test_build_clients_map_family_vertices_no_hub(self):
         graphs = build_clients_map()
-        names = [g["group_name"] for g in graphs]
-        self.assertIn("9 аллея", names)
-        self.assertIn("казанские рокеры", names)
         alley = next(g for g in graphs if g["group_name"] == "9 аллея")
+        # Елена+Дмитрий и Иван — две семейные вершины, без хаба группы
+        self.assertEqual(alley["vertex_count"], 2)
         self.assertEqual(alley["payer_count"], 1)
         node_els = [e for e in alley["elements"] if "source" not in e["data"]]
-        # без синего хаба группы — только платящие вершины
-        self.assertEqual(len(node_els), 1)
-        self.assertNotIn("group", node_els[0].get("classes", ""))
-        self.assertIn("Елена", node_els[0]["data"]["label"])
-        self.assertIn("Дмитрий", node_els[0]["data"]["label"])
+        self.assertEqual(len(node_els), 2)
+        self.assertTrue(all(e["data"]["kind"] == "household" for e in node_els))
+        labels = " ".join(e["data"]["label"] for e in node_els)
+        self.assertIn("Елена", labels)
+        self.assertIn("Дмитрий", labels)
+        self.assertIn("Иван", labels)
 
     def test_panel_page_renders_groups(self):
         import json
@@ -75,9 +74,7 @@ class ClientsMapTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         self.assertIn("Карта клиентов", body)
-        self.assertIn("платящих", body)
-        self.assertNotIn("node.group", body)
-        self.assertIn("9 аллея", body)
+        self.assertIn("семей", body)
         match = re.search(
             r'<script id="clients-map-data" type="application/json">(.*?)</script>',
             body,
@@ -87,5 +84,5 @@ class ClientsMapTests(TestCase):
         payload = json.loads(match.group(1))
         alley = next(g for g in payload if g["group_name"] == "9 аллея")
         nodes = [e for e in alley["elements"] if "source" not in e["data"]]
-        self.assertEqual(len(nodes), 1)
-        self.assertEqual(nodes[0]["data"]["kind"], "household")
+        self.assertEqual(len(nodes), 2)
+        self.assertTrue(all(n["data"]["kind"] == "household" for n in nodes))

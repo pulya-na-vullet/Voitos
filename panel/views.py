@@ -1278,6 +1278,7 @@ def clients_map(request: HttpRequest) -> HttpResponse:
         {
             "group_id": g["group_id"],
             "group_name": g["group_name"],
+            "vertex_count": g["vertex_count"],
             "payer_count": g["payer_count"],
             "user_count": g["user_count"],
             "elements": g["elements"],
@@ -1291,6 +1292,7 @@ def clients_map(request: HttpRequest) -> HttpResponse:
             "graphs": graphs,
             "graphs_payload": graphs_payload,
             "graph_count": len(graphs),
+            "vertex_total": sum(g["vertex_count"] for g in graphs),
             "payer_total": sum(g["payer_count"] for g in graphs),
         },
     )
