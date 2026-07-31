@@ -51,6 +51,7 @@ class ActivityKind(models.TextChoices):
     SERVICE_OFFER = "service_offer", "Сервисное предложение"
     SERVICE_RECEIPT = "service_receipt", "Чек сервисного сбора"
     SERVICE_PAID = "service_paid", "Сервисный сбор оплачен"
+    SERVICE_NOTICE = "service_notice", "Уведомление по сбору"
     ERROR = "error", "Ошибка"
     SETTINGS = "settings", "Настройки"
     OTHER = "other", "Прочее"
@@ -81,6 +82,14 @@ class InviteStatus(models.TextChoices):
     PAID = "paid", "Оплачено"
     DECLINED = "declined", "Отказ"
     CANCELLED = "cancelled", "Отменено"
+
+
+class CampaignNoticeKind(models.TextChoices):
+    CLOSED = "closed", "Сбор закрыт"
+    SURPLUS = "surplus", "Остаток в бюджет"
+    REMIND_3D = "remind_3d", "Напоминание за 3 дня"
+    REMIND_1D = "remind_1d", "Напоминание за 1 день"
+    REMIND_2H = "remind_2h", "Напоминание за 2 часа"
 
 
 class ReceiptStatus(models.TextChoices):
@@ -371,6 +380,12 @@ class ServiceCampaign(models.Model):
         decimal_places=2,
         default=Decimal("0"),
     )
+    event_at = models.DateTimeField(
+        "Дата мероприятия",
+        null=True,
+        blank=True,
+        help_text="К этой дате должен быть выполнен сбор; напоминания неоплатившим — за 3 дня, 1 день и 2 часа.",
+    )
     status = models.CharField(
         max_length=16,
         choices=CampaignStatus.choices,
@@ -400,6 +415,34 @@ class ServiceCampaign(models.Model):
         if not self.total_amount or self.total_amount <= 0:
             return 0
         return min(100, int(self.collected_amount * 100 / Decimal(self.total_amount)))
+
+
+class ServiceCampaignNotice(models.Model):
+    """Idempotent log of campaign notifications (close / surplus / unpaid reminders)."""
+
+    campaign = models.ForeignKey(
+        ServiceCampaign, on_delete=models.CASCADE, related_name="notices"
+    )
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="service_notices",
+    )
+    kind = models.CharField(max_length=32, choices=CampaignNoticeKind.choices)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Уведомление по сбору"
+        verbose_name_plural = "Уведомления по сборам"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campaign", "user", "kind"],
+                name="uniq_campaign_user_notice_kind",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.campaign_id}:{self.kind}:{self.user_id}"
 
 
 class ServiceInvite(models.Model):

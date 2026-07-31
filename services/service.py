@@ -13,10 +13,12 @@ from database.models import (
     ActivityLog,
     AppSettings,
     BotUser,
+    CampaignNoticeKind,
     CampaignStatus,
     InviteStatus,
     ReceiptStatus,
     ServiceCampaign,
+    ServiceCampaignNotice,
     ServiceCategory,
     ServiceGroup,
     ServiceInvite,
@@ -25,6 +27,10 @@ from database.models import (
 from subscriptions.receipts import analyze_receipt_text, normalize_phone, ocr_image_bytes
 
 logger = logging.getLogger(__name__)
+
+UNPAID_REMINDER_TEXT = (
+    "Вы не оплатили сбор. Мероприятие по сбору может быть не выполнено из-за вас."
+)
 
 
 def service_payment_requisites() -> str:
@@ -56,6 +62,12 @@ def campaign_progress_line(campaign: ServiceCampaign) -> str:
     )
 
 
+def campaign_collected(campaign: ServiceCampaign) -> Decimal:
+    return (
+        campaign.invites.aggregate(s=Sum("amount_paid"))["s"] or Decimal("0")
+    )
+
+
 def format_collections_for_user(user: BotUser) -> str:
     invites = (
         ServiceInvite.objects.filter(user=user)
@@ -71,14 +83,23 @@ def format_collections_for_user(user: BotUser) -> str:
     lines = ["Сервисные сборы\n────────────"]
     for inv in invites:
         c = inv.campaign
-        status = "оплачено" if inv.status == InviteStatus.PAID else "ожидает оплаты"
-        if inv.status == InviteStatus.DECLINED:
+        if c.status == CampaignStatus.CLOSED:
+            status = "сбор закрыт"
+        elif inv.status == InviteStatus.PAID:
+            status = "оплачено"
+        elif inv.status == InviteStatus.DECLINED:
             status = "отказ"
+        else:
+            status = "ожидает оплаты"
         group_name = c.group.name if c.group_id else (c.locality or "")
         extra = f"{group_name}\n" if group_name else ""
+        event_line = ""
+        if c.event_at:
+            event_line = f"Дата мероприятия: {timezone.localtime(c.event_at).strftime('%d.%m.%Y %H:%M')}\n"
         lines.append(
             f"\n{c.get_category_display()} — {c.title}\n"
             f"{extra}"
+            f"{event_line}"
             f"{campaign_progress_line(c)}\n"
             f"Ваш взнос: {inv.amount_due:.0f} ₽ — {status}"
         )
@@ -96,11 +117,15 @@ def create_campaign(
     total_amount: Decimal,
     amount_per_user: Decimal | None = None,
     group: ServiceGroup | None = None,
+    event_at=None,
 ) -> ServiceCampaign:
     if category not in ServiceCategory.values:
         raise ValueError("Неизвестная категория")
     title = title.strip() or dict(ServiceCategory.choices).get(category, "Мероприятие")
-    date_s = timezone.localtime().strftime("%d.%m.%Y")
+    if event_at:
+        date_s = timezone.localtime(event_at).strftime("%d.%m.%Y")
+    else:
+        date_s = timezone.localtime().strftime("%d.%m.%Y")
     if "от " not in title.lower():
         title = f"{title} от {date_s}"
     if group and not locality:
@@ -113,12 +138,18 @@ def create_campaign(
         group=group,
         total_amount=total_amount,
         amount_per_user=amount_per_user or Decimal("0"),
+        event_at=event_at,
         status=CampaignStatus.DRAFT,
     )
 
 
 def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
-    date_s = timezone.localtime(campaign.created_at).strftime("%d.%m.%Y")
+    if campaign.event_at:
+        date_s = timezone.localtime(campaign.event_at).strftime("%d.%m.%Y %H:%M")
+        date_label = "Дата мероприятия"
+    else:
+        date_s = timezone.localtime(campaign.created_at).strftime("%d.%m.%Y")
+        date_label = "Дата"
     group_line = ""
     if campaign.group_id:
         group_line = f"Группа: {campaign.group.name}\n"
@@ -128,7 +159,7 @@ def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
         f"{campaign.title}\n"
         f"{desc}"
         f"{group_line}"
-        f"Дата: {date_s}\n"
+        f"{date_label}: {date_s}\n"
         f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
         f"Вам нужно перевести: {amount_per_user:.0f} ₽\n\n"
         f"Реквизиты:\n{service_payment_requisites()}\n\n"
@@ -136,6 +167,177 @@ def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
         "Пришлите фото чека о переводе в этот чат.\n"
         "Список сборов — команда «сборы»."
     )
+
+
+def _notice_already_sent(campaign: ServiceCampaign, user: BotUser, kind: str) -> bool:
+    return ServiceCampaignNotice.objects.filter(
+        campaign=campaign, user=user, kind=kind
+    ).exists()
+
+
+def _record_notice(campaign: ServiceCampaign, user: BotUser, kind: str) -> None:
+    ServiceCampaignNotice.objects.get_or_create(
+        campaign=campaign,
+        user=user,
+        kind=kind,
+    )
+
+
+def broadcast_campaign_message(
+    campaign: ServiceCampaign,
+    text: str,
+    send_fn,
+    *,
+    kind: str | None = None,
+    users=None,
+) -> int:
+    """Send text to campaign invitees (or given users). Optionally de-dupe by kind."""
+    if not send_fn:
+        return 0
+    if users is None:
+        users = [inv.user for inv in campaign.invites.select_related("user").all()]
+    sent = 0
+    for user in users:
+        if kind and _notice_already_sent(campaign, user, kind):
+            continue
+        try:
+            send_fn(user, text)
+            if kind:
+                _record_notice(campaign, user, kind)
+            sent += 1
+            ActivityLog.objects.create(
+                user=user,
+                kind=ActivityKind.SERVICE_NOTICE,
+                title="Уведомление по сбору",
+                detail=text[:200],
+                meta={"campaign_id": campaign.id, "kind": kind or ""},
+            )
+        except Exception:
+            logger.exception(
+                "Failed campaign broadcast to %s (campaign %s)",
+                user.max_user_id,
+                campaign.id,
+            )
+    return sent
+
+
+def close_campaign_goal_reached(campaign: ServiceCampaign, send_fn=None) -> bool:
+    """Close campaign when goal is met and notify everyone: «Сбор закрыт.»"""
+    campaign.refresh_from_db()
+    if campaign.status == CampaignStatus.CLOSED:
+        return False
+    paid = campaign_collected(campaign)
+    if paid < Decimal(campaign.total_amount or 0):
+        return False
+    campaign.status = CampaignStatus.CLOSED
+    campaign.closed_at = timezone.now()
+    campaign.save(update_fields=["status", "closed_at"])
+    broadcast_campaign_message(
+        campaign,
+        "Сбор закрыт.",
+        send_fn,
+        kind=CampaignNoticeKind.CLOSED,
+    )
+    return True
+
+
+def maybe_notify_surplus(campaign: ServiceCampaign, send_fn=None) -> bool:
+    """
+    If approved amount exceeds the goal and there are no pending receipts left,
+    notify that the leftover went to the general budget.
+    """
+    paid = campaign_collected(campaign)
+    total = Decimal(campaign.total_amount or 0)
+    if paid <= total:
+        return False
+    pending = campaign.receipts.filter(status=ReceiptStatus.PENDING).exists()
+    if pending:
+        return False
+    surplus = paid - total
+    text = (
+        f"По сбору «{campaign.title}» подтверждена сумма сверх цели.\n"
+        f"Собрано: {paid:.0f} ₽ при цели {total:.0f} ₽.\n"
+        f"Оставшаяся часть ({surplus:.0f} ₽) ушла в общий бюджет."
+    )
+    sent = broadcast_campaign_message(
+        campaign,
+        text,
+        send_fn,
+        kind=CampaignNoticeKind.SURPLUS,
+    )
+    return sent > 0
+
+
+def unpaid_reminder_message(campaign: ServiceCampaign) -> str:
+    event = ""
+    if campaign.event_at:
+        event = (
+            f"\nДата мероприятия: "
+            f"{timezone.localtime(campaign.event_at).strftime('%d.%m.%Y %H:%M')}"
+        )
+    return (
+        f"Сбор «{campaign.title}»{event}\n\n"
+        f"{UNPAID_REMINDER_TEXT}\n\n"
+        f"Ваш взнос: {campaign.amount_per_user:.0f} ₽\n"
+        f"{service_payment_requisites()}\n"
+        "Пришлите фото чека в этот чат."
+    )
+
+
+def process_unpaid_reminders(send_fn=None, *, now=None) -> int:
+    """
+    For active campaigns with event_at: remind unpaid users
+    3 days, 1 day and 2 hours before the event.
+    """
+    from datetime import timedelta
+
+    if not send_fn:
+        return 0
+    now = now or timezone.now()
+    windows = (
+        (CampaignNoticeKind.REMIND_3D, timedelta(days=3)),
+        (CampaignNoticeKind.REMIND_1D, timedelta(days=1)),
+        (CampaignNoticeKind.REMIND_2H, timedelta(hours=2)),
+    )
+    campaigns = ServiceCampaign.objects.filter(
+        status=CampaignStatus.ACTIVE,
+        event_at__isnull=False,
+        event_at__gt=now,
+    )
+    sent_total = 0
+    text_cache: dict[int, str] = {}
+    for campaign in campaigns:
+        for kind, delta in windows:
+            trigger_at = campaign.event_at - delta
+            if now < trigger_at:
+                continue
+            unpaid = (
+                campaign.invites.filter(status=InviteStatus.OFFERED)
+                .select_related("user")
+            )
+            for inv in unpaid:
+                if _notice_already_sent(campaign, inv.user, kind):
+                    continue
+                if campaign.id not in text_cache:
+                    text_cache[campaign.id] = unpaid_reminder_message(campaign)
+                try:
+                    send_fn(inv.user, text_cache[campaign.id])
+                    _record_notice(campaign, inv.user, kind)
+                    sent_total += 1
+                    ActivityLog.objects.create(
+                        user=inv.user,
+                        kind=ActivityKind.SERVICE_NOTICE,
+                        title="Напоминание об оплате сбора",
+                        detail=campaign.title,
+                        meta={"campaign_id": campaign.id, "kind": kind},
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed unpaid reminder %s to %s",
+                        kind,
+                        inv.user.max_user_id,
+                    )
+    return sent_total
 
 
 def offer_to_users(
@@ -201,6 +403,7 @@ def launch_campaign_to_group(
     group: ServiceGroup,
     total_amount: Decimal,
     amount_per_user: Decimal,
+    event_at=None,
     send_fn=None,
 ) -> tuple[ServiceCampaign, int]:
     """Create campaign for a group and broadcast to all members."""
@@ -211,6 +414,8 @@ def launch_campaign_to_group(
         raise ValueError("Укажите сумму с участника")
     if total_amount <= 0:
         raise ValueError("Укажите общую сумму")
+    if event_at is None:
+        raise ValueError("Укажите дату мероприятия")
     campaign = create_campaign(
         category=category,
         title=title,
@@ -218,6 +423,7 @@ def launch_campaign_to_group(
         group=group,
         total_amount=total_amount,
         amount_per_user=amount_per_user,
+        event_at=event_at,
     )
     sent = offer_to_users(campaign, members, amount_per_user, send_fn=send_fn)
     return campaign, sent
@@ -397,7 +603,11 @@ def submit_service_receipt(
     return receipt
 
 
-def approve_service_receipt(receipt: ServiceReceipt, comment: str = "") -> ServiceReceipt:
+def approve_service_receipt(
+    receipt: ServiceReceipt,
+    comment: str = "",
+    send_fn=None,
+) -> ServiceReceipt:
     if receipt.status == ReceiptStatus.APPROVED:
         return receipt
     amount = Decimal(receipt.amount or 0)
@@ -405,10 +615,9 @@ def approve_service_receipt(receipt: ServiceReceipt, comment: str = "") -> Servi
         raise ValueError("Нельзя принять чек без суммы.")
 
     cfg = AppSettings.load()
-    warn = cfg.tax_limit_warning()
-    # Still allow but track
 
     invite = receipt.invite
+    campaign = invite.campaign
     invite.amount_paid = Decimal(invite.amount_paid or 0) + amount
     if invite.amount_paid >= invite.amount_due:
         invite.status = InviteStatus.PAID
@@ -427,9 +636,14 @@ def approve_service_receipt(receipt: ServiceReceipt, comment: str = "") -> Servi
         user=receipt.user,
         kind=ActivityKind.SERVICE_PAID,
         title="Сервисный чек принят",
-        detail=f"+{amount} ₽ → {invite.campaign.title}",
+        detail=f"+{amount} ₽ → {campaign.title}",
         meta={"receipt_id": receipt.id},
     )
+
+    # Goal reached → close + «Сбор закрыт.» to everyone
+    close_campaign_goal_reached(campaign, send_fn=send_fn)
+    # Surplus after all receipts verified → general budget notice
+    maybe_notify_surplus(campaign, send_fn=send_fn)
     return receipt
 
 
@@ -443,13 +657,26 @@ def reject_service_receipt(receipt: ServiceReceipt, comment: str = "") -> Servic
 
 def approved_service_message(receipt: ServiceReceipt) -> str:
     inv = receipt.invite
-    return (
-        f"Чек по мероприятию «{inv.campaign.title}» принят.\n"
-        f"Зачтено: {receipt.amount} ₽.\n"
-        f"{campaign_progress_line(inv.campaign)}\n"
-        f"Ваш статус взноса: "
-        f"{'оплачено' if inv.status == InviteStatus.PAID else 'частично, можно дослать чек'}."
-    )
+    campaign = inv.campaign
+    paid = campaign_collected(campaign)
+    total = Decimal(campaign.total_amount or 0)
+    lines = [
+        f"Чек по мероприятию «{campaign.title}» принят.",
+        f"Зачтено: {receipt.amount} ₽.",
+        campaign_progress_line(campaign),
+        (
+            "Ваш статус взноса: "
+            f"{'оплачено' if inv.status == InviteStatus.PAID else 'частично, можно дослать чек'}."
+        ),
+    ]
+    if campaign.status == CampaignStatus.CLOSED:
+        lines.append("Сбор закрыт.")
+    if paid > total and not campaign.receipts.filter(status=ReceiptStatus.PENDING).exists():
+        surplus = paid - total
+        lines.append(
+            f"Оставшаяся часть ({surplus:.0f} ₽) ушла в общий бюджет."
+        )
+    return "\n".join(lines)
 
 
 def rejected_service_message(receipt: ServiceReceipt) -> str:

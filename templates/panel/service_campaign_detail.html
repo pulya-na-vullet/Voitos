@@ -15,15 +15,20 @@
     {{ campaign.get_status_display }}
   </p>
   <p class="muted">{{ campaign.description|default:"—" }}</p>
+  {% if campaign.event_at %}
+  <p><strong>Дата мероприятия:</strong> {{ campaign.event_at|date:"d.m.Y H:i" }}</p>
+  {% endif %}
   <p>
     <strong>Общая сумма:</strong> {{ campaign.total_amount }} ₽ ·
     <strong>С участника:</strong> {{ campaign.amount_per_user }} ₽ ·
     <strong>Собрано:</strong> {{ collected }} ₽ ({{ progress_pct }}%)
+    {% if surplus %}<span class="badge ok">+{{ surplus }} ₽ в общий бюджет</span>{% endif %}
   </p>
   <div style="height:10px; background:var(--bg-soft); border-radius:999px; overflow:hidden; max-width:420px;">
     <div style="height:100%; width:{{ progress_pct }}%; background:var(--accent-2);"></div>
   </div>
   <p class="muted" style="margin-top:10px;">Реквизиты: {{ cfg.service_payee_name }} / {{ cfg.service_payee_phone }} / {{ cfg.service_payee_status }}</p>
+  <p class="muted">При достижении цели всем уходит «Сбор закрыт.» Неоплатившим — напоминания за 3 дня / 1 день / 2 часа до мероприятия.</p>
   <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
     {% if campaign.status != 'closed' and campaign.group %}
     <form method="post">{% csrf_token %}

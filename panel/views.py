@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
@@ -11,6 +11,7 @@ from django.db.models.functions import TruncDate
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods, require_POST
 
 from ai.factory import get_runtime_settings
@@ -619,6 +620,23 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 per_user = Decimal(request.POST.get("amount_per_user") or "0")
             except (InvalidOperation, ValueError):
                 total, per_user = Decimal("0"), Decimal("0")
+            event_raw = (request.POST.get("event_at") or "").strip()
+            event_at = None
+            if event_raw:
+                # datetime-local: YYYY-MM-DDTHH:MM
+                normalized = event_raw.replace(" ", "T")
+                if len(normalized) == 16:
+                    normalized += ":00"
+                dt = parse_datetime(normalized)
+                if dt is None:
+                    try:
+                        dt = datetime.fromisoformat(normalized)
+                    except ValueError:
+                        dt = None
+                if dt is not None:
+                    if timezone.is_naive(dt):
+                        dt = timezone.make_aware(dt, timezone.get_current_timezone())
+                    event_at = dt
             try:
                 campaign, sent = launch_campaign_to_group(
                     category=category,
@@ -628,6 +646,7 @@ def services_home(request: HttpRequest) -> HttpResponse:
                     group=group,
                     total_amount=total,
                     amount_per_user=per_user,
+                    event_at=event_at,
                     send_fn=_notify_user,
                 )
                 messages.success(
@@ -776,6 +795,7 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     paid = campaign.invites.aggregate(s=Sum("amount_paid"))["s"] or Decimal("0")
     total = Decimal(campaign.total_amount or 0)
     pct = min(100, int(paid * 100 / total)) if total > 0 else 0
+    surplus = paid - total if paid > total else Decimal("0")
     return render(
         request,
         "panel/service_campaign_detail.html",
@@ -785,6 +805,7 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "receipts": campaign.receipts.select_related("user", "invite").all()[:200],
             "collected": paid,
             "progress_pct": pct,
+            "surplus": surplus,
             "tax_warning": AppSettings.load().tax_limit_warning(),
             "cfg": AppSettings.load(),
         },
@@ -797,9 +818,14 @@ def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
     receipt = get_object_or_404(ServiceReceipt, pk=pk)
     comment = request.POST.get("comment", "").strip()
     try:
-        approve_service_receipt(receipt, comment=comment)
+        approve_service_receipt(receipt, comment=comment, send_fn=_notify_user)
+        receipt.refresh_from_db()
+        receipt.invite.refresh_from_db()
+        receipt.campaign.refresh_from_db()
         _notify_user(receipt.user, approved_service_message(receipt))
         messages.success(request, f"Сервис-чек #{pk} принят.")
+        if receipt.campaign.status == CampaignStatus.CLOSED:
+            messages.info(request, "Цель сбора достигнута — рассылка «Сбор закрыт.»")
         tax_warn = AppSettings.load().tax_limit_warning()
         if tax_warn:
             messages.warning(request, tax_warn)
