@@ -354,7 +354,13 @@ class MessagePipeline:
         if not choose_subscription and chosen is None:
             return "Не понял выбор.\n\n" + format_receipt_pick_menu(invites)
 
-        file_bytes = base64.b64decode(raw_b64)
+        try:
+            file_bytes = base64.b64decode(raw_b64)
+        except Exception:
+            logger.exception("Invalid pending receipt payload")
+            pending.clear_pending()
+            return "Не удалось прочитать сохранённый чек. Пришлите PDF или скрин ещё раз."
+
         if choose_subscription:
             try:
                 receipt = submit_receipt(user, file_bytes, filename=filename)
@@ -362,22 +368,16 @@ class MessagePipeline:
                 logger.exception("Subscription receipt submit after pick failed")
                 pending.clear_pending()
                 return (
-                    "Не удалось обработать чек подписки. Пришлите PDF или скрин ещё раз.\n\n"
+                    "Не удалось сохранить чек подписки. Пришлите PDF или скрин ещё раз.\n\n"
                     + payment_help_text()
                 )
             pending.clear_pending()
-            if receipt.details_match:
-                return (
-                    f"Чек подписки получен и отправлен администратору на проверку.\n"
-                    f"Сумма: {receipt.amount or 'не распознана'} ₽"
-                    f"{', дата: ' + receipt.transfer_date.strftime('%d.%m.%Y') if receipt.transfer_date else ''}.\n"
-                    f"Предварительно: ~{receipt.period_label()} подписки "
-                    f"(точный срок подтвердит администратор)."
-                )
+            amount_line = f"Сумма: {receipt.amount or 'будет проверена администратором'} ₽"
+            if receipt.transfer_date:
+                amount_line += f", дата: {receipt.transfer_date.strftime('%d.%m.%Y')}"
             return (
-                "Чек подписки получен, но реквизиты распознаны неуверенно "
-                "(телефон/ФИО/дата). Администратор проверит вручную.\n\n"
-                + payment_help_text()
+                "Ваш чек отправлен на проверку администратору.\n"
+                f"{amount_line}."
             )
 
         try:
@@ -390,11 +390,11 @@ class MessagePipeline:
         except Exception:
             logger.exception("Service receipt submit after pick failed")
             pending.clear_pending()
-            return "Не удалось обработать чек. Пришлите фото ещё раз."
+            return "Не удалось сохранить чек. Пришлите PDF или скрин ещё раз."
         pending.clear_pending()
         return (
-            f"Чек по «{chosen.campaign.title}» отправлен администратору.\n"
-            f"Сумма: {receipt.amount or 'не распознана'} ₽."
+            f"Ваш чек по «{chosen.campaign.title}» отправлен на проверку администратору.\n"
+            f"Сумма: {receipt.amount or 'будет проверена администратором'} ₽."
         )
 
     def _chat(self, user: BotUser, text: str) -> str:

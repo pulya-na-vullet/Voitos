@@ -40,7 +40,7 @@ WORK_STAGE_NEXT = {
     WorkStage.WORK_STARTED: WorkStage.WORK_DONE,
     WorkStage.WORK_DONE: WorkStage.WORK_CLOSED,
 }
-from subscriptions.receipts import analyze_receipt_text, normalize_phone, ocr_image_bytes
+from subscriptions.receipts import normalize_phone
 
 logger = logging.getLogger(__name__)
 
@@ -829,13 +829,12 @@ def submit_service_receipt(
         else:
             raise ValueError("SEVERAL_INVITES")
 
-    ocr_text = ocr_image_bytes(image_bytes, filename=filename)
+    from subscriptions.service import _parse_receipt_or_empty, _safe_receipt_filename
+
+    filename = _safe_receipt_filename(filename, default="receipt.pdf")
+    parsed = _parse_receipt_or_empty(image_bytes, filename)
+    ocr_text = parsed.ocr_text or ""
     cfg = AppSettings.load()
-    parsed = analyze_receipt_text(
-        ocr_text,
-        expected_phone=cfg.service_payee_phone,
-        expected_name=cfg.service_payee_name,
-    )
     # Also accept short form «Григорьев Д.В.»
     phone_ok = normalize_phone(parsed.recipient_phone) == normalize_phone(
         cfg.service_payee_phone
@@ -858,7 +857,7 @@ def submit_service_receipt(
         details_match=details_match,
     )
     media_name = f"{user.max_user_id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
-    receipt.image.save(Path(media_name).name, ContentFile(image_bytes), save=False)
+    receipt.image.save(media_name, ContentFile(image_bytes), save=False)
     receipt.save()
     ActivityLog.objects.create(
         user=user,

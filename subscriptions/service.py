@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
@@ -17,11 +18,49 @@ from database.models import (
     PaymentReceipt,
     ReceiptStatus,
 )
-from subscriptions.receipts import analyze_receipt_text, ocr_image_bytes
+from subscriptions.receipts import ReceiptParseResult, analyze_receipt_text, ocr_image_bytes
 
 logger = logging.getLogger(__name__)
 
 DAYS_PER_MONTH = 30
+
+
+def _safe_receipt_filename(filename: str, *, default: str = "receipt.bin") -> str:
+    base = Path(filename or default).name.strip() or default
+    safe = re.sub(r"[^\w.\-]+", "_", base, flags=re.UNICODE).strip("._") or default
+    return safe[:120]
+
+
+def _parse_receipt_or_empty(image_bytes: bytes, filename: str) -> ReceiptParseResult:
+    """OCR + LLM parse; on any failure return empty result for manual admin review."""
+    try:
+        ocr_text = ocr_image_bytes(image_bytes, filename=filename) or ""
+    except Exception:
+        logger.exception("OCR failed for %s — saving receipt for manual review", filename)
+        ocr_text = ""
+    if not ocr_text.strip():
+        return ReceiptParseResult(
+            amount=None,
+            transfer_date=None,
+            recipient_phone="",
+            recipient_name="",
+            ocr_text="",
+            notes="ocr_empty_or_failed",
+            details_match=False,
+        )
+    try:
+        return analyze_receipt_text(ocr_text)
+    except Exception:
+        logger.exception("Receipt text analysis failed — saving for manual review")
+        return ReceiptParseResult(
+            amount=None,
+            transfer_date=None,
+            recipient_phone="",
+            recipient_name="",
+            ocr_text=ocr_text[:8000],
+            notes="parse_failed",
+            details_match=False,
+        )
 
 
 def period_from_amount(amount: Decimal, price: Decimal) -> tuple[int, int]:
@@ -106,8 +145,11 @@ def can_use_features(user: BotUser) -> bool:
 
 
 def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.jpg") -> PaymentReceipt:
-    ocr_text = ocr_image_bytes(image_bytes, filename=filename)
-    parsed = analyze_receipt_text(ocr_text)
+    """Always create a pending receipt + admin task, even if OCR/AI fails."""
+    if not image_bytes:
+        raise ValueError("Пустой файл чека")
+    filename = _safe_receipt_filename(filename, default="receipt.pdf")
+    parsed = _parse_receipt_or_empty(image_bytes, filename)
     cfg = AppSettings.load()
     months, days = (0, 0)
     if parsed.amount:
@@ -129,9 +171,8 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
         ai_notes=parsed.notes,
         details_match=parsed.details_match,
     )
-    # store file
-    media_name = f"receipts/{user.max_user_id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
-    receipt.image.save(Path(media_name).name, ContentFile(image_bytes), save=False)
+    media_name = f"{user.max_user_id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+    receipt.image.save(media_name, ContentFile(image_bytes), save=False)
     receipt.save()
 
     ActivityLog.objects.create(
@@ -144,7 +185,9 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
     try:
         from panel.admin_tasks import task_payment_receipt
 
-        task_payment_receipt(receipt)
+        task = task_payment_receipt(receipt)
+        if task is None:
+            logger.error("Admin task was not created for payment receipt %s", receipt.id)
     except Exception:
         logger.exception("Failed to create admin task for payment receipt")
     return receipt

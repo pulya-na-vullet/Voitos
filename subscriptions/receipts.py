@@ -62,19 +62,35 @@ class ReceiptParseResult:
 
 
 def guess_ocr_mime(file_bytes: bytes, filename: str = "") -> str:
-    """Return Yandex OCR mimeType: JPEG / PNG / PDF."""
+    """Return canonical Yandex OCR mimeType (lowercase): jpeg / png / pdf."""
     lower = (filename or "").lower()
     if file_bytes[:4] == b"%PDF" or lower.endswith(".pdf"):
-        return "PDF"
+        return "pdf"
     if file_bytes[:8] == b"\x89PNG\r\n\x1a\n" or lower.endswith(".png"):
-        return "PNG"
-    return "JPEG"
+        return "png"
+    return "jpeg"
+
+
+def _ocr_mime_candidates(mime: str) -> list[str]:
+    """Yandex docs use lowercase; some accounts still accept uppercase."""
+    m = (mime or "jpeg").lower()
+    variants = [m, m.upper()]
+    # preserve order, unique
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in variants:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
 
 
 def ocr_image_bytes(image_bytes: bytes, filename: str = "") -> str:
+    """OCR receipt bytes. Returns empty string when recognition fails (never blocks submit)."""
     cfg = get_runtime_settings()
     if not cfg.yandex_api_key:
-        raise RuntimeError("Yandex API Key не настроен")
+        logger.warning("Yandex API Key не настроен — OCR пропущен")
+        return ""
 
     mime = guess_ocr_mime(image_bytes, filename)
     b64 = base64.b64encode(image_bytes).decode("ascii")
@@ -84,37 +100,45 @@ def ocr_image_bytes(image_bytes: bytes, filename: str = "") -> str:
         "x-folder-id": cfg.yandex_folder_id,
     }
 
-    # Prefer modern OCR endpoint, fallback to Vision batchAnalyze (images only)
-    try:
-        resp = requests.post(
-            OCR_URL,
-            headers=headers,
-            json={
-                "mimeType": mime,
-                "languageCodes": ["ru", "en"],
-                "model": "page",
-                "content": b64,
-            },
-            timeout=90,
-        )
-        if resp.status_code < 400:
-            data = resp.json()
-            text = _extract_ocr_v1_text(data)
-            if text.strip():
-                try:
-                    from ai.usage import log_ocr_call
+    # Prefer modern OCR endpoint; try mime variants (pdf/jpeg/png)
+    for mime_try in _ocr_mime_candidates(mime):
+        try:
+            resp = requests.post(
+                OCR_URL,
+                headers=headers,
+                json={
+                    "mimeType": mime_try,
+                    "languageCodes": ["ru", "en"],
+                    "model": "page",
+                    "content": b64,
+                },
+                timeout=90,
+            )
+            if resp.status_code < 400:
+                data = resp.json()
+                text = _extract_ocr_v1_text(data)
+                if text.strip():
+                    try:
+                        from ai.usage import log_ocr_call
 
-                    log_ocr_call(mime=mime, filename=filename)
-                except Exception:
-                    logger.exception("Failed to record OCR usage")
-                return text
-        else:
-            logger.warning("OCR v1 failed %s: %s", resp.status_code, resp.text[:300])
-    except Exception:
-        logger.exception("OCR v1 request failed")
+                        log_ocr_call(mime=mime_try, filename=filename)
+                    except Exception:
+                        logger.exception("Failed to record OCR usage")
+                    return text
+            else:
+                logger.warning(
+                    "OCR v1 failed mime=%s %s: %s",
+                    mime_try,
+                    resp.status_code,
+                    resp.text[:300],
+                )
+        except Exception:
+            logger.exception("OCR v1 request failed mime=%s", mime_try)
 
-    if mime == "PDF":
-        raise RuntimeError("Не удалось распознать PDF-чек. Пришлите ещё раз или скрин перевода.")
+    # Vision batchAnalyze supports images only
+    if mime == "pdf":
+        logger.warning("PDF OCR returned no text for %s — admin will review manually", filename)
+        return ""
 
     payload = {
         "folderId": cfg.yandex_folder_id,
@@ -130,18 +154,23 @@ def ocr_image_bytes(image_bytes: bytes, filename: str = "") -> str:
             }
         ],
     }
-    resp = requests.post(VISION_URL, headers=headers, json=payload, timeout=60)
-    if resp.status_code >= 400:
-        logger.error("Vision OCR error %s: %s", resp.status_code, resp.text[:400])
-        resp.raise_for_status()
-    text = _extract_vision_text(resp.json())
     try:
-        from ai.usage import log_ocr_call
+        resp = requests.post(VISION_URL, headers=headers, json=payload, timeout=60)
+        if resp.status_code >= 400:
+            logger.error("Vision OCR error %s: %s", resp.status_code, resp.text[:400])
+            return ""
+        text = _extract_vision_text(resp.json())
+        if text.strip():
+            try:
+                from ai.usage import log_ocr_call
 
-        log_ocr_call(mime=mime, filename=filename)
+                log_ocr_call(mime=mime, filename=filename)
+            except Exception:
+                logger.exception("Failed to record OCR usage")
+        return text
     except Exception:
-        logger.exception("Failed to record OCR usage")
-    return text
+        logger.exception("Vision OCR request failed")
+        return ""
 
 
 def _extract_ocr_v1_text(data: dict[str, Any]) -> str:

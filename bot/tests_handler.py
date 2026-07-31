@@ -76,6 +76,6 @@ class ReceiptAttachmentRoutingTests(SimpleTestCase):
         self.assertIsNone(_find_receipt_file(message)[0])
 
     def test_guess_ocr_mime_pdf(self):
-        self.assertEqual(guess_ocr_mime(b"%PDF-1.4...", "cheque.pdf"), "PDF")
-        self.assertEqual(guess_ocr_mime(b"\x89PNG\r\n\x1a\nxxxx", "a.png"), "PNG")
-        self.assertEqual(guess_ocr_mime(b"\xff\xd8\xff", "a.jpg"), "JPEG")
+        self.assertEqual(guess_ocr_mime(b"%PDF-1.4...", "cheque.pdf"), "pdf")
+        self.assertEqual(guess_ocr_mime(b"\x89PNG\r\n\x1a\nxxxx", "a.png"), "png")
+        self.assertEqual(guess_ocr_mime(b"\xff\xd8\xff", "a.jpg"), "jpeg")

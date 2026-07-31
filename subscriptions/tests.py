@@ -7,11 +7,13 @@ from django.test import TestCase
 from django.utils import timezone
 
 from database.models import AccessState, BotUser, PaymentReceipt, ReceiptStatus
+from database.models import AdminTask, AdminTaskKind, AdminTaskStatus
 from subscriptions.receipts import names_match, normalize_phone
 from subscriptions.service import (
     approve_receipt,
     period_from_amount,
     reject_receipt,
+    submit_receipt,
 )
 
 
@@ -156,3 +158,52 @@ class SubscriptionTests(TestCase):
         self.user.refresh_from_db()
         self.assertIsNotNone(self.user.subscription_until)
         self.assertEqual(self.user.access_state(), AccessState.ACTIVE)
+
+    def test_submit_receipt_saves_when_ocr_fails(self):
+        from unittest.mock import patch
+
+        pdf = b"%PDF-1.4 fake cheque content"
+        with patch("subscriptions.service.ocr_image_bytes", return_value=""):
+            receipt = submit_receipt(
+                self.user,
+                pdf,
+                filename="document31.07.26 12_17_17.724.pdf",
+            )
+        self.assertEqual(receipt.status, ReceiptStatus.PENDING)
+        self.assertFalse(receipt.details_match)
+        self.assertTrue(receipt.image.name)
+        task = AdminTask.objects.filter(
+            kind=AdminTaskKind.PAYMENT_RECEIPT,
+            source_id=receipt.id,
+            status=AdminTaskStatus.OPEN,
+        ).first()
+        self.assertIsNotNone(task)
+
+    def test_pick_subscription_creates_receipt_and_task(self):
+        import base64
+        from unittest.mock import patch
+
+        from bot.pipeline import MessagePipeline
+        from database.models import PendingAction
+
+        pending, _ = PendingAction.objects.get_or_create(user=self.user)
+        pending.pending_kind = "service_invite_pick"
+        pending.pending_payload = {
+            "image_b64": base64.b64encode(b"%PDF-1.4 sub").decode("ascii"),
+            "filename": "cheque.pdf",
+        }
+        pending.save()
+        with patch("subscriptions.service.ocr_image_bytes", return_value=""):
+            reply = MessagePipeline()._pick_service_invite(self.user, "1", pending)
+        self.assertIn("отправлен на проверку администратору", reply.lower())
+        self.assertEqual(PaymentReceipt.objects.filter(user=self.user).count(), 1)
+        receipt = PaymentReceipt.objects.get(user=self.user)
+        self.assertTrue(
+            AdminTask.objects.filter(
+                kind=AdminTaskKind.PAYMENT_RECEIPT,
+                source_id=receipt.id,
+                status=AdminTaskStatus.OPEN,
+            ).exists()
+        )
+        pending.refresh_from_db()
+        self.assertEqual(pending.pending_kind, "")

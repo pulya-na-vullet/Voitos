@@ -288,20 +288,13 @@ class UpdateHandler:
             intent="receipt_submit",
             meta={"receipt_id": receipt.id},
         )
-        if receipt.details_match:
-            msg = (
-                f"Чек получен и отправлен администратору на проверку.\n"
-                f"Сумма: {receipt.amount or 'не распознана'} ₽"
-                f"{', дата: ' + receipt.transfer_date.strftime('%d.%m.%Y') if receipt.transfer_date else ''}.\n"
-                f"Предварительно: ~{receipt.period_label()} подписки "
-                f"(точный срок подтвердит администратор)."
-            )
-        else:
-            msg = (
-                "Чек получен, но реквизиты распознаны неуверенно "
-                "(телефон/ФИО/дата). Администратор проверит вручную.\n\n"
-                + payment_help_text()
-            )
+        amount_line = f"Сумма: {receipt.amount or 'будет проверена администратором'} ₽"
+        if receipt.transfer_date:
+            amount_line += f", дата: {receipt.transfer_date.strftime('%d.%m.%Y')}"
+        msg = (
+            "Ваш чек отправлен на проверку администратору.\n"
+            f"{amount_line}."
+        )
         self._reply(user, msg)
         ChatMessage.objects.create(
             user=user,
