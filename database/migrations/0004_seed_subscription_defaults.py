@@ -18,9 +18,12 @@ def seed(apps, schema_editor):
         cfg.grace_days = 2
     cfg.allowed_max_user_id = ""
     cfg.save()
-    until = timezone.now() + timedelta(days=30)
+    # Existing users without a paid subscription get a short grace window to pay —
+    # do NOT gift a free month of full access.
+    grace_days = cfg.grace_days or 2
+    grace_until = timezone.now() + timedelta(days=grace_days)
     BotUser.objects.filter(subscription_until__isnull=True).update(
-        subscription_until=until, grace_until=None
+        subscription_until=None, grace_until=grace_until
     )
 
 

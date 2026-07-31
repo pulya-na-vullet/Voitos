@@ -142,6 +142,40 @@ def reject_receipt(receipt: PaymentReceipt, comment: str = "") -> PaymentReceipt
     return receipt
 
 
+def revoke_unpaid_subscriptions() -> int:
+    """
+    Clear gifted/active subscriptions for users without an approved receipt.
+    Opens a grace window so the bot asks for payment instead of silent full access.
+
+    Safe to call on every startup: only touches unpaid users who still have
+    an active subscription_until in the future.
+    """
+    from datetime import timedelta
+
+    cfg = AppSettings.load()
+    grace_days = cfg.grace_days or 2
+    now = timezone.now()
+    grace_until = now + timedelta(days=grace_days)
+    paid_ids = set(
+        PaymentReceipt.objects.filter(status=ReceiptStatus.APPROVED).values_list(
+            "user_id", flat=True
+        )
+    )
+    updated = 0
+    qs = BotUser.objects.exclude(id__in=paid_ids).filter(subscription_until__gt=now)
+    for user in qs.iterator():
+        user.subscription_until = None
+        user.grace_until = grace_until
+        user.last_payment_notice_at = None
+        user.save(
+            update_fields=["subscription_until", "grace_until", "last_payment_notice_at"]
+        )
+        updated += 1
+    if updated:
+        logger.info("Revoked unpaid free access for %s user(s)", updated)
+    return updated
+
+
 def approved_user_message(receipt: PaymentReceipt) -> str:
     until = receipt.user.subscription_until
     until_s = timezone.localtime(until).strftime("%d.%m.%Y") if until else "—"

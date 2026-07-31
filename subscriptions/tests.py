@@ -60,3 +60,35 @@ class SubscriptionTests(TestCase):
         reject_receipt(receipt, comment="не тот получатель")
         receipt.refresh_from_db()
         self.assertEqual(receipt.status, ReceiptStatus.REJECTED)
+
+    def test_unpaid_user_does_not_keep_free_month(self):
+        """Users without approved receipt must not stay on gifted full access."""
+        from subscriptions.service import revoke_unpaid_subscriptions
+
+        self.user.subscription_until = timezone.now() + timedelta(days=30)
+        self.user.grace_until = None
+        self.user.save()
+        self.assertEqual(self.user.access_state(), AccessState.ACTIVE)
+
+        n = revoke_unpaid_subscriptions()
+        self.user.refresh_from_db()
+        self.assertEqual(n, 1)
+        self.assertIsNone(self.user.subscription_until)
+        self.assertEqual(self.user.access_state(), AccessState.GRACE)
+        self.assertTrue(self.user.has_feature_access())
+
+    def test_paid_user_keeps_subscription_after_revoke_pass(self):
+        from subscriptions.service import revoke_unpaid_subscriptions
+
+        self.user.subscription_until = timezone.now() + timedelta(days=20)
+        self.user.save()
+        PaymentReceipt.objects.create(
+            user=self.user,
+            amount=Decimal("100"),
+            status=ReceiptStatus.APPROVED,
+            months_granted=1,
+        )
+        revoke_unpaid_subscriptions()
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.subscription_until)
+        self.assertEqual(self.user.access_state(), AccessState.ACTIVE)
