@@ -18,6 +18,7 @@ from database.models import (
     ReceiptStatus,
     ServiceCampaign,
     ServiceCategory,
+    ServiceGroup,
     ServiceInvite,
     ServiceReceipt,
 )
@@ -73,9 +74,11 @@ def format_collections_for_user(user: BotUser) -> str:
         status = "оплачено" if inv.status == InviteStatus.PAID else "ожидает оплаты"
         if inv.status == InviteStatus.DECLINED:
             status = "отказ"
+        group_name = c.group.name if c.group_id else (c.locality or "")
+        extra = f"{group_name}\n" if group_name else ""
         lines.append(
             f"\n{c.get_category_display()} — {c.title}\n"
-            f"{c.locality}\n"
+            f"{extra}"
             f"{campaign_progress_line(c)}\n"
             f"Ваш взнос: {inv.amount_due:.0f} ₽ — {status}"
         )
@@ -88,9 +91,11 @@ def create_campaign(
     *,
     category: str,
     title: str,
-    description: str,
-    locality: str,
+    description: str = "",
+    locality: str = "",
     total_amount: Decimal,
+    amount_per_user: Decimal | None = None,
+    group: ServiceGroup | None = None,
 ) -> ServiceCampaign:
     if category not in ServiceCategory.values:
         raise ValueError("Неизвестная категория")
@@ -98,13 +103,38 @@ def create_campaign(
     date_s = timezone.localtime().strftime("%d.%m.%Y")
     if "от " not in title.lower():
         title = f"{title} от {date_s}"
+    if group and not locality:
+        locality = group.name
     return ServiceCampaign.objects.create(
         category=category,
         title=title,
         description=description.strip(),
-        locality=locality.strip(),
+        locality=(locality or "").strip(),
+        group=group,
         total_amount=total_amount,
+        amount_per_user=amount_per_user or Decimal("0"),
         status=CampaignStatus.DRAFT,
+    )
+
+
+def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
+    date_s = timezone.localtime(campaign.created_at).strftime("%d.%m.%Y")
+    group_line = ""
+    if campaign.group_id:
+        group_line = f"Группа: {campaign.group.name}\n"
+    desc = f"{campaign.description}\n" if campaign.description else ""
+    return (
+        f"Начат сбор: {campaign.get_category_display()}\n"
+        f"{campaign.title}\n"
+        f"{desc}"
+        f"{group_line}"
+        f"Дата: {date_s}\n"
+        f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
+        f"Вам нужно перевести: {amount_per_user:.0f} ₽\n\n"
+        f"Реквизиты:\n{service_payment_requisites()}\n\n"
+        f"{campaign_progress_line(campaign)}\n\n"
+        "Пришлите фото чека о переводе в этот чат.\n"
+        "Список сборов — команда «сборы»."
     )
 
 
@@ -114,9 +144,11 @@ def offer_to_users(
     amount_per_user: Decimal,
     send_fn=None,
 ) -> int:
-    """Create invites and optionally notify users via send_fn(user, text)."""
+    """Create invites and notify users via send_fn(user, text)."""
     cfg = AppSettings.load()
-    users = BotUser.objects.filter(id__in=user_ids, locality__iexact=campaign.locality)
+    users = BotUser.objects.filter(id__in=user_ids)
+    campaign.amount_per_user = amount_per_user
+    campaign.save(update_fields=["amount_per_user"])
     sent = 0
     for user in users:
         invite, created = ServiceInvite.objects.get_or_create(
@@ -136,18 +168,7 @@ def offer_to_users(
             invite.amount_due = amount_per_user
             invite.save(update_fields=["amount_due"])
 
-        text = (
-            f"Сервисное мероприятие: {campaign.get_category_display()}\n"
-            f"{campaign.title}\n"
-            f"{campaign.description}\n\n"
-            f"Населённый пункт: {campaign.locality}\n"
-            f"Общая сумма сбора: {campaign.total_amount:.0f} ₽\n"
-            f"Ваш взнос: {amount_per_user:.0f} ₽\n\n"
-            f"Реквизиты:\n{service_payment_requisites()}\n\n"
-            f"{campaign_progress_line(campaign)}\n\n"
-            "Пришлите фото чека о переводе в этот чат.\n"
-            "Список сборов — команда «сборы»."
-        )
+        text = offer_message(campaign, amount_per_user)
         ActivityLog.objects.create(
             user=user,
             kind=ActivityKind.SERVICE_OFFER,
@@ -170,6 +191,36 @@ def offer_to_users(
     if warn:
         logger.warning(warn)
     return sent
+
+
+def launch_campaign_to_group(
+    *,
+    category: str,
+    title: str,
+    description: str,
+    group: ServiceGroup,
+    total_amount: Decimal,
+    amount_per_user: Decimal,
+    send_fn=None,
+) -> tuple[ServiceCampaign, int]:
+    """Create campaign for a group and broadcast to all members."""
+    members = list(group.members.values_list("id", flat=True))
+    if not members:
+        raise ValueError("В группе нет участников")
+    if amount_per_user <= 0:
+        raise ValueError("Укажите сумму с участника")
+    if total_amount <= 0:
+        raise ValueError("Укажите общую сумму")
+    campaign = create_campaign(
+        category=category,
+        title=title,
+        description=description,
+        group=group,
+        total_amount=total_amount,
+        amount_per_user=amount_per_user,
+    )
+    sent = offer_to_users(campaign, members, amount_per_user, send_fn=send_fn)
+    return campaign, sent
 
 
 def open_invites_for_user(user: BotUser) -> list[ServiceInvite]:

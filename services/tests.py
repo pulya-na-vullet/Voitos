@@ -8,21 +8,23 @@ from database.models import (
     BotUser,
     CampaignStatus,
     InviteStatus,
+    PendingAction,
     ProfileStatus,
     ServiceCategory,
+    ServiceGroup,
 )
-from bot.pipeline import MessagePipeline
 from bot.registration import handle_registration_step, start_registration
-from database.models import PendingAction
 from services.ranking import citizen_stats, rank_label
-from services.service import create_campaign, format_collections_for_user, offer_to_users
+from services.service import (
+    format_collections_for_user,
+    launch_campaign_to_group,
+)
 
 
 class RegistrationTests(TestCase):
     def setUp(self) -> None:
         self.user = BotUser.objects.create(max_user_id="u1")
         self.pending, _ = PendingAction.objects.get_or_create(user=self.user)
-        self.pipeline = MessagePipeline()
 
     def test_registration_flow(self):
         msg = start_registration(self.user, self.pending)
@@ -50,28 +52,40 @@ class ServiceCampaignTests(TestCase):
             locality="Казань",
             profile_status=ProfileStatus.VERIFIED,
         )
+        self.group = ServiceGroup.objects.create(name="ул. А")
+        self.group.members.add(self.user)
 
-    def test_create_and_offer(self):
-        campaign = create_campaign(
+    def test_launch_to_group(self):
+        campaign, sent = launch_campaign_to_group(
             category=ServiceCategory.SNOW,
             title="Чистка снега",
-            description="ул. А",
-            locality="Казань",
+            description="двор",
+            group=self.group,
             total_amount=Decimal("10000"),
+            amount_per_user=Decimal("500"),
         )
-        self.assertIn("от ", campaign.title)
-        sent = offer_to_users(campaign, [self.user.id], Decimal("500"))
         self.assertEqual(sent, 1)
-        campaign.refresh_from_db()
+        self.assertIn("от ", campaign.title)
         self.assertEqual(campaign.status, CampaignStatus.ACTIVE)
+        self.assertEqual(campaign.group_id, self.group.id)
         inv = campaign.invites.get(user=self.user)
         self.assertEqual(inv.amount_due, Decimal("500"))
-        self.assertEqual(inv.status, InviteStatus.OFFERED)
 
         text = format_collections_for_user(self.user)
         self.assertIn("Чистка снега", text)
         self.assertIn("500", text)
-        self.assertIn("[", text)
+
+    def test_launch_empty_group_fails(self):
+        empty = ServiceGroup.objects.create(name="пусто")
+        with self.assertRaises(ValueError):
+            launch_campaign_to_group(
+                category=ServiceCategory.SNOW,
+                title="Снег",
+                description="",
+                group=empty,
+                total_amount=Decimal("1000"),
+                amount_per_user=Decimal("100"),
+            )
 
     def test_rank_labels(self):
         self.assertEqual(rank_label(85), "Образцовый гражданин")
@@ -80,14 +94,14 @@ class ServiceCampaignTests(TestCase):
         self.assertEqual(rank_label(10), "Неактивный гражданин")
 
     def test_citizen_stats(self):
-        campaign = create_campaign(
+        campaign, _ = launch_campaign_to_group(
             category=ServiceCategory.ROAD,
             title="Ремонт",
             description="",
-            locality="Казань",
+            group=self.group,
             total_amount=Decimal("5000"),
+            amount_per_user=Decimal("100"),
         )
-        offer_to_users(campaign, [self.user.id], Decimal("100"))
         inv = campaign.invites.get()
         inv.status = InviteStatus.PAID
         inv.amount_paid = Decimal("100")

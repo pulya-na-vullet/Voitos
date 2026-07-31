@@ -327,12 +327,50 @@ class PaymentReceipt(models.Model):
         return max(0, int(Decimal(self.amount) // Decimal(price)))
 
 
+class ServiceGroup(models.Model):
+    """Admin-defined group of residents for service campaign broadcasts."""
+
+    name = models.CharField("Название группы", max_length=255)
+    description = models.TextField(blank=True, default="")
+    members = models.ManyToManyField(
+        BotUser, blank=True, related_name="service_groups"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Группа жителей"
+        verbose_name_plural = "Группы жителей"
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def member_count(self) -> int:
+        return self.members.count()
+
+
 class ServiceCampaign(models.Model):
     category = models.CharField(max_length=32, choices=ServiceCategory.choices)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
-    locality = models.CharField("Населённый пункт", max_length=255)
+    locality = models.CharField("Населённый пункт", max_length=255, blank=True, default="")
+    group = models.ForeignKey(
+        "ServiceGroup",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="campaigns",
+        verbose_name="Группа",
+    )
     total_amount = models.DecimalField("Общая сумма, ₽", max_digits=12, decimal_places=2)
+    amount_per_user = models.DecimalField(
+        "Сумма с участника, ₽",
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0"),
+    )
     status = models.CharField(
         max_length=16,
         choices=CampaignStatus.choices,

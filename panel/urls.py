@@ -22,6 +22,7 @@ urlpatterns = [
     path("receipts/<int:pk>/reject/", views.receipt_reject, name="receipt_reject"),
     path("services/", views.services_home, name="services"),
     path("services/ranking/", views.services_ranking, name="services_ranking"),
+    path("services/groups/<int:pk>/", views.service_group_edit, name="service_group_edit"),
     path(
         "services/campaigns/<int:pk>/",
         views.service_campaign_detail,

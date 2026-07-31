@@ -35,6 +35,7 @@ from database.models import (
     Reminder,
     ServiceCampaign,
     ServiceCategory,
+    ServiceGroup,
     ServiceReceipt,
     TaskItem,
 )
@@ -43,7 +44,7 @@ from services.ranking import citizen_stats, ranking_list
 from services.service import (
     approve_service_receipt,
     approved_service_message,
-    create_campaign,
+    launch_campaign_to_group,
     offer_to_users,
     reject_service_receipt,
     rejected_service_message,
@@ -515,8 +516,55 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@require_http_methods(["GET", "POST"])
 def services_home(request: HttpRequest) -> HttpResponse:
     cfg = AppSettings.load()
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "create_group":
+            name = request.POST.get("name", "").strip()
+            if not name:
+                messages.error(request, "Укажите название группы")
+            else:
+                group = ServiceGroup.objects.create(
+                    name=name,
+                    description=request.POST.get("description", "").strip(),
+                )
+                messages.success(request, f"Группа «{group.name}» создана. Добавьте участников.")
+                return redirect("panel:service_group_edit", pk=group.id)
+        elif action == "launch":
+            group_id = request.POST.get("group_id")
+            group = get_object_or_404(ServiceGroup, pk=group_id)
+            category = request.POST.get("category", "").strip()
+            try:
+                total = Decimal(request.POST.get("total_amount") or "0")
+                per_user = Decimal(request.POST.get("amount_per_user") or "0")
+            except (InvalidOperation, ValueError):
+                total, per_user = Decimal("0"), Decimal("0")
+            try:
+                campaign, sent = launch_campaign_to_group(
+                    category=category,
+                    title=request.POST.get("title", "").strip()
+                    or dict(ServiceCategory.choices).get(category, "Сбор"),
+                    description=request.POST.get("description", "").strip(),
+                    group=group,
+                    total_amount=total,
+                    amount_per_user=per_user,
+                    send_fn=_notify_user,
+                )
+                messages.success(
+                    request,
+                    f"Сбор запущен для группы «{group.name}»: разослано {sent} сообщ.",
+                )
+                tax_warn = AppSettings.load().tax_limit_warning()
+                if tax_warn:
+                    messages.warning(request, tax_warn)
+                return redirect("panel:service_campaign_detail", pk=campaign.id)
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect("panel:services")
+        return redirect("panel:services")
+
     categories = []
     for value, label in ServiceCategory.choices:
         qs = ServiceCampaign.objects.filter(category=value)
@@ -531,16 +579,53 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 ).count(),
             }
         )
+    groups = ServiceGroup.objects.prefetch_related("members").all()
+    recent = ServiceCampaign.objects.select_related("group").all()[:20]
     return render(
         request,
         "panel/services_home.html",
         {
             "categories": categories,
+            "groups": groups,
+            "recent_campaigns": recent,
+            "category_choices": ServiceCategory.choices,
             "tax_warning": cfg.tax_limit_warning(),
             "cfg": cfg,
             "pending_service": ServiceReceipt.objects.filter(
                 status=ReceiptStatus.PENDING
             ).count(),
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
+    group = get_object_or_404(ServiceGroup, pk=pk)
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "delete":
+            name = group.name
+            group.delete()
+            messages.success(request, f"Группа «{name}» удалена")
+            return redirect("panel:services")
+        group.name = request.POST.get("name", group.name).strip() or group.name
+        group.description = request.POST.get("description", "").strip()
+        group.save()
+        ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
+        group.members.set(BotUser.objects.filter(id__in=ids))
+        messages.success(request, "Группа сохранена")
+        return redirect("panel:service_group_edit", pk=pk)
+
+    member_ids = set(group.members.values_list("id", flat=True))
+    users = BotUser.objects.all().order_by("real_name", "display_name")
+    return render(
+        request,
+        "panel/service_group_edit.html",
+        {
+            "group": group,
+            "users": users,
+            "member_ids": member_ids,
         },
     )
 
@@ -565,70 +650,25 @@ def services_category(request: HttpRequest, category: str) -> HttpResponse:
 
 
 @login_required
-@require_http_methods(["GET", "POST"])
 def service_campaign_create(request: HttpRequest, category: str) -> HttpResponse:
-    if category not in ServiceCategory.values:
-        return redirect("panel:services")
-    label = dict(ServiceCategory.choices)[category]
-    localities = (
-        BotUser.objects.exclude(locality="")
-        .values_list("locality", flat=True)
-        .distinct()
-        .order_by("locality")
-    )
-    if request.method == "POST":
-        try:
-            total = Decimal(request.POST.get("total_amount") or "0")
-        except (InvalidOperation, ValueError):
-            total = Decimal("0")
-        if total <= 0:
-            messages.error(request, "Укажите общую сумму сбора")
-            return redirect("panel:service_campaign_create", category=category)
-        locality = request.POST.get("locality", "").strip()
-        if not locality:
-            messages.error(request, "Укажите населённый пункт")
-            return redirect("panel:service_campaign_create", category=category)
-        campaign = create_campaign(
-            category=category,
-            title=request.POST.get("title", "").strip() or label,
-            description=request.POST.get("description", "").strip(),
-            locality=locality,
-            total_amount=total,
-        )
-        messages.success(request, "Мероприятие создано. Выберите жителей и отправьте предложение.")
-        return redirect("panel:service_campaign_detail", pk=campaign.id)
-    return render(
-        request,
-        "panel/service_campaign_form.html",
-        {
-            "category": category,
-            "category_label": label,
-            "localities": localities,
-        },
-    )
+    """Legacy URL — campaigns are launched from /services/ to a group."""
+    return redirect("panel:services")
 
 
 @login_required
 @require_http_methods(["GET", "POST"])
 def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    campaign = get_object_or_404(ServiceCampaign, pk=pk)
-    users = BotUser.objects.filter(locality__iexact=campaign.locality).order_by("real_name")
+    campaign = get_object_or_404(ServiceCampaign.objects.select_related("group"), pk=pk)
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "send":
-            try:
-                amount = Decimal(request.POST.get("amount_per_user") or "0")
-            except (InvalidOperation, ValueError):
-                amount = Decimal("0")
-            ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
+        if action == "resend" and campaign.group_id:
+            amount = campaign.amount_per_user or Decimal("0")
+            ids = list(campaign.group.members.values_list("id", flat=True))
             if amount <= 0 or not ids:
-                messages.error(request, "Укажите сумму на человека и выберите пользователей")
+                messages.error(request, "Нет группы или суммы для рассылки")
             else:
                 sent = offer_to_users(campaign, ids, amount, send_fn=_notify_user)
-                messages.success(request, f"Предложение отправлено: {sent} польз.")
-                tax_warn = AppSettings.load().tax_limit_warning()
-                if tax_warn:
-                    messages.warning(request, tax_warn)
+                messages.success(request, f"Повторная рассылка: {sent} сообщ.")
             return redirect("panel:service_campaign_detail", pk=pk)
         if action == "close":
             campaign.status = CampaignStatus.CLOSED
@@ -647,7 +687,6 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "panel/service_campaign_detail.html",
         {
             "campaign": campaign,
-            "users": users,
             "invites": campaign.invites.select_related("user").all(),
             "receipts": campaign.receipts.select_related("user", "invite").all()[:200],
             "collected": paid,

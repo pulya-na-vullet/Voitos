@@ -11,6 +11,7 @@ from database.models import (
     PendingAction,
     Reminder,
     ServiceCampaign,
+    ServiceGroup,
     ServiceInvite,
     ServiceReceipt,
     TaskItem,
@@ -55,10 +56,16 @@ class PaymentReceiptAdmin(admin.ModelAdmin):
     list_filter = ("status", "details_match")
 
 
+@admin.register(ServiceGroup)
+class ServiceGroupAdmin(admin.ModelAdmin):
+    list_display = ("name", "created_at", "updated_at")
+    filter_horizontal = ("members",)
+
+
 @admin.register(ServiceCampaign)
 class ServiceCampaignAdmin(admin.ModelAdmin):
-    list_display = ("title", "category", "locality", "total_amount", "status", "created_at")
-    list_filter = ("category", "status", "locality")
+    list_display = ("title", "category", "group", "total_amount", "amount_per_user", "status", "created_at")
+    list_filter = ("category", "status")
 
 
 @admin.register(ServiceInvite)

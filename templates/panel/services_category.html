@@ -4,8 +4,7 @@
 <div class="topbar">
   <h1>{{ category_label }}</h1>
   <div style="display:flex; gap:8px;">
-    <a class="btn secondary small" href="{% url 'panel:services' %}">← Все категории</a>
-    <a class="btn small" href="{% url 'panel:service_campaign_create' category %}">Новое мероприятие</a>
+    <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
   </div>
 </div>
 {% if tax_warning %}
