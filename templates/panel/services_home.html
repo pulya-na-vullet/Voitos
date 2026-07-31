@@ -121,13 +121,18 @@
 <div class="card" style="margin-bottom:16px;">
   <h3 style="margin-top:0;">Последние сборы</h3>
   <table>
-    <thead><tr><th>Мероприятие</th><th>Группа</th><th>Сумма</th><th>Сбор</th><th>Этап</th><th></th></tr></thead>
+    <thead><tr><th>Мероприятие</th><th>Группа</th><th>Собрано</th><th>Сбор</th><th>Этап</th><th></th></tr></thead>
     <tbody>
     {% for item in recent_campaigns %}
       <tr>
         <td>{{ item.get_category_display }} — {{ item.title }}</td>
         <td>{% if item.group %}{{ item.group.name }}{% else %}{{ item.locality|default:"—" }}{% endif %}</td>
-        <td class="mono">{{ item.total_amount }} ₽</td>
+        <td style="min-width:160px;">
+          <div class="mono" style="margin-bottom:4px;">{{ item.collected_amount }} / {{ item.total_amount }} ₽ · {{ item.progress_percent }}%</div>
+          <div style="height:8px; background:var(--bg-soft); border-radius:999px; overflow:hidden;">
+            <div style="height:100%; width:{{ item.progress_percent }}%; background:var(--accent-2);"></div>
+          </div>
+        </td>
         <td><span class="badge {% if item.status == 'active' %}ok{% elif item.status == 'closed' %}bad{% endif %}">{{ item.get_status_display }}</span></td>
         <td><span class="badge">{{ item.get_work_stage_display }}</span></td>
         <td><a class="btn small" href="{% url 'panel:service_campaign_detail' item.id %}">Открыть</a></td>

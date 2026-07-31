@@ -15,9 +15,9 @@
     <thead>
       <tr>
         <th>Мероприятие</th>
-        <th>Нас. пункт</th>
-        <th>Сумма</th>
-        <th>Статус</th>
+        <th>Группа / нас. пункт</th>
+        <th>Собрано</th>
+        <th>Статус / этап</th>
         <th>Создано</th>
         <th></th>
       </tr>
@@ -26,9 +26,17 @@
     {% for item in campaigns %}
       <tr>
         <td>{{ item.title }}</td>
-        <td>{{ item.locality }}</td>
-        <td class="mono">{{ item.total_amount }} ₽</td>
-        <td><span class="badge {% if item.status == 'active' %}ok{% elif item.status == 'closed' %}bad{% endif %}">{{ item.get_status_display }}</span></td>
+        <td>{% if item.group %}{{ item.group.name }}{% else %}{{ item.locality|default:"—" }}{% endif %}</td>
+        <td style="min-width:160px;">
+          <div class="mono" style="margin-bottom:4px;">{{ item.collected_amount }} / {{ item.total_amount }} ₽ · {{ item.progress_percent }}%</div>
+          <div style="height:8px; background:var(--bg-soft); border-radius:999px; overflow:hidden;">
+            <div style="height:100%; width:{{ item.progress_percent }}%; background:var(--accent-2);"></div>
+          </div>
+        </td>
+        <td>
+          <span class="badge {% if item.status == 'active' %}ok{% elif item.status == 'closed' %}bad{% endif %}">{{ item.get_status_display }}</span>
+          <div class="muted" style="margin-top:4px;">{{ item.get_work_stage_display }}</div>
+        </td>
         <td class="mono">{{ item.created_at|date:"d.m.Y" }}</td>
         <td><a class="btn small" href="{% url 'panel:service_campaign_detail' item.id %}">Открыть</a></td>
       </tr>

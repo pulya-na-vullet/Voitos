@@ -750,7 +750,11 @@ def services_home(request: HttpRequest) -> HttpResponse:
             }
         )
     groups = ServiceGroup.objects.prefetch_related("members").all()
-    recent = ServiceCampaign.objects.select_related("group").all()[:20]
+    recent = (
+        ServiceCampaign.objects.select_related("group")
+        .prefetch_related("invites")
+        .all()[:20]
+    )
     return render(
         request,
         "panel/services_home.html",

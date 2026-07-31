@@ -45,6 +45,8 @@
         <td>
           {% if item.status == "approved" %}
             <span class="badge ok">распознано администратором</span>
+          {% elif item.status == "rejected" %}
+            <span class="badge bad">не принят</span>
           {% elif item.details_match %}
             <span class="badge ok">совпали</span>
           {% else %}
