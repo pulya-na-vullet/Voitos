@@ -100,18 +100,39 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
     return receipt
 
 
-def approve_receipt(receipt: PaymentReceipt, comment: str = "") -> PaymentReceipt:
+def approve_receipt(
+    receipt: PaymentReceipt,
+    comment: str = "",
+    *,
+    amount: Decimal | None = None,
+) -> PaymentReceipt:
+    """
+    Accept a subscription receipt.
+
+    Admin must confirm the accepted amount by hand; it becomes the saved
+    payment fact and drives how many months are granted.
+    """
+    if receipt.status == ReceiptStatus.APPROVED:
+        return receipt
+
     cfg = AppSettings.load()
-    months = receipt.calc_months(cfg.subscription_price_rub)
-    if months < 1 and receipt.amount and receipt.amount >= cfg.subscription_price_rub:
-        months = int(receipt.amount // cfg.subscription_price_rub)
+    price = Decimal(cfg.subscription_price_rub or 100)
+
+    if amount is None:
+        raise ValueError("Укажите сумму, которую принимаете по чеку.")
+    amount = Decimal(amount)
+    if amount <= 0:
+        raise ValueError("Сумма должна быть больше нуля.")
+
+    months = int(amount // price)
     if months < 1:
-        months = 1 if receipt.details_match else 0
-    if months < 1:
-        raise ValueError("Нельзя принять чек: сумма меньше стоимости месяца или не распознана.")
+        raise ValueError(
+            f"Сумма {amount:.0f} ₽ меньше стоимости месяца ({price:.0f} ₽)."
+        )
 
     user = receipt.user
     user.extend_subscription(months)
+    receipt.amount = amount
     receipt.status = ReceiptStatus.APPROVED
     receipt.months_granted = months
     receipt.admin_comment = comment
@@ -121,8 +142,8 @@ def approve_receipt(receipt: PaymentReceipt, comment: str = "") -> PaymentReceip
         user=user,
         kind=ActivityKind.RECEIPT_APPROVED,
         title="Чек принят",
-        detail=f"+{months} мес. до {user.subscription_until}",
-        meta={"receipt_id": receipt.id},
+        detail=f"{amount:.0f} ₽ → +{months} мес. до {user.subscription_until}",
+        meta={"receipt_id": receipt.id, "amount": str(amount), "months": months},
     )
     return receipt
 
@@ -179,8 +200,10 @@ def revoke_unpaid_subscriptions() -> int:
 def approved_user_message(receipt: PaymentReceipt) -> str:
     until = receipt.user.subscription_until
     until_s = timezone.localtime(until).strftime("%d.%m.%Y") if until else "—"
+    amount_s = f"{receipt.amount:.0f} ₽" if receipt.amount is not None else "—"
     return (
-        f"Чек принят. Подписка активна на {receipt.months_granted} мес.\n"
+        f"Чек принят. Зачтено: {amount_s}.\n"
+        f"Подписка активна на {receipt.months_granted} мес.\n"
         f"Доступ открыт до {until_s}."
     )
 

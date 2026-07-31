@@ -40,16 +40,29 @@ class SubscriptionTests(TestCase):
     def test_approve_extends_subscription(self):
         receipt = PaymentReceipt.objects.create(
             user=self.user,
-            amount=Decimal("250"),
+            amount=Decimal("50"),
             details_match=True,
             status=ReceiptStatus.PENDING,
         )
-        approve_receipt(receipt)
+        approve_receipt(receipt, amount=Decimal("250"))
+        receipt.refresh_from_db()
         self.user.refresh_from_db()
         self.assertEqual(receipt.status, ReceiptStatus.APPROVED)
+        self.assertEqual(receipt.amount, Decimal("250"))
         self.assertEqual(receipt.months_granted, 2)
         self.assertIsNotNone(self.user.subscription_until)
         self.assertEqual(self.user.access_state(), AccessState.ACTIVE)
+
+    def test_approve_requires_manual_amount(self):
+        receipt = PaymentReceipt.objects.create(
+            user=self.user,
+            amount=Decimal("100"),
+            status=ReceiptStatus.PENDING,
+        )
+        with self.assertRaises(ValueError):
+            approve_receipt(receipt)
+        with self.assertRaises(ValueError):
+            approve_receipt(receipt, amount=Decimal("0"))
 
     def test_reject_notifies_status(self):
         receipt = PaymentReceipt.objects.create(

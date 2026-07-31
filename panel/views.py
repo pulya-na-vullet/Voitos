@@ -441,10 +441,25 @@ def user_receipts(request: HttpRequest, user_id: int) -> HttpResponse:
 def receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
     receipt = get_object_or_404(PaymentReceipt, pk=pk)
     comment = request.POST.get("comment", "").strip()
+    raw_amount = (request.POST.get("amount") or "").strip().replace(",", ".")
     try:
-        approve_receipt(receipt, comment=comment)
+        amount = Decimal(raw_amount) if raw_amount else None
+    except (InvalidOperation, ValueError):
+        amount = None
+        messages.error(request, "Некорректная сумма. Укажите число, например 100.")
+        next_url = request.POST.get("next") or "panel:receipts"
+        if isinstance(next_url, str) and next_url.startswith("/"):
+            return redirect(next_url)
+        return redirect("panel:receipts")
+    try:
+        approve_receipt(receipt, comment=comment, amount=amount)
+        receipt.refresh_from_db()
+        receipt.user.refresh_from_db()
         _notify_user(receipt.user, approved_user_message(receipt))
-        messages.success(request, f"Чек #{pk} принят, подписка продлена.")
+        messages.success(
+            request,
+            f"Чек #{pk} принят: {receipt.amount} ₽ → +{receipt.months_granted} мес.",
+        )
     except ValueError as exc:
         messages.error(request, str(exc))
     next_url = request.POST.get("next") or "panel:receipts"
