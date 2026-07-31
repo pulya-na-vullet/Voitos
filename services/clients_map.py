@@ -1,6 +1,7 @@
 """Клиентская карта: графы групп, родственники в одной вершине.
 
-Визуализация на фронте — Cytoscape.js (https://github.com/cytoscape/cytoscape.js).
+Вершина = платящее домохозяйство (плательщик подписки).
+Название группы только в заголовке карточки — хаб-узел не рисуем.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from typing import Any
 
 from django.db.models import Prefetch
 from django.urls import reverse
+from django.utils import timezone
 
 from database.models import BotUser, ServiceGroup
 
@@ -31,6 +33,14 @@ def _display_name(user: BotUser) -> str:
     return name or f"id {user.id}"
 
 
+def is_paying_user(user: BotUser) -> bool:
+    """Плательщик: сам оплачивает подписку и срок ещё активен."""
+    if user.family_payer_id:
+        return False
+    until = user.subscription_until
+    return bool(until and until > timezone.now())
+
+
 def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
     """root_id -> household dict with members (related users merged)."""
     by_id = {int(u.id): u for u in users}
@@ -47,6 +57,10 @@ def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
         uniq: dict[int, BotUser] = {}
         for m in members:
             uniq[int(m.id)] = m
+        root = by_id.get(root_id) or next(iter(uniq.values()))
+        # Вершина только у тех, кто платит.
+        if not is_paying_user(root):
+            continue
         ordered = sorted(
             uniq.values(),
             key=lambda u: (0 if int(u.id) == root_id else 1, _display_name(u).lower(), int(u.id)),
@@ -60,53 +74,31 @@ def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
             "labels": labels,
             "member_count": len(ordered),
             "has_family": len(ordered) > 1,
-            "active_subscription": any(u.has_feature_access() for u in ordered),
+            "active_subscription": True,
         }
     return households
 
 
-def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any]:
+def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] | None:
     """Данные одного графа группы в формате элементов Cytoscape.js."""
     households_map = build_households(users)
     households = sorted(
         households_map.values(),
         key=lambda h: (-h["member_count"], h["label"].lower(), h["root_id"]),
     )
+    if not households:
+        return None
 
-    hub_id = f"g{group.id if group.id is not None else 'none'}"
-    elements: list[dict[str, Any]] = [
-        {
-            "data": {
-                "id": hub_id,
-                "label": group.name,
-                "kind": "group",
-                "href": "",
-            },
-            "classes": "group",
-        }
-    ]
-    nodes: list[dict[str, Any]] = [
-        {
-            "id": hub_id,
-            "kind": "group",
-            "label": group.name,
-            "labels": [group.name],
-            "has_family": False,
-            "member_count": 0,
-            "root_id": None,
-        }
-    ]
+    elements: list[dict[str, Any]] = []
+    nodes: list[dict[str, Any]] = []
 
     for household in households:
         labels = household["labels"]
-        # Многострочная подпись в круге: Елена / Дмитрий
         cy_label = "\n".join(labels)
         href = reverse("panel:user_dashboard", args=[household["root_id"]])
-        classes = ["household"]
+        classes = ["household", "active-sub"]
         if household["has_family"]:
             classes.append("family")
-        if household["active_subscription"]:
-            classes.append("active-sub")
         elements.append(
             {
                 "data": {
@@ -118,17 +110,6 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any]:
                     "member_count": household["member_count"],
                 },
                 "classes": " ".join(classes),
-            }
-        )
-        elements.append(
-            {
-                "data": {
-                    "id": f"e-{hub_id}-{household['id']}",
-                    "source": hub_id,
-                    "target": household["id"],
-                    "kind": "member",
-                },
-                "classes": "member",
             }
         )
         nodes.append(
@@ -143,10 +124,9 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any]:
             }
         )
 
-    # Кольцо между соседними домохозяйствами — визуально «одна группа».
+    # Связи между платящими вершинами одной группы (без хаба).
     n = len(households)
     if n >= 2:
-        # Для 2 вершин достаточно одного ребра; иначе полный цикл.
         ring_steps = n if n > 2 else 1
         for i in range(ring_steps):
             a = households[i]["id"]
@@ -166,7 +146,8 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any]:
     return {
         "group_id": group.id,
         "group_name": group.name,
-        "household_count": len(households),
+        "payer_count": len(households),
+        "household_count": len(households),  # alias: вершины = платящие
         "user_count": sum(h["member_count"] for h in households),
         "nodes": nodes,
         "elements": elements,
@@ -210,12 +191,12 @@ def build_clients_map() -> list[dict[str, Any]]:
         users = _expand_with_family(members)
         for u in users:
             seen_user_ids.add(int(u.id))
-        graphs.append(
-            build_group_graph(
-                MapGroup(id=int(group.id), name=group.name),
-                users,
-            )
+        graph = build_group_graph(
+            MapGroup(id=int(group.id), name=group.name),
+            users,
         )
+        if graph:
+            graphs.append(graph)
 
     orphan_users = list(
         BotUser.objects.filter(is_active=True)
@@ -227,11 +208,11 @@ def build_clients_map() -> list[dict[str, Any]]:
         users = _expand_with_family(orphan_users)
         users = [u for u in users if int(u.id) not in seen_user_ids]
         if users:
-            graphs.append(
-                build_group_graph(
-                    MapGroup(id=None, name="Без группы"),
-                    users,
-                )
+            graph = build_group_graph(
+                MapGroup(id=None, name="Без группы"),
+                users,
             )
+            if graph:
+                graphs.append(graph)
 
     return graphs

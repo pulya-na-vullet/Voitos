@@ -27,6 +27,7 @@
       <a href="{% url 'panel:services' %}" class="{% if 'service' in request.resolver_match.url_name and request.resolver_match.url_name != 'services_ranking' %}active{% endif %}">Сервисные мероприятия</a>
       <a href="{% url 'panel:services_ranking' %}" class="{% if request.resolver_match.url_name == 'services_ranking' %}active{% endif %}">Рейтинг граждан</a>
       <a href="{% url 'panel:clients_map' %}" class="{% if request.resolver_match.url_name == 'clients_map' %}active{% endif %}">Карта клиентов</a>
+      <a href="{% url 'panel:earnings_forecast' %}" class="{% if request.resolver_match.url_name == 'earnings_forecast' %}active{% endif %}">Прогноз заработка</a>
       <a href="{% url 'panel:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">Настройки</a>
       {% if bot_user %}
       <div class="brand-sub" style="margin-top:18px;">Пользователь</div>

@@ -30,6 +30,7 @@ urlpatterns = [
     path("services/", views.services_home, name="services"),
     path("services/ranking/", views.services_ranking, name="services_ranking"),
     path("clients-map/", views.clients_map, name="clients_map"),
+    path("earnings-forecast/", views.earnings_forecast, name="earnings_forecast"),
     path("services/groups/<int:pk>/", views.service_group_edit, name="service_group_edit"),
     path(
         "services/campaigns/<int:pk>/",

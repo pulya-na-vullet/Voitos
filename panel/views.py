@@ -1278,7 +1278,7 @@ def clients_map(request: HttpRequest) -> HttpResponse:
         {
             "group_id": g["group_id"],
             "group_name": g["group_name"],
-            "household_count": g["household_count"],
+            "payer_count": g["payer_count"],
             "user_count": g["user_count"],
             "elements": g["elements"],
         }
@@ -1291,8 +1291,20 @@ def clients_map(request: HttpRequest) -> HttpResponse:
             "graphs": graphs,
             "graphs_payload": graphs_payload,
             "graph_count": len(graphs),
-            "household_total": sum(g["household_count"] for g in graphs),
+            "payer_total": sum(g["payer_count"] for g in graphs),
         },
+    )
+
+
+@login_required
+def earnings_forecast(request: HttpRequest) -> HttpResponse:
+    from subscriptions.forecast import build_earnings_forecast
+
+    forecast = build_earnings_forecast()
+    return render(
+        request,
+        "panel/earnings_forecast.html",
+        {"forecast": forecast},
     )
 
 

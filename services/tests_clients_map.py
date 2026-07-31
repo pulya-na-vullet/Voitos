@@ -25,48 +25,47 @@ class ClientsMapTests(TestCase):
         self.ivan = BotUser.objects.create(
             max_user_id="map-iv",
             real_name="Иван",
+            # без подписки — не вершина (не платит)
+        )
+        self.rocker = BotUser.objects.create(
+            max_user_id="map-rk",
+            real_name="Рокер",
+            subscription_until=timezone.now() + timedelta(days=20),
         )
         self.alley = ServiceGroup.objects.create(name="9 аллея")
         self.rockers = ServiceGroup.objects.create(name="казанские рокеры")
         self.alley.members.add(self.elena, self.dmitry, self.ivan)
-        self.rockers.members.add(
-            BotUser.objects.create(max_user_id="map-rk", real_name="Рокер")
-        )
+        self.rockers.members.add(self.rocker)
         link_family_members([self.elena, self.dmitry])
         self.admin = User.objects.create_user("mapadm", password="pass")
         self.client = Client()
         self.client.login(username="mapadm", password="pass")
 
-    def test_household_merges_relatives(self):
+    def test_household_merges_relatives_only_payers(self):
         self.elena.refresh_from_db()
         self.dmitry.refresh_from_db()
         self.assertEqual(household_root_id(self.elena), self.dmitry.id)
         households = build_households([self.elena, self.dmitry, self.ivan])
-        self.assertEqual(len(households), 2)
+        # Иван без подписки не платит → 1 вершина (семья)
+        self.assertEqual(len(households), 1)
         family = households[self.dmitry.id]
         self.assertTrue(family["has_family"])
         self.assertIn("Елена", family["label"])
         self.assertIn("Дмитрий", family["label"])
 
-    def test_build_clients_map_one_graph_per_group(self):
+    def test_build_clients_map_payer_vertices_no_hub(self):
         graphs = build_clients_map()
         names = [g["group_name"] for g in graphs]
         self.assertIn("9 аллея", names)
         self.assertIn("казанские рокеры", names)
         alley = next(g for g in graphs if g["group_name"] == "9 аллея")
-        # Елена+Дмитрий = 1 вершина, Иван = 1 → 2 домохозяйства (+ hub не считается)
-        self.assertEqual(alley["household_count"], 2)
-        household_nodes = [n for n in alley["nodes"] if n["kind"] == "household"]
-        family_node = next(n for n in household_nodes if n["has_family"])
-        self.assertEqual(family_node["member_count"], 2)
-        self.assertTrue(any("Елена" in lbl for lbl in family_node["labels"]))
-        self.assertTrue(any("Дмитрий" in lbl for lbl in family_node["labels"]))
-        # Cytoscape elements: hub + 2 households + edges
+        self.assertEqual(alley["payer_count"], 1)
         node_els = [e for e in alley["elements"] if "source" not in e["data"]]
-        self.assertEqual(len(node_els), 3)
-        family_el = next(e for e in node_els if "family" in e.get("classes", ""))
-        self.assertIn("Елена", family_el["data"]["label"])
-        self.assertIn("Дмитрий", family_el["data"]["label"])
+        # без синего хаба группы — только платящие вершины
+        self.assertEqual(len(node_els), 1)
+        self.assertNotIn("group", node_els[0].get("classes", ""))
+        self.assertIn("Елена", node_els[0]["data"]["label"])
+        self.assertIn("Дмитрий", node_els[0]["data"]["label"])
 
     def test_panel_page_renders_groups(self):
         import json
@@ -76,10 +75,9 @@ class ClientsMapTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         self.assertIn("Карта клиентов", body)
-        self.assertIn("cytoscape", body.lower())
+        self.assertIn("платящих", body)
+        self.assertNotIn("node.group", body)
         self.assertIn("9 аллея", body)
-        self.assertIn("казанские рокеры", body)
-        self.assertIn("clients-map-data", body)
         match = re.search(
             r'<script id="clients-map-data" type="application/json">(.*?)</script>',
             body,
@@ -87,11 +85,7 @@ class ClientsMapTests(TestCase):
         )
         self.assertIsNotNone(match)
         payload = json.loads(match.group(1))
-        labels = " ".join(
-            e["data"].get("label", "")
-            for g in payload
-            for e in g["elements"]
-            if "source" not in e["data"]
-        )
-        self.assertIn("Елена", labels)
-        self.assertIn("Дмитрий", labels)
+        alley = next(g for g in payload if g["group_name"] == "9 аллея")
+        nodes = [e for e in alley["elements"] if "source" not in e["data"]]
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0]["data"]["kind"], "household")
