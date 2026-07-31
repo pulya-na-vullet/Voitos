@@ -5,14 +5,16 @@
   <h1>Карта клиентов</h1>
 </div>
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
-  Каждая группа — отдельный граф. Родственники (семейная подписка) объединены в одной вершине.
+  Каждая группа — отдельный граф
+  (<a href="https://github.com/cytoscape/cytoscape.js" target="_blank" rel="noopener">Cytoscape.js</a>).
+  Родственники (семейная подписка) объединены в одной вершине.
   {% if graph_count %}
     Графов: {{ graph_count }} · домохозяйств: {{ household_total }}.
   {% endif %}
 </p>
 
 {% if graphs %}
-<div class="clients-map-grid">
+<div class="clients-map-grid" id="clients-map-root">
   {% for graph in graphs %}
   <section class="clients-map-graph card">
     <div class="clients-map-graph-head">
@@ -21,48 +23,152 @@
         {{ graph.household_count }} домохоз. · {{ graph.user_count }} чел.
       </span>
     </div>
-    <div class="clients-map-svg-wrap">
-      <svg
-        class="clients-map-svg"
-        viewBox="0 0 {{ graph.width }} {{ graph.height }}"
-        role="img"
-        aria-label="Граф группы {{ graph.group_name }}"
-      >
-        {% for edge in graph.edges %}
-        <line
-          x1="{{ edge.x1 }}" y1="{{ edge.y1 }}"
-          x2="{{ edge.x2 }}" y2="{{ edge.y2 }}"
-          class="cmap-edge cmap-edge-{{ edge.kind }}"
-        />
-        {% endfor %}
-
-        {% for node in graph.nodes %}
-          {% if node.kind == "group" %}
-          <g class="cmap-node cmap-node-group" transform="translate({{ node.x }}, {{ node.y }})">
-            <circle r="{{ node.r }}" />
-            <text class="cmap-label cmap-label-hub">
-              <tspan x="0" dy="0.35em">{{ node.label|truncatechars:28 }}</tspan>
-            </text>
-          </g>
-          {% else %}
-          <g class="cmap-node cmap-node-household {% if node.has_family %}cmap-family{% endif %} {% if node.active_subscription %}cmap-active{% endif %}"
-             transform="translate({{ node.x }}, {{ node.y }})">
-            <a href="{% url 'panel:user_dashboard' node.root_id %}" class="cmap-node-link">
-              <circle r="{{ node.r }}" />
-              <text class="cmap-label">
-                {% for name in node.labels %}
-                <tspan x="0" dy="{% if forloop.first %}{{ node.label_start_dy }}{% else %}1.15em{% endif %}">{{ name|truncatechars:16 }}</tspan>
-                {% endfor %}
-              </text>
-            </a>
-          </g>
-          {% endif %}
-        {% endfor %}
-      </svg>
-    </div>
+    <div
+      class="clients-map-cy"
+      id="cy-graph-{{ forloop.counter0 }}"
+      data-graph-index="{{ forloop.counter0 }}"
+      aria-label="Граф группы {{ graph.group_name }}"
+    ></div>
   </section>
   {% endfor %}
 </div>
+{{ graphs_payload|json_script:"clients-map-data" }}
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+<script>
+(function () {
+  var dataEl = document.getElementById("clients-map-data");
+  if (!dataEl || typeof cytoscape === "undefined") return;
+  var graphs = JSON.parse(dataEl.textContent || "[]");
+
+  graphs.forEach(function (graph, index) {
+    var container = document.getElementById("cy-graph-" + index);
+    if (!container) return;
+
+    var cy = cytoscape({
+      container: container,
+      elements: graph.elements || [],
+      wheelSensitivity: 0.25,
+      minZoom: 0.35,
+      maxZoom: 2.5,
+      style: [
+        {
+          selector: "node",
+          style: {
+            label: "data(label)",
+            "text-wrap": "wrap",
+            "text-max-width": 86,
+            "text-valign": "center",
+            "text-halign": "center",
+            "font-size": 12,
+            "font-weight": 600,
+            color: "#e8eef6",
+            "background-color": "#1c2430",
+            "border-width": 2,
+            "border-color": "#8b9bb0",
+            width: 78,
+            height: 78,
+            "overlay-padding": 4,
+          },
+        },
+        {
+          selector: "node.group",
+          style: {
+            "background-color": "#1a3a5c",
+            "border-color": "#3d9cfd",
+            "border-width": 3,
+            color: "#d7e8ff",
+            "font-size": 13,
+            width: 96,
+            height: 96,
+            "text-max-width": 88,
+          },
+        },
+        {
+          selector: "node.household",
+          style: {
+            "background-color": "#222b38",
+            "border-color": "#8b9bb0",
+          },
+        },
+        {
+          selector: "node.family",
+          style: {
+            "border-color": "#2dd4bf",
+            "border-width": 3,
+            width: 92,
+            height: 92,
+            "text-max-width": 84,
+          },
+        },
+        {
+          selector: "node.active-sub",
+          style: {
+            "background-color": "#1e3a2c",
+          },
+        },
+        {
+          selector: "edge",
+          style: {
+            width: 2,
+            "curve-style": "haystack",
+            "haystack-radius": 0.45,
+            "line-color": "rgba(139,155,176,0.45)",
+            "target-arrow-shape": "none",
+          },
+        },
+        {
+          selector: "edge.member",
+          style: {
+            "line-color": "rgba(45,212,191,0.45)",
+            width: 2.5,
+          },
+        },
+        {
+          selector: "edge.ring",
+          style: {
+            "line-color": "rgba(61,156,253,0.35)",
+            "line-style": "dashed",
+            width: 1.5,
+            "curve-style": "bezier",
+          },
+        },
+        {
+          selector: "node:selected",
+          style: {
+            "border-color": "#3d9cfd",
+            "border-width": 4,
+          },
+        },
+      ],
+      layout: {
+        name: "cose",
+        animate: false,
+        padding: 28,
+        nodeRepulsion: function () { return 12000; },
+        idealEdgeLength: function () { return 110; },
+        edgeElasticity: function () { return 90; },
+        nestingFactor: 1.2,
+        gravity: 0.35,
+        numIter: 900,
+        initialTemp: 180,
+        coolingFactor: 0.95,
+        minTemp: 1.0,
+        randomize: true,
+      },
+    });
+
+    cy.on("tap", "node.household", function (evt) {
+      var href = evt.target.data("href");
+      if (href) window.location.href = href;
+    });
+
+    // После layout подогнать в контейнер.
+    cy.ready(function () {
+      cy.fit(undefined, 24);
+    });
+  });
+})();
+</script>
 {% else %}
 <div class="card">
   <p class="muted" style="margin:0;">Пока нет групп с участниками — карта пуста.</p>

@@ -246,14 +246,14 @@ tr.dupe-row:hover > td {
 .muted { color: var(--muted); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; }
 
-/* Карта клиентов (графы групп) */
+/* Карта клиентов — Cytoscape.js */
 .clients-map-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 16px;
 }
 .clients-map-graph {
-  padding: 14px 14px 8px;
+  padding: 14px 14px 12px;
   overflow: hidden;
 }
 .clients-map-graph-head {
@@ -261,69 +261,23 @@ tr.dupe-row:hover > td {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 .clients-map-graph-head h2 {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 650;
 }
-.clients-map-svg-wrap {
+.clients-map-cy {
   width: 100%;
-  aspect-ratio: 640 / 420;
-}
-.clients-map-svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-.cmap-edge {
-  stroke: rgba(139, 155, 176, 0.35);
-  stroke-width: 1.5;
-  fill: none;
-}
-.cmap-edge-ring {
-  stroke: rgba(61, 156, 253, 0.22);
-  stroke-dasharray: 4 5;
-}
-.cmap-edge-member {
-  stroke: rgba(45, 212, 191, 0.35);
-}
-.cmap-node circle {
-  fill: rgba(28, 36, 48, 0.95);
-  stroke: rgba(139, 155, 176, 0.45);
-  stroke-width: 1.6;
-}
-.cmap-node-group circle {
-  fill: rgba(61, 156, 253, 0.18);
-  stroke: rgba(61, 156, 253, 0.65);
-  stroke-width: 2;
-}
-.cmap-node-household.cmap-family circle {
-  stroke: rgba(45, 212, 191, 0.75);
-  stroke-width: 2.2;
-}
-.cmap-node-household.cmap-active circle {
-  fill: rgba(127, 217, 154, 0.12);
-}
-.cmap-label {
-  fill: var(--text);
-  font-size: 11px;
-  text-anchor: middle;
-  pointer-events: none;
-  font-weight: 600;
-}
-.cmap-label-hub {
-  fill: #d7e8ff;
-  font-size: 12px;
-}
-.cmap-node-link {
-  cursor: pointer;
-  text-decoration: none;
-}
-.cmap-node-link:hover circle {
-  stroke: var(--accent);
-  stroke-width: 2.4;
+  height: min(52vh, 480px);
+  min-height: 320px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(61, 156, 253, 0.08), transparent 55%),
+    radial-gradient(ellipse at 80% 80%, rgba(45, 212, 191, 0.06), transparent 50%),
+    #121820;
 }
 
 @media (max-width: 1100px) {

@@ -61,13 +61,37 @@ class ClientsMapTests(TestCase):
         self.assertEqual(family_node["member_count"], 2)
         self.assertTrue(any("Елена" in lbl for lbl in family_node["labels"]))
         self.assertTrue(any("Дмитрий" in lbl for lbl in family_node["labels"]))
+        # Cytoscape elements: hub + 2 households + edges
+        node_els = [e for e in alley["elements"] if "source" not in e["data"]]
+        self.assertEqual(len(node_els), 3)
+        family_el = next(e for e in node_els if "family" in e.get("classes", ""))
+        self.assertIn("Елена", family_el["data"]["label"])
+        self.assertIn("Дмитрий", family_el["data"]["label"])
 
     def test_panel_page_renders_groups(self):
+        import json
+        import re
+
         resp = self.client.get("/panel/clients-map/")
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         self.assertIn("Карта клиентов", body)
+        self.assertIn("cytoscape", body.lower())
         self.assertIn("9 аллея", body)
         self.assertIn("казанские рокеры", body)
-        self.assertIn("Елена", body)
-        self.assertIn("Дмитрий", body)
+        self.assertIn("clients-map-data", body)
+        match = re.search(
+            r'<script id="clients-map-data" type="application/json">(.*?)</script>',
+            body,
+            re.S,
+        )
+        self.assertIsNotNone(match)
+        payload = json.loads(match.group(1))
+        labels = " ".join(
+            e["data"].get("label", "")
+            for g in payload
+            for e in g["elements"]
+            if "source" not in e["data"]
+        )
+        self.assertIn("Елена", labels)
+        self.assertIn("Дмитрий", labels)

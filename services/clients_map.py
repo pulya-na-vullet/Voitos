@@ -1,12 +1,15 @@
-"""Клиентская карта: графы групп, родственники в одной вершине."""
+"""Клиентская карта: графы групп, родственники в одной вершине.
+
+Визуализация на фронте — Cytoscape.js (https://github.com/cytoscape/cytoscape.js).
+"""
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from math import cos, pi, sin
 from typing import Any
 
 from django.db.models import Prefetch
+from django.urls import reverse
 
 from database.models import BotUser, ServiceGroup
 
@@ -41,7 +44,6 @@ def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
 
     households: dict[int, dict[str, Any]] = {}
     for root_id, members in members_by_root.items():
-        # unique by id (payer may appear twice when expanded)
         uniq: dict[int, BotUser] = {}
         for m in members:
             uniq[int(m.id)] = m
@@ -63,114 +65,111 @@ def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
     return households
 
 
-def _layout_ring(
-    center_x: float,
-    center_y: float,
-    radius: float,
-    count: int,
-) -> list[tuple[float, float]]:
-    if count <= 0:
-        return []
-    if count == 1:
-        return [(center_x + radius, center_y)]
-    coords: list[tuple[float, float]] = []
-    for i in range(count):
-        angle = -pi / 2 + (2 * pi * i) / count
-        coords.append((center_x + radius * cos(angle), center_y + radius * sin(angle)))
-    return coords
-
-
-def build_group_graph(
-    group: MapGroup,
-    users: list[BotUser],
-    *,
-    width: float = 640,
-    height: float = 420,
-) -> dict[str, Any]:
+def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any]:
+    """Данные одного графа группы в формате элементов Cytoscape.js."""
     households_map = build_households(users)
     households = sorted(
         households_map.values(),
         key=lambda h: (-h["member_count"], h["label"].lower(), h["root_id"]),
     )
 
-    cx, cy = width / 2, height / 2 + 8
-    hub_r = 46
-    node_r = 38 if len(households) <= 8 else 32
-    ring_r = min(width, height) * 0.34
-    if len(households) > 10:
-        ring_r = min(width, height) * 0.38
-
-    coords = _layout_ring(cx, cy, ring_r, len(households))
     hub_id = f"g{group.id if group.id is not None else 'none'}"
-    nodes_by_id: dict[str, dict[str, Any]] = {
-        hub_id: {
+    elements: list[dict[str, Any]] = [
+        {
+            "data": {
+                "id": hub_id,
+                "label": group.name,
+                "kind": "group",
+                "href": "",
+            },
+            "classes": "group",
+        }
+    ]
+    nodes: list[dict[str, Any]] = [
+        {
             "id": hub_id,
             "kind": "group",
             "label": group.name,
-            "x": cx,
-            "y": cy,
-            "r": hub_r,
+            "labels": [group.name],
+            "has_family": False,
+            "member_count": 0,
+            "root_id": None,
         }
-    }
-    edge_specs: list[tuple[str, str, str]] = []
+    ]
 
-    for household, (x, y) in zip(households, coords):
+    for household in households:
         labels = household["labels"]
-        # Смещение первой строки подписи, чтобы блок имён был по центру круга.
-        label_start_dy = 0.35 - 0.55 * (len(labels) - 1)
-        nodes_by_id[household["id"]] = {
-            "id": household["id"],
-            "kind": "household",
-            "label": household["label"],
-            "labels": labels,
-            "label_start_dy": f"{label_start_dy:.2f}em",
-            "member_count": household["member_count"],
-            "has_family": household["has_family"],
-            "active_subscription": household["active_subscription"],
-            "root_id": household["root_id"],
-            "x": round(x, 2),
-            "y": round(y, 2),
-            "r": node_r + (4 if household["has_family"] else 0),
-        }
-        edge_specs.append((hub_id, household["id"], "member"))
-
-    # Кольцо между соседними домохозяйствами — визуально «одна группа».
-    if len(households) >= 2:
-        for i in range(len(households)):
-            a = households[i]["id"]
-            b = households[(i + 1) % len(households)]["id"]
-            edge_specs.append((a, b, "ring"))
-
-    edges: list[dict[str, Any]] = []
-    for source_id, target_id, kind in edge_specs:
-        src = nodes_by_id[source_id]
-        tgt = nodes_by_id[target_id]
-        edges.append(
+        # Многострочная подпись в круге: Елена / Дмитрий
+        cy_label = "\n".join(labels)
+        href = reverse("panel:user_dashboard", args=[household["root_id"]])
+        classes = ["household"]
+        if household["has_family"]:
+            classes.append("family")
+        if household["active_subscription"]:
+            classes.append("active-sub")
+        elements.append(
             {
-                "source": source_id,
-                "target": target_id,
-                "kind": kind,
-                "x1": src["x"],
-                "y1": src["y"],
-                "x2": tgt["x"],
-                "y2": tgt["y"],
+                "data": {
+                    "id": household["id"],
+                    "label": cy_label,
+                    "kind": "household",
+                    "href": href,
+                    "root_id": household["root_id"],
+                    "member_count": household["member_count"],
+                },
+                "classes": " ".join(classes),
+            }
+        )
+        elements.append(
+            {
+                "data": {
+                    "id": f"e-{hub_id}-{household['id']}",
+                    "source": hub_id,
+                    "target": household["id"],
+                    "kind": "member",
+                },
+                "classes": "member",
+            }
+        )
+        nodes.append(
+            {
+                "id": household["id"],
+                "kind": "household",
+                "label": household["label"],
+                "labels": labels,
+                "has_family": household["has_family"],
+                "member_count": household["member_count"],
+                "root_id": household["root_id"],
             }
         )
 
-    # hub first, then households in ring order
-    nodes = [nodes_by_id[hub_id]] + [
-        nodes_by_id[h["id"]] for h in households
-    ]
+    # Кольцо между соседними домохозяйствами — визуально «одна группа».
+    n = len(households)
+    if n >= 2:
+        # Для 2 вершин достаточно одного ребра; иначе полный цикл.
+        ring_steps = n if n > 2 else 1
+        for i in range(ring_steps):
+            a = households[i]["id"]
+            b = households[(i + 1) % n]["id"]
+            elements.append(
+                {
+                    "data": {
+                        "id": f"e-ring-{a}-{b}",
+                        "source": a,
+                        "target": b,
+                        "kind": "ring",
+                    },
+                    "classes": "ring",
+                }
+            )
 
     return {
         "group_id": group.id,
         "group_name": group.name,
-        "width": width,
-        "height": height,
         "household_count": len(households),
         "user_count": sum(h["member_count"] for h in households),
         "nodes": nodes,
-        "edges": edges,
+        "elements": elements,
     }
 
 
@@ -218,13 +217,14 @@ def build_clients_map() -> list[dict[str, Any]]:
             )
         )
 
-    orphan_qs = BotUser.objects.filter(is_active=True).exclude(id__in=seen_user_ids)
     orphan_users = list(
-        orphan_qs.select_related("family_payer").order_by("id")[:200]
+        BotUser.objects.filter(is_active=True)
+        .exclude(id__in=seen_user_ids)
+        .select_related("family_payer")
+        .order_by("id")[:200]
     )
     if orphan_users:
         users = _expand_with_family(orphan_users)
-        # Не тянуть в «Без группы» тех, кто уже в графах групп.
         users = [u for u in users if int(u.id) not in seen_user_ids]
         if users:
             graphs.append(

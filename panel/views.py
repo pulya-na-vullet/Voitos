@@ -1274,11 +1274,22 @@ def clients_map(request: HttpRequest) -> HttpResponse:
     from services.clients_map import build_clients_map
 
     graphs = build_clients_map()
+    graphs_payload = [
+        {
+            "group_id": g["group_id"],
+            "group_name": g["group_name"],
+            "household_count": g["household_count"],
+            "user_count": g["user_count"],
+            "elements": g["elements"],
+        }
+        for g in graphs
+    ]
     return render(
         request,
         "panel/clients_map.html",
         {
             "graphs": graphs,
+            "graphs_payload": graphs_payload,
             "graph_count": len(graphs),
             "household_total": sum(g["household_count"] for g in graphs),
         },
