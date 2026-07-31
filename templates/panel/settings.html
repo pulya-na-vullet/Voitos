@@ -91,9 +91,17 @@
       <input type="number" name="service_tax_limit" value="{{ cfg.service_tax_limit }}" min="1" step="1">
     </div>
     <div class="form-row">
-      <label>Уже собрано через самозанятого, ₽</label>
-      <input type="number" name="service_tax_collected" value="{{ cfg.service_tax_collected }}" min="0" step="1">
-      <div class="hint">При 85%+ лимита панель предупредит сменить самозанятого</div>
+      <label>Собрано через самозанятого за {{ tax_year|default:"год" }}, ₽</label>
+      <input type="text" value="{{ cfg.service_tax_collected }}" readonly disabled>
+      <div class="hint">
+        Считается автоматически: принятые чеки подписки + сервисные сборы за календарный год.
+        {% if tax_breakdown %}
+        Сейчас: подписки {{ tax_breakdown.subscriptions }} ₽ ({{ tax_breakdown.subscription_count }})
+        + сборы {{ tax_breakdown.services }} ₽ ({{ tax_breakdown.service_count }})
+        = {{ tax_breakdown.total }} ₽.
+        {% endif %}
+        При 85%+ лимита панель предупредит сменить самозанятого.
+      </div>
     </div>
     <button class="btn" type="submit">Сохранить</button>
   </form>

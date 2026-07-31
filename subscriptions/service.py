@@ -252,6 +252,12 @@ def approve_receipt(
         },
     )
     try:
+        from services.tax import sync_self_employed_tax_collected
+
+        sync_self_employed_tax_collected()
+    except Exception:
+        logger.exception("Failed to sync self-employed tax after subscription approve")
+    try:
         from panel.admin_tasks import task_payment_receipt
 
         task_payment_receipt(receipt)
@@ -272,6 +278,12 @@ def reject_receipt(receipt: PaymentReceipt, comment: str = "") -> PaymentReceipt
         detail=comment or "Без комментария",
         meta={"receipt_id": receipt.id},
     )
+    try:
+        from services.tax import sync_self_employed_tax_collected
+
+        sync_self_employed_tax_collected()
+    except Exception:
+        logger.exception("Failed to sync self-employed tax after subscription reject")
     try:
         from panel.admin_tasks import task_payment_receipt
 

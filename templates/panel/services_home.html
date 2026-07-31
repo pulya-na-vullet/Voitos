@@ -14,7 +14,14 @@
     <span class="mono">{{ cfg.service_payee_phone }}</span> /
     {{ cfg.service_payee_status }}
   </p>
-  <p class="muted" style="margin:6px 0 0;">Лимит: {{ cfg.service_tax_collected }} / {{ cfg.service_tax_limit }} ₽
+  <p class="muted" style="margin:6px 0 0;">
+    Лимит самозанятого за {{ tax_stats.year|default:"" }}:
+    <strong>{{ cfg.service_tax_collected }}</strong> / {{ cfg.service_tax_limit }} ₽
+    {% if tax_stats %}
+      <span class="mono">
+        (подписки {{ tax_stats.subscriptions }} ₽ · сборы {{ tax_stats.services }} ₽)
+      </span>
+    {% endif %}
     {% if pending_service %} · чеков на проверке: {{ pending_service }}{% endif %}
   </p>
 </div>

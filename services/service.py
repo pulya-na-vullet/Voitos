@@ -886,8 +886,6 @@ def approve_service_receipt(
     if amount <= 0:
         raise ValueError("Нельзя принять чек без суммы.")
 
-    cfg = AppSettings.load()
-
     invite = receipt.invite
     campaign = invite.campaign
     invite.amount_paid = Decimal(invite.amount_paid or 0) + amount
@@ -896,13 +894,14 @@ def approve_service_receipt(
         invite.paid_at = timezone.now()
     invite.save()
 
-    cfg.service_tax_collected = Decimal(cfg.service_tax_collected or 0) + amount
-    cfg.save(update_fields=["service_tax_collected", "updated_at"])
-
     receipt.status = ReceiptStatus.APPROVED
     receipt.admin_comment = comment
     receipt.reviewed_at = timezone.now()
     receipt.save()
+
+    from services.tax import sync_self_employed_tax_collected
+
+    sync_self_employed_tax_collected()
 
     ActivityLog.objects.create(
         user=receipt.user,
@@ -930,6 +929,12 @@ def reject_service_receipt(receipt: ServiceReceipt, comment: str = "") -> Servic
     receipt.admin_comment = comment
     receipt.reviewed_at = timezone.now()
     receipt.save()
+    try:
+        from services.tax import sync_self_employed_tax_collected
+
+        sync_self_employed_tax_collected()
+    except Exception:
+        logger.exception("Failed to sync self-employed tax after service reject")
     try:
         from panel.admin_tasks import task_service_receipt
 

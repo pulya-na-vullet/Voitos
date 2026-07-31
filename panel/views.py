@@ -581,11 +581,7 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             )
         except (InvalidOperation, ValueError):
             pass
-        try:
-            if request.POST.get("service_tax_collected") not in (None, ""):
-                cfg.service_tax_collected = Decimal(request.POST.get("service_tax_collected"))
-        except (InvalidOperation, ValueError):
-            pass
+        # service_tax_collected is auto-synced from approved receipts — ignore manual POST
         for field, default in (
             ("yandex_llm_rub_per_1k", "0.40"),
             ("yandex_stt_rub_per_request", "0.15"),
@@ -608,6 +604,10 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             messages.warning(request, tax_warn)
         messages.success(request, "Настройки сохранены.")
         return redirect("panel:settings")
+    from services.tax import sync_self_employed_tax_collected
+
+    tax_breakdown = sync_self_employed_tax_collected(cfg)
+    cfg.refresh_from_db()
     return render(
         request,
         "panel/settings.html",
@@ -615,6 +615,8 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             "cfg": cfg,
             "model_warning": _model_warning(cfg.yandex_model),
             "tax_warning": cfg.tax_limit_warning(),
+            "tax_breakdown": tax_breakdown,
+            "tax_year": tax_breakdown["year"],
             "has_token": bool(cfg.max_bot_token),
             "has_api_key": bool(cfg.yandex_api_key),
             "bot_status": BotRuntimeStatus.load(),
@@ -811,6 +813,10 @@ def services_home(request: HttpRequest) -> HttpResponse:
         .prefetch_related("invites")
         .all()[:20]
     )
+    from services.tax import sync_self_employed_tax_collected
+
+    tax_stats = sync_self_employed_tax_collected(cfg)
+    cfg.refresh_from_db()
     return render(
         request,
         "panel/services_home.html",
@@ -821,6 +827,7 @@ def services_home(request: HttpRequest) -> HttpResponse:
             "category_choices": ServiceCategory.choices,
             "tax_warning": cfg.tax_limit_warning(),
             "cfg": cfg,
+            "tax_stats": tax_stats,
             "pending_service": ServiceReceipt.objects.filter(
                 status=ReceiptStatus.PENDING
             ).count(),

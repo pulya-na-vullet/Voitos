@@ -189,6 +189,7 @@ class AppSettings(models.Model):
         max_digits=14,
         decimal_places=2,
         default=Decimal("0"),
+        help_text="Считается автоматически из принятых чеков подписки и сервисных сборов за текущий год.",
     )
     yandex_llm_rub_per_1k = models.DecimalField(
         "YandexGPT, ₽ / 1000 токенов",
@@ -211,23 +212,40 @@ class AppSettings(models.Model):
     )
     updated_at = models.DateTimeField(auto_now=True)
 
+    def refresh_tax_collected(self) -> Decimal:
+        """Sync service_tax_collected from approved receipts (current year)."""
+        from services.tax import sync_self_employed_tax_collected
+
+        stats = sync_self_employed_tax_collected(self)
+        # keep in-memory field in sync for subsequent reads
+        self.service_tax_collected = stats["total"]
+        return stats["total"]
+
     def tax_usage_ratio(self) -> float:
         limit = float(self.service_tax_limit or 0)
         if limit <= 0:
             return 0.0
-        return float(self.service_tax_collected or 0) / limit
+        collected = float(self.service_tax_collected or 0)
+        return collected / limit
 
     def tax_limit_warning(self) -> str:
+        # Always show warning against fresh totals from approved receipts.
+        try:
+            self.refresh_tax_collected()
+        except Exception:
+            pass
         ratio = self.tax_usage_ratio()
+        year = timezone.localdate().year
         if ratio >= 1.0:
             return (
-                "Лимит самозанятого исчерпан. Смените получателя в настройках "
-                "сервисных реквизитов."
+                f"Лимит самозанятого за {year} исчерпан "
+                f"({self.service_tax_collected} / {self.service_tax_limit} ₽). "
+                "Смените получателя в настройках сервисных реквизитов."
             )
         if ratio >= 0.85:
             left = Decimal(self.service_tax_limit or 0) - Decimal(self.service_tax_collected or 0)
             return (
-                f"Приближение к лимиту самозанятого: собрано "
+                f"Приближение к лимиту самозанятого за {year}: собрано "
                 f"{self.service_tax_collected} из {self.service_tax_limit} ₽ "
                 f"(осталось ~{left} ₽). Рекомендуется сменить самозанятого."
             )
