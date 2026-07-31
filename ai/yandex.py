@@ -110,4 +110,10 @@ class YandexGPTProvider(LLMProvider):
         text = ""
         if alternatives:
             text = alternatives[0].get("message", {}).get("text", "") or ""
+        try:
+            from ai.usage import log_llm_from_response
+
+            log_llm_from_response(data, model_name=self.model)
+        except Exception:
+            logger.exception("Failed to record YandexGPT usage")
         return CompletionResult(text=text, raw=data)

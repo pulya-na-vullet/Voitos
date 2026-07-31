@@ -2,10 +2,9 @@ from django.db import migrations
 
 
 def forwards(apps, schema_editor):
-    # Use runtime helper so logic stays in one place.
-    from subscriptions.service import recalculate_approved_receipt_periods
-
-    recalculate_approved_receipt_periods()
+    # Historical one-time recalc. Intentionally does not import runtime models:
+    # AppSettings.load() would break when later migrations add columns.
+    pass
 
 
 def backwards(apps, schema_editor):

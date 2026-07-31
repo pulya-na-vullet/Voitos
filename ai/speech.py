@@ -50,4 +50,10 @@ class YandexSpeechKitProvider(SpeechToTextProvider):
             logger.error("SpeechKit error %s: %s", response.status_code, response.text[:500])
             response.raise_for_status()
         data = response.json()
+        try:
+            from ai.usage import log_stt_call
+
+            log_stt_call(audio_format=audio_format)
+        except Exception:
+            logger.exception("Failed to record SpeechKit usage")
         return (data.get("result") or "").strip()

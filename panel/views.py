@@ -41,6 +41,7 @@ from database.models import (
     ServiceReceipt,
     TaskItem,
     WorkStage,
+    YandexBillingEntry,
 )
 from logs.service import log_activity
 from services.ranking import citizen_stats, ranking_list, sort_ranking_rows
@@ -57,6 +58,7 @@ from services.service import (
     rejected_service_message,
     resend_to_unpaid,
 )
+from subscriptions.finance import build_finance_snapshot
 from subscriptions.service import (
     approve_receipt,
     approved_user_message,
@@ -426,11 +428,33 @@ def user_logs(request: HttpRequest, user_id: int) -> HttpResponse:
 
 
 @login_required
+@require_http_methods(["GET", "POST"])
 def receipts_list(request: HttpRequest) -> HttpResponse:
+    if request.method == "POST" and request.POST.get("action") == "add_yandex_spend":
+        raw_amount = (request.POST.get("amount") or "").strip().replace(",", ".")
+        raw_date = (request.POST.get("for_date") or "").strip()
+        note = (request.POST.get("note") or "").strip()
+        try:
+            amount = Decimal(raw_amount)
+            if amount <= 0:
+                raise InvalidOperation("amount")
+        except (InvalidOperation, ValueError):
+            messages.error(request, "Укажите сумму расхода Yandex больше 0.")
+            return redirect("panel:receipts")
+        try:
+            for_date = datetime.strptime(raw_date, "%Y-%m-%d").date() if raw_date else timezone.localdate()
+        except ValueError:
+            messages.error(request, "Некорректная дата расхода.")
+            return redirect("panel:receipts")
+        YandexBillingEntry.objects.create(for_date=for_date, amount_rub=amount, note=note)
+        messages.success(request, f"Учтён расход Yandex: {amount} ₽ за {for_date.strftime('%d.%m.%Y')}.")
+        return redirect("panel:receipts")
+
     status = request.GET.get("status", "").strip()
     qs = PaymentReceipt.objects.select_related("user").all()
     if status:
         qs = qs.filter(status=status)
+    finance = build_finance_snapshot()
     return render(
         request,
         "panel/receipts.html",
@@ -438,7 +462,9 @@ def receipts_list(request: HttpRequest) -> HttpResponse:
             "items": qs[:300],
             "status": status,
             "statuses": ReceiptStatus.choices,
-            "pending_count": PaymentReceipt.objects.filter(status=ReceiptStatus.PENDING).count(),
+            "pending_count": finance["pending_count"],
+            "finance": finance,
+            "today": timezone.localdate().isoformat(),
         },
     )
 
@@ -557,6 +583,18 @@ def settings_view(request: HttpRequest) -> HttpResponse:
                 cfg.service_tax_collected = Decimal(request.POST.get("service_tax_collected"))
         except (InvalidOperation, ValueError):
             pass
+        for field, default in (
+            ("yandex_llm_rub_per_1k", "0.40"),
+            ("yandex_stt_rub_per_request", "0.15"),
+            ("yandex_ocr_rub_per_page", "0.10"),
+        ):
+            raw = request.POST.get(field)
+            if raw in (None, ""):
+                continue
+            try:
+                setattr(cfg, field, Decimal(str(raw).replace(",", ".")))
+            except (InvalidOperation, ValueError):
+                setattr(cfg, field, Decimal(default))
         cfg.save()
         log_activity(kind=ActivityKind.SETTINGS, title="Обновлены настройки", detail="Из панели")
         warn = _model_warning(cfg.yandex_model)

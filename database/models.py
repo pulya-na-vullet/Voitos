@@ -190,6 +190,25 @@ class AppSettings(models.Model):
         decimal_places=2,
         default=Decimal("0"),
     )
+    yandex_llm_rub_per_1k = models.DecimalField(
+        "YandexGPT, ₽ / 1000 токенов",
+        max_digits=10,
+        decimal_places=4,
+        default=Decimal("0.40"),
+        help_text="Оценка для дашборда оплаты. Уточните по тарифу в Yandex Cloud.",
+    )
+    yandex_stt_rub_per_request = models.DecimalField(
+        "SpeechKit STT, ₽ / запрос",
+        max_digits=10,
+        decimal_places=4,
+        default=Decimal("0.15"),
+    )
+    yandex_ocr_rub_per_page = models.DecimalField(
+        "OCR, ₽ / страница",
+        max_digits=10,
+        decimal_places=4,
+        default=Decimal("0.10"),
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def tax_usage_ratio(self) -> float:
@@ -797,6 +816,59 @@ class PendingAction(models.Model):
         self.pending_kind = ""
         self.pending_payload = {}
         self.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+
+
+class AiUsageKind(models.TextChoices):
+    LLM = "llm", "YandexGPT"
+    STT = "stt", "SpeechKit"
+    OCR = "ocr", "OCR"
+
+
+class AiUsageLog(models.Model):
+    """Estimated Yandex AI usage for subscription finance dashboard."""
+
+    kind = models.CharField(max_length=16, choices=AiUsageKind.choices)
+    model_name = models.CharField(max_length=128, blank=True, default="")
+    input_tokens = models.PositiveIntegerField(default=0)
+    output_tokens = models.PositiveIntegerField(default=0)
+    units = models.PositiveIntegerField(
+        default=1,
+        help_text="Запросы STT / страницы OCR / иные единицы.",
+    )
+    estimated_cost_rub = models.DecimalField(
+        max_digits=12, decimal_places=4, default=Decimal("0")
+    )
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Расход Yandex AI"
+        verbose_name_plural = "Расходы Yandex AI"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["kind", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind} {self.estimated_cost_rub}₽ @ {self.created_at:%Y-%m-%d}"
+
+
+class YandexBillingEntry(models.Model):
+    """Manual fact from Yandex Cloud billing for net-profit calculation."""
+
+    for_date = models.DateField("Дата расхода")
+    amount_rub = models.DecimalField("Сумма, ₽", max_digits=12, decimal_places=2)
+    note = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Факт расходов Yandex"
+        verbose_name_plural = "Факты расходов Yandex"
+        ordering = ["-for_date", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.for_date}: {self.amount_rub} ₽"
 
 
 class BotRuntimeStatus(models.Model):

@@ -1,8 +1,8 @@
 {% extends "panel/base.html" %}
-{% block title %}Чеки — Voitos{% endblock %}
+{% block title %}{% if bot_user %}Чеки — {{ bot_user }}{% else %}Оплата подписок{% endif %} — Voitos{% endblock %}
 {% block content %}
 <div class="topbar">
-  <h1>{% if bot_user %}Чеки: {{ bot_user }}{% else %}Чеки оплаты{% endif %}</h1>
+  <h1>{% if bot_user %}Чеки: {{ bot_user }}{% else %}Оплата подписок{% endif %}</h1>
   <div>
     {% if pending_count %}<span class="badge bad">На проверке: {{ pending_count }}</span>{% endif %}
     {% if not bot_user %}
@@ -18,7 +18,176 @@
   </div>
 </div>
 
+{% if finance and not bot_user %}
+<section style="margin-bottom:18px;">
+  <div class="grid stats">
+    <div class="card">
+      <div class="stat-label">Собрано за неделю</div>
+      <div class="stat-value">{{ finance.periods.week.collected }} ₽</div>
+      <div class="muted">{{ finance.periods.week.approved_count }} чек(ов)</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Собрано за месяц</div>
+      <div class="stat-value">{{ finance.periods.month.collected }} ₽</div>
+      <div class="muted">{{ finance.periods.month.approved_count }} чек(ов)</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Собрано за год</div>
+      <div class="stat-value">{{ finance.periods.year.collected }} ₽</div>
+      <div class="muted">{{ finance.periods.year.approved_count }} чек(ов)</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">На проверке</div>
+      <div class="stat-value">{{ finance.pending_amount }} ₽</div>
+      <div class="muted">{{ finance.pending_count }} чек(ов)</div>
+    </div>
+  </div>
+
+  <div class="grid stats" style="margin-top:12px;">
+    <div class="card">
+      <div class="stat-label">Чистыми за неделю</div>
+      <div class="stat-value" style="color: {% if finance.periods.week.net >= 0 %}var(--ok){% else %}var(--danger){% endif %};">{{ finance.periods.week.net }} ₽</div>
+      <div class="muted">сборы − Yandex ({{ finance.periods.week.ai_used }} ₽, {% if finance.periods.week.ai_source == "billing" %}факт{% else %}оценка{% endif %})</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Чистыми за месяц</div>
+      <div class="stat-value" style="color: {% if finance.periods.month.net >= 0 %}var(--ok){% else %}var(--danger){% endif %};">{{ finance.periods.month.net }} ₽</div>
+      <div class="muted">сборы − Yandex ({{ finance.periods.month.ai_used }} ₽, {% if finance.periods.month.ai_source == "billing" %}факт{% else %}оценка{% endif %})</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Чистыми за год</div>
+      <div class="stat-value" style="color: {% if finance.periods.year.net >= 0 %}var(--ok){% else %}var(--danger){% endif %};">{{ finance.periods.year.net }} ₽</div>
+      <div class="muted">сборы − Yandex ({{ finance.periods.year.ai_used }} ₽, {% if finance.periods.year.ai_source == "billing" %}факт{% else %}оценка{% endif %})</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Yandex AI за месяц</div>
+      <div class="stat-value">{{ finance.periods.month.ai_used }} ₽</div>
+      <div class="muted">оценка {{ finance.periods.month.ai_estimated }} ₽ · факт {{ finance.periods.month.ai_billed }} ₽</div>
+    </div>
+  </div>
+
+  <div class="grid stats" style="margin-top:12px;">
+    <div class="card">
+      <div class="stat-label">Пользователи всего</div>
+      <div class="stat-value">{{ finance.users.total }}</div>
+      <div class="muted">активных {{ finance.users.active }} · льготный {{ finance.users.grace }} · блок {{ finance.users.blocked }}</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Новые за неделю</div>
+      <div class="stat-value">{{ finance.periods.week.new_users }}</div>
+      <div class="muted">динамика регистраций</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Новые за месяц</div>
+      <div class="stat-value">{{ finance.periods.month.new_users }}</div>
+      <div class="muted">с начала месяца</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Новые за год</div>
+      <div class="stat-value">{{ finance.periods.year.new_users }}</div>
+      <div class="muted">с начала года</div>
+    </div>
+  </div>
+
+  <div class="grid two" style="margin-top:16px;">
+    <div class="card">
+      <h3 style="margin-top:0;">Динамика 30 дней</h3>
+      <canvas id="financeChart" height="140"></canvas>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Расходы Yandex (факт из биллинга)</h3>
+      <p class="muted" style="margin-top:0;">Если внесён факт за период — чистая прибыль считается по нему. Иначе используется оценка по логам API.</p>
+      <form method="post" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_yandex_spend">
+        <div class="form-row" style="margin:0; min-width:130px;">
+          <label>Дата</label>
+          <input type="date" name="for_date" value="{{ today }}" required>
+        </div>
+        <div class="form-row" style="margin:0; min-width:120px;">
+          <label>Сумма, ₽</label>
+          <input type="number" name="amount" min="0.01" step="0.01" required placeholder="120.50">
+        </div>
+        <div class="form-row" style="margin:0; flex:1; min-width:160px;">
+          <label>Комментарий</label>
+          <input type="text" name="note" placeholder="Yandex Cloud за месяц">
+        </div>
+        <button class="btn small" type="submit">Учесть</button>
+      </form>
+      <table>
+        <thead><tr><th>Дата</th><th>Сумма</th><th>Комментарий</th></tr></thead>
+        <tbody>
+        {% for row in finance.billing_entries %}
+          <tr>
+            <td class="mono">{{ row.for_date|date:"d.m.Y" }}</td>
+            <td>{{ row.amount_rub }} ₽</td>
+            <td class="muted">{{ row.note|default:"—" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="3" class="muted">Пока нет ручных записей — показывается оценка по API</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const labels = {{ finance.chart.labels_json|safe }};
+  const revenue = {{ finance.chart.revenue_json|safe }};
+  const users = {{ finance.chart.users_json|safe }};
+  const ai = {{ finance.chart.ai_json|safe }};
+  const ctx = document.getElementById('financeChart');
+  if (!ctx || typeof Chart === 'undefined') return;
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Сборы, ₽',
+          data: revenue,
+          borderColor: '#2dd4bf',
+          backgroundColor: 'rgba(45,212,191,0.12)',
+          tension: 0.25,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Yandex (оценка), ₽',
+          data: ai,
+          borderColor: '#e6c07b',
+          backgroundColor: 'rgba(230,192,123,0.10)',
+          tension: 0.25,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Новые пользователи',
+          data: users,
+          borderColor: '#3d9cfd',
+          backgroundColor: 'rgba(61,156,253,0.10)',
+          tension: 0.25,
+          yAxisID: 'y1',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        y: { position: 'left', ticks: { color: '#8b9bb0' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+        y1: { position: 'right', ticks: { color: '#8b9bb0', stepSize: 1 }, grid: { drawOnChartArea: false } },
+        x: { ticks: { color: '#8b9bb0', maxRotation: 0 }, grid: { display: false } },
+      },
+      plugins: { legend: { labels: { color: '#e8eef6' } } },
+    },
+  });
+})();
+</script>
+{% endif %}
+
 <div class="card">
+  <h3 style="margin-top:0;">{% if bot_user %}Чеки пользователя{% else %}Чеки{% endif %}</h3>
   <table>
     <thead>
       <tr>

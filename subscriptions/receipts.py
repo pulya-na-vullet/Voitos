@@ -101,6 +101,12 @@ def ocr_image_bytes(image_bytes: bytes, filename: str = "") -> str:
             data = resp.json()
             text = _extract_ocr_v1_text(data)
             if text.strip():
+                try:
+                    from ai.usage import log_ocr_call
+
+                    log_ocr_call(mime=mime, filename=filename)
+                except Exception:
+                    logger.exception("Failed to record OCR usage")
                 return text
         else:
             logger.warning("OCR v1 failed %s: %s", resp.status_code, resp.text[:300])
@@ -128,7 +134,14 @@ def ocr_image_bytes(image_bytes: bytes, filename: str = "") -> str:
     if resp.status_code >= 400:
         logger.error("Vision OCR error %s: %s", resp.status_code, resp.text[:400])
         resp.raise_for_status()
-    return _extract_vision_text(resp.json())
+    text = _extract_vision_text(resp.json())
+    try:
+        from ai.usage import log_ocr_call
+
+        log_ocr_call(mime=mime, filename=filename)
+    except Exception:
+        logger.exception("Failed to record OCR usage")
+    return text
 
 
 def _extract_ocr_v1_text(data: dict[str, Any]) -> str:
