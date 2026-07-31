@@ -21,6 +21,7 @@ class IntentRulesTests(TestCase):
     def test_help_command(self):
         r = self.analyzer.analyze("помощь")
         self.assertEqual(r.intent, "help")
+        self.assertEqual(self.analyzer.analyze("описание").intent, "help")
 
     def test_subscription_command(self):
         r = self.analyzer.analyze("подписка")
