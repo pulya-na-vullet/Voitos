@@ -98,5 +98,6 @@ class DeleteReceiptTests(TestCase):
         b.save()
         resp = self.client.get("/panel/receipts/", {"find_dupes": "1"})
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'class="dupe-row"')
+        self.assertContains(resp, "dupe-row")
+        self.assertContains(resp, "background:rgba(230,192,123")
         self.assertContains(resp, "Дубль")

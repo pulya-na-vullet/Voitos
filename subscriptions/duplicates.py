@@ -5,6 +5,7 @@ import logging
 from collections import defaultdict
 from typing import Iterable
 
+from django.core.files.storage import default_storage
 from django.db.models import Count
 
 from database.models import PaymentReceipt, ReceiptStatus
@@ -16,19 +17,40 @@ def file_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _read_receipt_bytes(receipt: PaymentReceipt) -> bytes:
+    """Read receipt file bytes from FileField / storage as reliably as possible."""
+    if not receipt.image:
+        return b""
+    name = getattr(receipt.image, "name", "") or ""
+    # Prefer storage API (works even if .open on field fails)
+    if name and default_storage.exists(name):
+        try:
+            with default_storage.open(name, "rb") as fh:
+                return fh.read() or b""
+        except Exception:
+            logger.exception("storage open failed for receipt #%s (%s)", receipt.pk, name)
+    try:
+        receipt.image.open("rb")
+        try:
+            return receipt.image.read() or b""
+        finally:
+            try:
+                receipt.image.close()
+            except Exception:
+                pass
+    except Exception:
+        logger.exception("image.open failed for receipt #%s", receipt.pk)
+    return b""
+
+
 def ensure_receipt_hash(receipt: PaymentReceipt) -> str:
     """Compute and persist content_hash from stored file if missing."""
     if receipt.content_hash:
         return receipt.content_hash
-    if not receipt.image:
+    data = _read_receipt_bytes(receipt)
+    if not data:
         return ""
-    try:
-        receipt.image.open("rb")
-        digest = file_sha256(receipt.image.read())
-        receipt.image.close()
-    except Exception:
-        logger.exception("Failed to hash receipt #%s", receipt.pk)
-        return ""
+    digest = file_sha256(data)
     if digest:
         receipt.content_hash = digest
         receipt.save(update_fields=["content_hash"])
@@ -74,6 +96,10 @@ def group_identical_receipts(
     """
     backfill_missing_hashes()
     if receipts is None:
+        # Re-hash anything still empty (files may have appeared)
+        still = PaymentReceipt.objects.filter(content_hash="").exclude(image="")
+        for receipt in still.iterator():
+            ensure_receipt_hash(receipt)
         dupe_hashes = (
             PaymentReceipt.objects.exclude(content_hash="")
             .values("content_hash")
@@ -106,6 +132,25 @@ def group_identical_receipts(
     return dict(by_hash)
 
 
+def soft_duplicate_groups(
+    receipts: Iterable[PaymentReceipt],
+) -> dict[str, list[PaymentReceipt]]:
+    """
+    Fallback when file hashes are missing: same user + same amount + approved.
+
+    Keyed as soft:<user_id>:<amount>.
+    """
+    by_key: dict[str, list[PaymentReceipt]] = defaultdict(list)
+    for r in receipts:
+        if r.status != ReceiptStatus.APPROVED or r.amount is None:
+            continue
+        if r.content_hash:
+            continue  # already covered by hard hash groups
+        key = f"soft:{r.user_id}:{r.amount}"
+        by_key[key].append(r)
+    return {k: rows for k, rows in by_key.items() if len(rows) >= 2}
+
+
 def duplicate_labels_for_items(
     items: Iterable[PaymentReceipt] | None = None,
     *,
@@ -121,7 +166,19 @@ def duplicate_labels_for_items(
       receipt_id -> label like "Дубль A (#12, #15)"
       groups summary for UI cards
     """
-    groups = group_identical_receipts(None if global_scan else items)
+    item_list = list(items) if items is not None else None
+    groups = group_identical_receipts(None if global_scan else item_list)
+
+    # Soft fallback for approved twins without hashes (legacy / unread files)
+    if item_list is not None:
+        soft = soft_duplicate_groups(item_list)
+        for key, rows in soft.items():
+            # Don't override a hard hash group that already includes these ids
+            covered = {r.id for rows2 in groups.values() for r in rows2}
+            if any(r.id in covered for r in rows):
+                continue
+            groups[key] = rows
+
     labels: dict[int, str] = {}
     summaries: list[dict] = []
     for idx, (digest, rows) in enumerate(
@@ -131,18 +188,20 @@ def duplicate_labels_for_items(
         ids = [r.id for r in rows]
         users = sorted({str(r.user) for r in rows})
         statuses = sorted({r.get_status_display() for r in rows})
-        label = f"Дубль {letter}"
+        soft = str(digest).startswith("soft:")
+        label = f"Дубль {letter}" + (" ?" if soft else "")
         for r in rows:
             others = [i for i in ids if i != r.id]
             labels[r.id] = f"{label} (=#{', #'.join(map(str, others))})"
         summaries.append(
             {
                 "letter": letter,
-                "hash": digest[:12],
+                "hash": (digest[:12] if not soft else "без файла"),
                 "ids": ids,
                 "users": users,
                 "statuses": statuses,
                 "count": len(rows),
+                "soft": soft,
                 "has_approved": any(r.status == ReceiptStatus.APPROVED for r in rows),
                 "has_pending": any(r.status == ReceiptStatus.PENDING for r in rows),
             }

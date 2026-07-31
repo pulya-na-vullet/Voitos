@@ -69,5 +69,6 @@ class ReceiptDuplicateTests(TestCase):
         resp = self.client.get("/panel/receipts/", {"find_dupes": "1"})
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Дубль")
-        self.assertContains(resp, "Дубли найдены")
+        self.assertContains(resp, "Дубли: 1 групп")
+        self.assertContains(resp, "dupe-row")
         self.assertContains(resp, "Одинаковые чеки")

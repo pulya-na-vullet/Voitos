@@ -51,6 +51,7 @@ from services.service import (
     advance_work_stage,
     approve_service_receipt,
     approved_service_message,
+    delete_service_campaign,
     invite_new_members_to_group_campaigns,
     launch_campaign_to_group,
     notify_members_added_to_group,
@@ -532,15 +533,24 @@ def receipts_list(request: HttpRequest) -> HttpResponse:
     items = list(qs[:300])
     dupe_labels: dict[int, str] = {}
     dupe_groups: list[dict] = []
+    dupe_ids: set[int] = set()
     if find_dupes:
         from subscriptions.duplicates import duplicate_labels_for_items
 
         # Global scan backfills SHA-256 for old receipts and finds all twins
         dupe_labels, dupe_groups = duplicate_labels_for_items(items, global_scan=True)
-    # Attach label for template convenience
+        dupe_ids = set(dupe_labels.keys())
+        # Refresh items so content_hash written during backfill is visible
+        id_order = [i.id for i in items]
+        refreshed = {
+            r.id: r
+            for r in PaymentReceipt.objects.select_related("user").filter(id__in=id_order)
+        }
+        items = [refreshed[i] for i in id_order if i in refreshed]
+    # Attach label for template convenience (also mirrored in dupe_labels dict)
     for item in items:
         item.dupe_label = dupe_labels.get(item.id, "")
-        item.is_dupe = bool(item.dupe_label)
+        item.is_dupe = item.id in dupe_ids
     finance = build_finance_snapshot()
     return render(
         request,
@@ -555,6 +565,7 @@ def receipts_list(request: HttpRequest) -> HttpResponse:
             "find_dupes": find_dupes,
             "dupe_groups": dupe_groups,
             "dupe_labels": dupe_labels,
+            "dupe_ids": dupe_ids,
         },
     )
 
@@ -916,6 +927,15 @@ def services_home(request: HttpRequest) -> HttpResponse:
             except ValueError as exc:
                 messages.error(request, str(exc))
                 return redirect("panel:services")
+        elif action == "delete_campaign":
+            campaign = get_object_or_404(ServiceCampaign, pk=request.POST.get("campaign_id"))
+            reason = (request.POST.get("reason") or "").strip()
+            if not reason:
+                messages.error(request, "Укажите причину удаления сбора.")
+                return redirect("panel:services")
+            label = delete_service_campaign(campaign, reason=reason)
+            messages.success(request, f"Сбор удалён: {label}. Причина: {reason}")
+            return redirect("panel:services")
         return redirect("panel:services")
 
     categories = []
@@ -1142,6 +1162,14 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             except ValueError as exc:
                 messages.error(request, str(exc))
             return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "delete_campaign":
+            reason = (request.POST.get("reason") or "").strip()
+            if not reason:
+                messages.error(request, "Укажите причину удаления сбора.")
+                return redirect("panel:service_campaign_detail", pk=pk)
+            label = delete_service_campaign(campaign, reason=reason)
+            messages.success(request, f"Сбор удалён: {label}. Причина: {reason}")
+            return redirect("panel:services")
 
     from django.db.models import Sum
 

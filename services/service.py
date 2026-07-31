@@ -93,6 +93,51 @@ def campaign_surplus(campaign: ServiceCampaign) -> Decimal:
     return paid - total
 
 
+def delete_service_campaign(campaign: ServiceCampaign, *, reason: str = "") -> str:
+    """
+    Permanently delete a service campaign and related invites/receipts/photos.
+
+    Returns a short human label of what was deleted.
+    """
+    reason = (reason or "").strip()
+    title = str(campaign)
+    campaign_id = campaign.id
+    # Remove media files best-effort before CASCADE row delete
+    for photo in list(campaign.offer_photos.all()):
+        try:
+            if photo.image:
+                photo.image.delete(save=False)
+        except Exception:
+            logger.exception("Failed to delete offer photo %s", photo.id)
+    for photo in list(campaign.result_photos.all()):
+        try:
+            if photo.image:
+                photo.image.delete(save=False)
+        except Exception:
+            logger.exception("Failed to delete result photo %s", photo.id)
+    for receipt in list(campaign.receipts.all()):
+        try:
+            if receipt.image:
+                receipt.image.delete(save=False)
+        except Exception:
+            logger.exception("Failed to delete service receipt file %s", receipt.id)
+
+    campaign.delete()
+    try:
+        from services.tax import sync_self_employed_tax_collected
+
+        sync_self_employed_tax_collected()
+    except Exception:
+        logger.exception("Failed to sync tax after campaign delete #%s", campaign_id)
+    logger.info(
+        "Deleted service campaign #%s (%s). Reason: %s",
+        campaign_id,
+        title,
+        reason or "—",
+    )
+    return title
+
+
 def group_accumulated_budget(group: ServiceGroup) -> Decimal:
     """
     Budget accumulated for a resident group: sum of surpluses from closed
