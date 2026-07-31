@@ -4,8 +4,10 @@ import logging
 from typing import Any
 
 from ai.factory import AINotConfiguredError, get_stt_provider
+from ai.intent import HELP_RE, SUBSCRIPTION_RE
 from bot.access import AccessDenied, resolve_or_create_user
 from bot.client import MaxClient
+from bot.messages import help_message
 from bot.pipeline import MessagePipeline
 from bot.status import normalize_sender
 from database.models import AccessState, MessageRole, ChatMessage
@@ -139,23 +141,26 @@ class UpdateHandler:
         if not text:
             return
 
+        # Help / subscription / payment topics stay available even when blocked
+        is_help = bool(HELP_RE.match(text))
+        is_subscription = bool(SUBSCRIPTION_RE.match(text))
         lower = text.lower()
-        if any(k in lower for k in ("оплат", "подписк", "чек", "перевод")):
-            # Always allow payment help
-            if "чек" not in lower or image_url is None:
-                self._reply(user, access_message(user) or payment_help_text())
-                # still allow grace users to continue with features below
-                if user.access_state() == AccessState.BLOCKED:
-                    return
+        payment_topic = any(k in lower for k in ("оплат", "подписк", "чек", "перевод"))
 
-        # Subscription gate
         user.ensure_grace_period()
         state = user.access_state()
         if state == AccessState.BLOCKED:
-            self._reply(user, access_message(user) or payment_help_text())
+            from bot.messages import subscription_detail_message
+
+            if is_help:
+                self._reply(user, help_message(user))
+            elif is_subscription or payment_topic:
+                self._reply(user, subscription_detail_message(user))
+            else:
+                self._reply(user, access_message(user) or payment_help_text())
             return
-        if state == AccessState.GRACE:
-            # Notify once per day about payment wait, but allow features
+
+        if state == AccessState.GRACE and not is_help and not is_subscription:
             notice = access_message(user)
             if notice and self._should_send_grace_notice(user):
                 self._reply(user, notice)
@@ -236,19 +241,7 @@ class UpdateHandler:
                 self.client.send_message(str(exc), user_id=uid)
             return
         user.ensure_grace_period()
-        base = (
-            "Привет! Я Voitos — твой личный помощник.\n"
-            "Пиши мысли, задачи и напоминания. Можно голосом.\n"
-            "Команды: «Запомни это», «Не запоминай», «Что мне нужно сделать?»\n\n"
-        )
-        state = user.access_state()
-        if state == AccessState.ACTIVE:
-            extra = "Подписка активна."
-        elif state == AccessState.GRACE:
-            extra = access_message(user) or payment_help_text()
-        else:
-            extra = access_message(user) or payment_help_text()
-        self._reply(user, base + extra)
+        self._reply(user, help_message(user))
 
     def _reply(self, user, text: str) -> None:
         try:

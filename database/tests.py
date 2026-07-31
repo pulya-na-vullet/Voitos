@@ -18,6 +18,14 @@ class IntentRulesTests(TestCase):
     def setUp(self) -> None:
         self.analyzer = IntentAnalyzer()
 
+    def test_help_command(self):
+        r = self.analyzer.analyze("помощь")
+        self.assertEqual(r.intent, "help")
+
+    def test_subscription_command(self):
+        r = self.analyzer.analyze("подписка")
+        self.assertEqual(r.intent, "subscription_info")
+
     def test_force_remember(self):
         r = self.analyzer.analyze("Запомни это.")
         self.assertEqual(r.intent, "force_remember")
@@ -179,6 +187,33 @@ class PipelineTests(TestCase):
         TaskService().create(self.user, "Позвонить стоматологу")
         reply = self.pipeline.handle(self.user, "Что мне нужно сделать?")
         self.assertIn("стоматологу", reply)
+
+    def test_help_shows_features_and_days(self):
+        self.user.subscription_until = timezone.now() + timedelta(days=12)
+        self.user.grace_until = None
+        self.user.save()
+        reply = self.pipeline.handle(self.user, "помощь")
+        self.assertIn("Что умею", reply)
+        self.assertIn("подписка", reply.lower())
+        self.assertIn("дн", reply)
+
+    def test_subscription_command_details(self):
+        from database.models import PaymentReceipt, ReceiptStatus
+
+        self.user.subscription_until = timezone.now() + timedelta(days=5)
+        self.user.save()
+        PaymentReceipt.objects.create(
+            user=self.user,
+            amount=100,
+            status=ReceiptStatus.APPROVED,
+            admin_comment="Оплата подтверждена, спасибо",
+            months_granted=1,
+        )
+        reply = self.pipeline.handle(self.user, "подписка")
+        self.assertIn("Условия пользования", reply)
+        self.assertIn("Осталось дней", reply)
+        self.assertIn("Оплата подтверждена", reply)
+        self.assertIn("89625507832", reply)
 
     @patch("bot.pipeline.IntentAnalyzer.analyze")
     def test_reminder_clarification_then_time(self, analyze):

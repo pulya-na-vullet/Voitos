@@ -105,6 +105,16 @@ class MessagePipeline:
         intent: IntentResult,
         pending: PendingAction,
     ) -> str:
+        if intent.intent == "help":
+            from bot.messages import help_message
+
+            return help_message(user)
+
+        if intent.intent == "subscription_info":
+            from bot.messages import subscription_detail_message
+
+            return subscription_detail_message(user)
+
         if intent.intent == "force_remember":
             source = pending.last_user_text.strip()
             if text.lower().startswith("запомни") and "это" not in text.lower()[:12]:

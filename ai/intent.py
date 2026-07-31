@@ -32,6 +32,8 @@ INTENT_SYSTEM_PROMPT = """Ты классификатор намерений п�
 - list_reminders — показать напоминания
 - search_memory — вопрос о сохранённой памяти (что помнишь про ...)
 - list_memory — что ты помнишь обо мне / общий обзор памяти
+- help — просьба показать справку / команды / что умеешь
+- subscription_info — «подписка», статус оплаты, условия
 - chat — обычный вопрос или разговор
 
 Категории памяти: purchases, home, car, finance, health, preferences, people, ideas, other
@@ -124,6 +126,16 @@ DELETE_TASK_RE = re.compile(r"удали(ть)?\s+задач", re.IGNORECASE)
 DELETE_REMINDER_RE = re.compile(r"удали(ть)?\s+напомина", re.IGNORECASE)
 COMPLETE_TASK_RE = re.compile(
     r"^(выполнил[аи]?|сделал[аи]?|готово[:\s]|отметь\s+выполнен)",
+    re.IGNORECASE,
+)
+HELP_RE = re.compile(
+    r"^\s*(/)?(help|start|помощь|справка|команды|меню|"
+    r"что\s+ты\s+умеешь|что\s+умеешь)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+SUBSCRIPTION_RE = re.compile(
+    r"^\s*(/)?(подписка|subscription|podpiska|моя\s+подписка|"
+    r"статус\s+подписки|условия\s+подписки)\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 
@@ -501,6 +513,10 @@ class IntentAnalyzer:
             return self._heuristic_fallback(cleaned)
 
     def _rule_based(self, text: str) -> IntentResult | None:
+        if HELP_RE.match(text):
+            return IntentResult(intent="help", confidence=1.0)
+        if SUBSCRIPTION_RE.match(text):
+            return IntentResult(intent="subscription_info", confidence=1.0)
         if FORCE_REMEMBER_RE.match(text) or text.lower().startswith("запомни это"):
             return IntentResult(intent="force_remember", confidence=1.0)
         if FORCE_FORGET_RE.match(text):
