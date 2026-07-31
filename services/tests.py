@@ -27,6 +27,7 @@ from services.service import (
     invite_new_members_to_group_campaigns,
     launch_campaign_to_group,
     process_unpaid_reminders,
+    resend_to_unpaid,
     user_groups_list_message,
 )
 
@@ -225,6 +226,28 @@ class ServiceCampaignTests(TestCase):
                 campaign=campaign, kind=CampaignNoticeKind.SURPLUS
             ).exists()
         )
+
+    def test_resend_skips_paid_and_uses_reminder_text(self):
+        other = BotUser.objects.create(max_user_id="u5", real_name="Кира")
+        self.group.members.add(other)
+        campaign, _ = self._launch(
+            total_amount=Decimal("1000"),
+            amount_per_user=Decimal("500"),
+        )
+        paid_inv = campaign.invites.get(user=self.user)
+        paid_inv.status = InviteStatus.PAID
+        paid_inv.amount_paid = Decimal("500")
+        paid_inv.save()
+        inbox = []
+
+        def capture(user, text):
+            inbox.append((user.id, text))
+
+        n = resend_to_unpaid(campaign, send_fn=capture)
+        self.assertEqual(n, 1)
+        self.assertEqual(inbox[0][0], other.id)
+        self.assertIn("Напоминаю вам", inbox[0][1])
+        self.assertNotIn("Начат сбор", inbox[0][1])
 
     def test_unpaid_reminders_before_event(self):
         campaign, _ = self._launch(event_at=timezone.now() + timedelta(hours=3))

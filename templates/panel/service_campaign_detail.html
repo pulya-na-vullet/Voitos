@@ -30,10 +30,10 @@
   <p class="muted" style="margin-top:10px;">Реквизиты: {{ cfg.service_payee_name }} / {{ cfg.service_payee_phone }} / {{ cfg.service_payee_status }}</p>
   <p class="muted">При достижении цели всем уходит «Сбор закрыт.» Неоплатившим — напоминания за 3 дня / 1 день / 2 часа до мероприятия.</p>
   <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-    {% if campaign.status != 'closed' and campaign.group %}
+    {% if campaign.status != 'closed' %}
     <form method="post">{% csrf_token %}
       <input type="hidden" name="action" value="resend">
-      <button class="btn secondary small" type="submit">Повторить рассылку группе</button>
+      <button class="btn secondary small" type="submit">Повторить рассылку неоплатившим</button>
     </form>
     {% endif %}
     {% if campaign.status != 'closed' %}

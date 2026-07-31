@@ -143,22 +143,24 @@ def create_campaign(
     )
 
 
-def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
+def _campaign_date_lines(campaign: ServiceCampaign) -> tuple[str, str, str]:
     if campaign.event_at:
         date_s = timezone.localtime(campaign.event_at).strftime("%d.%m.%Y %H:%M")
         date_label = "Дата мероприятия"
     else:
         date_s = timezone.localtime(campaign.created_at).strftime("%d.%m.%Y")
         date_label = "Дата"
-    group_line = ""
-    if campaign.group_id:
-        group_line = f"Группа: {campaign.group.name}\n"
+    group_line = f"Группа: {campaign.group.name}\n" if campaign.group_id else ""
     desc = f"{campaign.description}\n" if campaign.description else ""
+    return date_s, date_label, group_line + desc
+
+
+def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
+    date_s, date_label, extra = _campaign_date_lines(campaign)
     return (
         f"Начат сбор: {campaign.get_category_display()}\n"
         f"{campaign.title}\n"
-        f"{desc}"
-        f"{group_line}"
+        f"{extra}"
         f"{date_label}: {date_s}\n"
         f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
         f"Вам нужно перевести: {amount_per_user:.0f} ₽\n\n"
@@ -167,6 +169,62 @@ def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
         "Пришлите фото чека о переводе в этот чат.\n"
         "Список сборов — команда «сборы»."
     )
+
+
+def resend_offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
+    """Reminder text for admin «Повторить рассылку» — only for unpaid users."""
+    date_s, date_label, extra = _campaign_date_lines(campaign)
+    return (
+        f"Напоминаю вам, что идёт сбор: {campaign.get_category_display()}\n"
+        f"{campaign.title}\n"
+        f"{extra}"
+        f"{date_label}: {date_s}\n"
+        f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
+        f"Вам нужно перевести: {amount_per_user:.0f} ₽\n\n"
+        f"Реквизиты:\n{service_payment_requisites()}\n\n"
+        f"{campaign_progress_line(campaign)}\n\n"
+        "Если вы ещё не оплатили — пришлите фото чека в этот чат.\n"
+        "Список сборов — команда «сборы»."
+    )
+
+
+def resend_to_unpaid(campaign: ServiceCampaign, send_fn=None) -> int:
+    """
+    Admin resend: remind only users who have not paid yet.
+    Does not message invitees with status PAID.
+    """
+    if campaign.status == CampaignStatus.CLOSED:
+        return 0
+    amount = Decimal(campaign.amount_per_user or 0)
+    if amount <= 0:
+        return 0
+    unpaid = (
+        campaign.invites.filter(status=InviteStatus.OFFERED)
+        .select_related("user")
+    )
+    text = resend_offer_message(campaign, amount)
+    sent = 0
+    for inv in unpaid:
+        ActivityLog.objects.create(
+            user=inv.user,
+            kind=ActivityKind.SERVICE_NOTICE,
+            title="Повторная рассылка сбора",
+            detail=campaign.title,
+            meta={"campaign_id": campaign.id, "invite_id": inv.id},
+        )
+        if send_fn:
+            try:
+                send_fn(inv.user, text)
+                sent += 1
+            except Exception:
+                logger.exception(
+                    "Failed resend to user %s about campaign %s",
+                    inv.user.max_user_id,
+                    campaign.id,
+                )
+        else:
+            sent += 1
+    return sent
 
 
 def _notice_already_sent(campaign: ServiceCampaign, user: BotUser, kind: str) -> bool:

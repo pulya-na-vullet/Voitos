@@ -48,9 +48,9 @@ from services.service import (
     invite_new_members_to_group_campaigns,
     launch_campaign_to_group,
     notify_members_added_to_group,
-    offer_to_users,
     reject_service_receipt,
     rejected_service_message,
+    resend_to_unpaid,
 )
 from subscriptions.service import (
     approve_receipt,
@@ -774,14 +774,23 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     campaign = get_object_or_404(ServiceCampaign.objects.select_related("group"), pk=pk)
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "resend" and campaign.group_id:
-            amount = campaign.amount_per_user or Decimal("0")
-            ids = list(campaign.group.members.values_list("id", flat=True))
-            if amount <= 0 or not ids:
-                messages.error(request, "Нет группы или суммы для рассылки")
+        if action == "resend":
+            if campaign.status == CampaignStatus.CLOSED:
+                messages.error(request, "Сбор уже закрыт")
+            elif (campaign.amount_per_user or 0) <= 0:
+                messages.error(request, "Нет суммы для рассылки")
             else:
-                sent = offer_to_users(campaign, ids, amount, send_fn=_notify_user)
-                messages.success(request, f"Повторная рассылка: {sent} сообщ.")
+                sent = resend_to_unpaid(campaign, send_fn=_notify_user)
+                if sent:
+                    messages.success(
+                        request,
+                        f"Напоминание отправлено неоплатившим: {sent} сообщ.",
+                    )
+                else:
+                    messages.info(
+                        request,
+                        "Некому напоминать — все участники уже оплатили или приглашений нет.",
+                    )
             return redirect("panel:service_campaign_detail", pk=pk)
         if action == "close":
             campaign.status = CampaignStatus.CLOSED
