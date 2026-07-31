@@ -1,9 +1,15 @@
 {% extends "panel/base.html" %}
-{% block title %}Вход — Voitos{% endblock %}
+{% block title %}Voitos — Панель администратора{% endblock %}
 {% block public %}
 <div class="login-wrap">
   <div class="login-card">
-    <h1>Voitos Admin</h1>
+    <div class="login-brand">
+      <img src="/static/panel/voitos_logo_04_mono.png" alt="Voitos" class="login-logo">
+      <div>
+        <h1>Voitos</h1>
+        <p class="brand-sub" style="margin:0;">Панель администратора</p>
+      </div>
+    </div>
     <p class="muted">Войдите, чтобы управлять помощником</p>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post">

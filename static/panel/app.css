@@ -49,11 +49,37 @@ a:hover { text-decoration: underline; }
   letter-spacing: 0.02em;
   margin-bottom: 6px;
 }
-.brand span { color: var(--accent-2); }
+.brand-with-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+  font-size: inherit;
+}
+.brand-logo {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.06);
+}
+.brand-name {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+}
+.brand span,
+.brand-name span { color: var(--accent-2); }
 .brand-sub {
   color: var(--muted);
   font-size: 0.85rem;
   margin-bottom: 28px;
+}
+.brand-with-logo .brand-sub {
+  margin-bottom: 0;
+  margin-top: 2px;
 }
 
 .nav a {
@@ -190,7 +216,22 @@ th { color: var(--muted); font-weight: 600; }
   border-radius: 18px;
   padding: 28px;
 }
-.login-card h1 { margin-top: 0; }
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.login-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+.login-card h1 { margin: 0; font-size: 1.7rem; }
+.login-brand .brand-sub { margin-bottom: 0; }
 .error { color: var(--danger); margin-bottom: 12px; }
 
 .muted { color: var(--muted); }

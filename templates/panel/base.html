@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Voitos Admin{% endblock %}</title>
+  <link rel="icon" type="image/png" href="/static/panel/voitos_logo_04_mono.png">
+  <link rel="apple-touch-icon" href="/static/panel/voitos_logo_04_mono.png">
   <link rel="stylesheet" href="/static/panel/app.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -11,8 +13,13 @@
 {% if request.user.is_authenticated %}
 <div class="layout">
   <aside class="sidebar">
-    <div class="brand">Voi<span>tos</span></div>
-    <div class="brand-sub">Панель администратора</div>
+    <div class="brand brand-with-logo">
+      <img src="/static/panel/voitos_logo_04_mono.png" alt="Voitos" class="brand-logo">
+      <div>
+        <div class="brand-name">Voi<span>tos</span></div>
+        <div class="brand-sub">Панель администратора</div>
+      </div>
+    </div>
     <nav class="nav">
       <a href="{% url 'panel:admin_tasks_today' %}" class="{% if request.resolver_match.url_name == 'admin_tasks_today' or request.resolver_match.url_name == 'admin_task_done' or request.resolver_match.url_name == 'admin_address_scan' %}active{% endif %}">Задачи на сегодня</a>
       <a href="{% url 'panel:users' %}" class="{% if request.resolver_match.url_name == 'users' %}active{% endif %}">Пользователи</a>
