@@ -56,6 +56,32 @@
       <label>Дней ожидания оплаты после истечения</label>
       <input type="number" name="grace_days" value="{{ cfg.grace_days }}" min="1">
     </div>
+    <hr style="border:0; border-top:1px solid var(--line); margin:22px 0;">
+    <h3 style="margin-top:0;">Сервисные сборы (самозанятый)</h3>
+    {% if tax_warning %}
+    <div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ tax_warning }}</div>
+    {% endif %}
+    <div class="form-row">
+      <label>Получатель</label>
+      <input type="text" name="service_payee_name" value="{{ cfg.service_payee_name }}">
+    </div>
+    <div class="form-row">
+      <label>Телефон</label>
+      <input type="text" name="service_payee_phone" value="{{ cfg.service_payee_phone }}">
+    </div>
+    <div class="form-row">
+      <label>Статус</label>
+      <input type="text" name="service_payee_status" value="{{ cfg.service_payee_status }}">
+    </div>
+    <div class="form-row">
+      <label>Лимит налоговой, ₽</label>
+      <input type="number" name="service_tax_limit" value="{{ cfg.service_tax_limit }}" min="1" step="1">
+    </div>
+    <div class="form-row">
+      <label>Уже собрано через самозанятого, ₽</label>
+      <input type="number" name="service_tax_collected" value="{{ cfg.service_tax_collected }}" min="0" step="1">
+      <div class="hint">При 85%+ лимита панель предупредит сменить самозанятого</div>
+    </div>
     <button class="btn" type="submit">Сохранить</button>
   </form>
 </div>

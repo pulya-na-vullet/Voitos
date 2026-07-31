@@ -3,14 +3,18 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import base64
+
 from ai.factory import AINotConfiguredError, get_stt_provider
-from ai.intent import HELP_RE, SUBSCRIPTION_RE
+from ai.intent import HELP_RE, SERVICE_COLLECTIONS_RE, SUBSCRIPTION_RE
 from bot.access import AccessDenied, resolve_or_create_user
 from bot.client import MaxClient
 from bot.messages import help_message
 from bot.pipeline import MessagePipeline
+from bot.registration import needs_registration, start_registration
 from bot.status import normalize_sender
-from database.models import AccessState, MessageRole, ChatMessage
+from database.models import AccessState, ChatMessage, MessageRole, PendingAction
+from services.service import open_invites_for_user, submit_service_receipt
 from subscriptions.service import (
     access_message,
     approved_user_message,
@@ -141,9 +145,10 @@ class UpdateHandler:
         if not text:
             return
 
-        # Help / subscription / payment topics stay available even when blocked
+        # Help / subscription / collections / registration stay available when blocked
         is_help = bool(HELP_RE.match(text))
         is_subscription = bool(SUBSCRIPTION_RE.match(text))
+        is_collections = bool(SERVICE_COLLECTIONS_RE.match(text))
         lower = text.lower()
         payment_topic = any(k in lower for k in ("оплат", "подписк", "чек", "перевод"))
 
@@ -151,16 +156,22 @@ class UpdateHandler:
         state = user.access_state()
         if state == AccessState.BLOCKED:
             from bot.messages import subscription_detail_message
+            from services.service import format_collections_for_user
 
-            if is_help:
+            pending, _ = PendingAction.objects.get_or_create(user=user)
+            if needs_registration(user) and not (is_help or is_subscription or is_collections):
+                self._reply(user, start_registration(user, pending))
+            elif is_help:
                 self._reply(user, help_message(user))
+            elif is_collections:
+                self._reply(user, format_collections_for_user(user))
             elif is_subscription or payment_topic:
                 self._reply(user, subscription_detail_message(user))
             else:
                 self._reply(user, access_message(user) or payment_help_text())
             return
 
-        if state == AccessState.GRACE and not is_help and not is_subscription:
+        if state == AccessState.GRACE and not is_help and not is_subscription and not is_collections:
             notice = access_message(user)
             if notice and self._should_send_grace_notice(user):
                 self._reply(user, notice)
@@ -192,6 +203,58 @@ class UpdateHandler:
     def _handle_receipt(self, user, image_url: str, filename: str) -> None:
         try:
             raw = self.client.download(image_url)
+        except Exception:
+            logger.exception("Receipt download failed")
+            self._reply(user, "Не удалось скачать файл чека. Пришлите ещё раз.")
+            return
+
+        # Prefer service campaign if user has open invites
+        invites = open_invites_for_user(user)
+        if invites:
+            if len(invites) > 1:
+                pending, _ = PendingAction.objects.get_or_create(user=user)
+                pending.pending_kind = "service_invite_pick"
+                pending.pending_payload = {
+                    "image_b64": base64.b64encode(raw).decode("ascii"),
+                    "filename": filename,
+                }
+                pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+                lines = [
+                    "У вас несколько активных сборов. К какому относится этот чек? Ответьте номером:"
+                ]
+                for i, inv in enumerate(invites, 1):
+                    lines.append(
+                        f"{i}. {inv.campaign.get_category_display()} — {inv.campaign.title} "
+                        f"({inv.amount_due:.0f} ₽)"
+                    )
+                self._reply(user, "\n".join(lines))
+                return
+            try:
+                receipt = submit_service_receipt(
+                    user, raw, invite=invites[0], filename=filename
+                )
+            except Exception:
+                logger.exception("Service receipt processing failed")
+                self._reply(
+                    user,
+                    "Не удалось разобрать чек сервисного сбора. Пришлите более чёткий скрин.",
+                )
+                return
+            msg = (
+                f"Чек по «{receipt.campaign.title}» отправлен администратору.\n"
+                f"Сумма: {receipt.amount or 'не распознана'} ₽"
+                f"{', дата: ' + receipt.transfer_date.strftime('%d.%m.%Y') if receipt.transfer_date else ''}."
+            )
+            self._reply(user, msg)
+            ChatMessage.objects.create(
+                user=user,
+                role=MessageRole.ASSISTANT,
+                text=msg,
+                intent="service_receipt",
+            )
+            return
+
+        try:
             receipt = submit_receipt(user, raw, filename=filename)
         except Exception:
             logger.exception("Receipt processing failed")
@@ -241,7 +304,11 @@ class UpdateHandler:
                 self.client.send_message(str(exc), user_id=uid)
             return
         user.ensure_grace_period()
-        self._reply(user, help_message(user))
+        pending, _ = PendingAction.objects.get_or_create(user=user)
+        if needs_registration(user):
+            self._reply(user, start_registration(user, pending))
+        else:
+            self._reply(user, help_message(user))
 
     def _reply(self, user, text: str) -> None:
         try:

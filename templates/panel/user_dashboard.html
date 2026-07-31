@@ -17,6 +17,25 @@
     · льготный период до:
     <strong>{% if bot_user.grace_until %}{{ bot_user.grace_until|date:"d.m.Y H:i" }}{% else %}—{% endif %}</strong>
   </p>
+  <p style="margin:8px 0 0;">Рейтинг гражданина:
+    <strong>{{ citizen.label }}</strong>
+    <span class="muted">({{ citizen.paid }}/{{ citizen.offered }} оплат, {{ citizen.ratio|floatformat:0 }}%)</span>
+  </p>
+</div>
+
+<div class="card" style="margin-bottom:16px; {% if bot_user.profile_status == 'pending_review' %}border-color: rgba(230,192,123,0.5);{% endif %}">
+  <h3 style="margin-top:0;">Анкета {% if bot_user.profile_status == 'pending_review' %}<span class="badge">Проверить данные</span>{% endif %}</h3>
+  <form method="post" action="{% url 'panel:user_profile_verify' bot_user.id %}">
+    {% csrf_token %}
+    <div class="form-row"><label>Имя</label><input type="text" name="real_name" value="{{ bot_user.real_name }}"></div>
+    <div class="form-row"><label>Телефон</label><input type="text" name="phone" value="{{ bot_user.phone }}"></div>
+    <div class="form-row"><label>Населённый пункт</label><input type="text" name="locality" value="{{ bot_user.locality }}"></div>
+    <div class="form-row"><label>Адрес</label><textarea name="address" rows="2">{{ bot_user.address }}</textarea></div>
+    <div class="form-row"><label>Комментарий админа</label><input type="text" name="note" value="{{ bot_user.profile_admin_note }}"></div>
+    <p class="muted">Статус: {{ bot_user.get_profile_status_display }}</p>
+    <button class="btn small" type="submit" name="action" value="verify">Подтвердить анкету</button>
+    <button class="btn danger small" type="submit" name="action" value="reject">Отклонить</button>
+  </form>
 </div>
 
 <div class="grid stats">

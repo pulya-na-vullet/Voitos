@@ -148,10 +148,15 @@ def _extract_vision_text(data: dict[str, Any]) -> str:
     return "\n".join(chunks)
 
 
-def analyze_receipt_text(ocr_text: str) -> ReceiptParseResult:
+def analyze_receipt_text(
+    ocr_text: str,
+    *,
+    expected_phone: str | None = None,
+    expected_name: str | None = None,
+) -> ReceiptParseResult:
     cfg = get_runtime_settings()
-    expected_phone = normalize_phone(cfg.payment_phone or "89625507832")
-    expected_name = cfg.payment_name or "Григорьев Дмитрий Вячеславович"
+    expected_phone = normalize_phone(expected_phone or cfg.payment_phone or "89625507832")
+    expected_name = expected_name or cfg.payment_name or "Григорьев Дмитрий Вячеславович"
 
     system = (
         "Ты извлекаешь данные из текста банковского чека/перевода. "

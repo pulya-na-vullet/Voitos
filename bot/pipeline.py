@@ -56,47 +56,70 @@ class MessagePipeline:
         )
 
         pending, _ = PendingAction.objects.get_or_create(user=user)
+
+        from bot.registration import (
+            REG_KIND,
+            handle_registration_step,
+            needs_registration,
+            start_registration,
+        )
+
+        if pending.pending_kind == REG_KIND:
+            reply = handle_registration_step(user, text, pending)
+            self._store_out(user, reply, "registration")
+            return reply
+
         if pending.pending_kind == "reminder_time":
             reply = self._finish_pending_reminder(user, text, pending)
             if reply is not None:
-                ChatMessage.objects.create(
-                    user=user,
-                    role=MessageRole.ASSISTANT,
-                    text=reply,
-                    intent="create_reminder",
-                )
-                ActivityLog.objects.create(
-                    user=user,
-                    kind=ActivityKind.MESSAGE_OUT,
-                    title="Исходящее сообщение",
-                    detail=reply[:500],
-                    meta={"intent": "create_reminder", "pending": "reminder_time"},
-                )
+                self._store_out(user, reply, "create_reminder")
+                return reply
+
+        if pending.pending_kind == "service_invite_pick":
+            reply = self._pick_service_invite(user, text, pending)
+            if reply is not None:
+                self._store_out(user, reply, "service_collections")
+                return reply
+
+        if needs_registration(user):
+            # Allow help/subscription/collections meta commands before forcing form
+            from ai.intent import HELP_RE, SERVICE_COLLECTIONS_RE, SUBSCRIPTION_RE
+
+            if not (
+                HELP_RE.match(text)
+                or SUBSCRIPTION_RE.match(text)
+                or SERVICE_COLLECTIONS_RE.match(text)
+            ):
+                reply = start_registration(user, pending)
+                self._store_out(user, reply, "registration")
                 return reply
 
         intent = self.analyzer.analyze(text)
         reply = self._dispatch(user, text, intent, pending)
 
+        self._store_out(user, reply, intent.intent)
+
+        # Keep last user text for "Запомни это"
+        if intent.intent not in {"force_remember", "force_forget", "registration"}:
+            pending.last_user_text = text
+            pending.save(update_fields=["last_user_text", "updated_at"])
+
+        return reply
+
+    def _store_out(self, user: BotUser, reply: str, intent: str) -> None:
         ChatMessage.objects.create(
             user=user,
             role=MessageRole.ASSISTANT,
             text=reply,
-            intent=intent.intent,
+            intent=intent,
         )
         ActivityLog.objects.create(
             user=user,
             kind=ActivityKind.MESSAGE_OUT,
             title="Исходящее сообщение",
             detail=reply[:500],
-            meta={"intent": intent.intent},
+            meta={"intent": intent},
         )
-
-        # Keep last user text for "Запомни это"
-        if intent.intent not in {"force_remember", "force_forget"}:
-            pending.last_user_text = text
-            pending.save(update_fields=["last_user_text", "updated_at"])
-
-        return reply
 
     def _dispatch(
         self,
@@ -114,6 +137,16 @@ class MessagePipeline:
             from bot.messages import subscription_detail_message
 
             return subscription_detail_message(user)
+
+        if intent.intent == "service_collections":
+            from services.service import format_collections_for_user
+
+            return format_collections_for_user(user)
+
+        if intent.intent == "registration":
+            from bot.registration import start_registration
+
+            return start_registration(user, pending)
 
         if intent.intent == "force_remember":
             source = pending.last_user_text.strip()
@@ -275,6 +308,64 @@ class MessagePipeline:
             clock = timezone.localtime(rem.due_at).strftime("%H:%M")
             return f"Готово. Буду напоминать каждый день в {clock}. Первый раз — {when}."
         return f"Готово. Напомню {when}."
+
+    def _pick_service_invite(self, user: BotUser, text: str, pending: PendingAction) -> str | None:
+        """User chooses which campaign a pending receipt photo belongs to."""
+        from services.service import open_invites_for_user
+
+        invites = open_invites_for_user(user)
+        payload = pending.pending_payload or {}
+        raw = payload.get("image_b64")
+        filename = payload.get("filename") or "receipt.jpg"
+        if not raw:
+            pending.clear_pending()
+            return "Не нашёл сохранённый чек. Пришлите фото ещё раз."
+
+        lower = text.lower().strip()
+        if lower in {"отмена", "стоп"}:
+            pending.clear_pending()
+            return "Ок, чек не прикрепляю. Пришлите снова, когда будете готовы."
+
+        chosen = None
+        if lower.isdigit():
+            idx = int(lower) - 1
+            if 0 <= idx < len(invites):
+                chosen = invites[idx]
+        if chosen is None:
+            for inv in invites:
+                title = inv.campaign.title.lower()
+                cat = inv.campaign.get_category_display().lower()
+                if lower in title or lower in cat or any(
+                    t in title for t in lower.split() if len(t) > 3
+                ):
+                    chosen = inv
+                    break
+        if chosen is None:
+            lines = ["Не понял, к какому сбору относится чек. Ответьте номером:"]
+            for i, inv in enumerate(invites, 1):
+                lines.append(f"{i}. {inv.campaign.get_category_display()} — {inv.campaign.title}")
+            return "\n".join(lines)
+
+        import base64
+
+        from services.service import submit_service_receipt
+
+        try:
+            receipt = submit_service_receipt(
+                user,
+                base64.b64decode(raw),
+                invite=chosen,
+                filename=filename,
+            )
+        except Exception:
+            logger.exception("Service receipt submit after pick failed")
+            pending.clear_pending()
+            return "Не удалось обработать чек. Пришлите фото ещё раз."
+        pending.clear_pending()
+        return (
+            f"Чек по «{chosen.campaign.title}» отправлен администратору.\n"
+            f"Сумма: {receipt.amount or 'не распознана'} ₽."
+        )
 
     def _chat(self, user: BotUser, text: str) -> str:
         memories = self.memory.list_all(user, limit=30)

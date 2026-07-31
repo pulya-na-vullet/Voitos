@@ -10,13 +10,23 @@ from database.models import (
     PaymentReceipt,
     PendingAction,
     Reminder,
+    ServiceCampaign,
+    ServiceInvite,
+    ServiceReceipt,
     TaskItem,
 )
 
 
 @admin.register(AppSettings)
 class AppSettingsAdmin(admin.ModelAdmin):
-    list_display = ("id", "bot_display_name", "yandex_model", "payment_phone", "updated_at")
+    list_display = (
+        "id",
+        "bot_display_name",
+        "yandex_model",
+        "payment_phone",
+        "service_payee_phone",
+        "updated_at",
+    )
 
 
 @admin.register(BotRuntimeStatus)
@@ -28,18 +38,38 @@ class BotRuntimeStatusAdmin(admin.ModelAdmin):
 class BotUserAdmin(admin.ModelAdmin):
     list_display = (
         "max_user_id",
-        "display_name",
+        "real_name",
+        "locality",
+        "profile_status",
         "subscription_until",
-        "grace_until",
         "is_active",
         "last_seen_at",
     )
-    search_fields = ("max_user_id", "display_name", "username")
+    search_fields = ("max_user_id", "display_name", "real_name", "username", "locality", "phone")
+    list_filter = ("profile_status", "locality")
 
 
 @admin.register(PaymentReceipt)
 class PaymentReceiptAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "amount", "status", "details_match", "months_granted", "created_at")
+    list_filter = ("status", "details_match")
+
+
+@admin.register(ServiceCampaign)
+class ServiceCampaignAdmin(admin.ModelAdmin):
+    list_display = ("title", "category", "locality", "total_amount", "status", "created_at")
+    list_filter = ("category", "status", "locality")
+
+
+@admin.register(ServiceInvite)
+class ServiceInviteAdmin(admin.ModelAdmin):
+    list_display = ("campaign", "user", "amount_due", "amount_paid", "status", "offered_at")
+    list_filter = ("status",)
+
+
+@admin.register(ServiceReceipt)
+class ServiceReceiptAdmin(admin.ModelAdmin):
+    list_display = ("id", "campaign", "user", "amount", "status", "details_match", "created_at")
     list_filter = ("status", "details_match")
 
 
@@ -75,4 +105,4 @@ class ActivityLogAdmin(admin.ModelAdmin):
 
 @admin.register(PendingAction)
 class PendingActionAdmin(admin.ModelAdmin):
-    list_display = ("user", "updated_at")
+    list_display = ("user", "pending_kind", "updated_at")

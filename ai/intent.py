@@ -34,6 +34,8 @@ INTENT_SYSTEM_PROMPT = """Ты классификатор намерений п�
 - list_memory — что ты помнишь обо мне / общий обзор памяти
 - help — просьба показать справку / команды / что умеешь
 - subscription_info — «подписка», статус оплаты, условия
+- service_collections — «сборы» / сервисные мероприятия / доступные сборы
+- registration — начать или продолжить анкету
 - chat — обычный вопрос или разговор
 
 Категории памяти: purchases, home, car, finance, health, preferences, people, ideas, other
@@ -136,6 +138,15 @@ HELP_RE = re.compile(
 SUBSCRIPTION_RE = re.compile(
     r"^\s*(/)?(подписка|subscription|podpiska|моя\s+подписка|"
     r"статус\s+подписки|условия\s+подписки)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+SERVICE_COLLECTIONS_RE = re.compile(
+    r"^\s*(/)?(сборы|сервис|сервисные\s+сборы|мероприятия|"
+    r"сервисные\s+мероприятия)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+REGISTRATION_RE = re.compile(
+    r"^\s*(/)?(регистрация|анкета|заполнить\s+анкету)\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 
@@ -517,6 +528,10 @@ class IntentAnalyzer:
             return IntentResult(intent="help", confidence=1.0)
         if SUBSCRIPTION_RE.match(text):
             return IntentResult(intent="subscription_info", confidence=1.0)
+        if SERVICE_COLLECTIONS_RE.match(text):
+            return IntentResult(intent="service_collections", confidence=1.0)
+        if REGISTRATION_RE.match(text):
+            return IntentResult(intent="registration", confidence=1.0)
         if FORCE_REMEMBER_RE.match(text) or text.lower().startswith("запомни это"):
             return IntentResult(intent="force_remember", confidence=1.0)
         if FORCE_FORGET_RE.match(text):

@@ -1,0 +1,113 @@
+{% extends "panel/base.html" %}
+{% block title %}{{ campaign.title }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>{{ campaign.get_category_display }} — {{ campaign.title }}</h1>
+  <a class="btn secondary small" href="{% url 'panel:services_category' campaign.category %}">← К категории</a>
+</div>
+{% if tax_warning %}
+<div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ tax_warning }}</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:16px;">
+  <p style="margin:0;">{{ campaign.locality }} · {{ campaign.get_status_display }}</p>
+  <p class="muted">{{ campaign.description|default:"—" }}</p>
+  <p><strong>Собрано:</strong> {{ collected }} / {{ campaign.total_amount }} ₽ ({{ progress_pct }}%)</p>
+  <div style="height:10px; background:var(--bg-soft); border-radius:999px; overflow:hidden; max-width:420px;">
+    <div style="height:100%; width:{{ progress_pct }}%; background:var(--accent-2);"></div>
+  </div>
+  <p class="muted" style="margin-top:10px;">Реквизиты: {{ cfg.service_payee_name }} / {{ cfg.service_payee_phone }} / {{ cfg.service_payee_status }}</p>
+  {% if campaign.status != 'closed' %}
+  <form method="post" style="margin-top:12px;">{% csrf_token %}
+    <input type="hidden" name="action" value="close">
+    <button class="btn danger small" type="submit">Закрыть мероприятие</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if campaign.status != 'closed' %}
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Отправить предложение жителям: {{ campaign.locality }}</h3>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="send">
+    <div class="form-row">
+      <label>Сумма с каждого, ₽</label>
+      <input type="number" name="amount_per_user" min="1" step="1" required>
+    </div>
+    <table>
+      <thead><tr><th></th><th>Имя</th><th>Телефон</th><th>Адрес</th><th>Анкета</th></tr></thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td><input type="checkbox" name="user_ids" value="{{ u.id }}" {% if u.profile_status == 'verified' or u.profile_status == 'pending_review' %}checked{% endif %}></td>
+          <td>{{ u.real_name|default:u.display_name }}</td>
+          <td class="mono">{{ u.phone|default:"—" }}</td>
+          <td>{{ u.address|truncatechars:60 }}</td>
+          <td><span class="badge">{{ u.get_profile_status_display }}</span></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted">Нет пользователей с этим населённым пунктом. Проверьте анкеты.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <button class="btn" type="submit" style="margin-top:12px;">Отправить предложения в MAX</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="grid two">
+  <div class="card">
+    <h3 style="margin-top:0;">Участники</h3>
+    <table>
+      <thead><tr><th>Пользователь</th><th>К оплате</th><th>Оплачено</th><th>Статус</th></tr></thead>
+      <tbody>
+      {% for inv in invites %}
+        <tr>
+          <td><a href="{% url 'panel:user_dashboard' inv.user_id %}">{{ inv.user }}</a></td>
+          <td class="mono">{{ inv.amount_due }}</td>
+          <td class="mono">{{ inv.amount_paid }}</td>
+          <td><span class="badge {% if inv.status == 'paid' %}ok{% endif %}">{{ inv.get_status_display }}</span></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">Ещё не отправляли</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Чеки мероприятия</h3>
+    <table>
+      <thead><tr><th>Дата</th><th>Кто</th><th>Сумма</th><th>Статус</th><th></th></tr></thead>
+      <tbody>
+      {% for r in receipts %}
+        <tr>
+          <td class="mono">{{ r.created_at|date:"d.m H:i" }}</td>
+          <td>{{ r.user }}</td>
+          <td class="mono">{{ r.amount|default:"?" }}</td>
+          <td><span class="badge {% if r.status == 'approved' %}ok{% elif r.status == 'rejected' %}bad{% endif %}">{{ r.get_status_display }}</span>
+            {% if r.details_match %}<span class="badge ok">match</span>{% endif %}
+          </td>
+          <td>
+            {% if r.image %}<a href="{{ r.image.url }}" target="_blank">файл</a>{% endif %}
+            {% if r.status == 'pending' %}
+            <form method="post" action="{% url 'panel:service_receipt_approve' r.id %}" style="display:inline;">{% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <input type="text" name="comment" placeholder="коммент" style="width:90px;">
+              <button class="btn small" type="submit">Принять</button>
+            </form>
+            <form method="post" action="{% url 'panel:service_receipt_reject' r.id %}" style="display:inline;">{% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <button class="btn danger small" type="submit">Отклонить</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted">Чеков пока нет</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

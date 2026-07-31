@@ -46,9 +46,41 @@ class ActivityKind(models.TextChoices):
     RECEIPT_APPROVED = "receipt_approved", "Чек принят"
     RECEIPT_REJECTED = "receipt_rejected", "Чек отклонён"
     SUBSCRIPTION_EXPIRED = "subscription_expired", "Подписка истекла"
+    PROFILE_SUBMITTED = "profile_submitted", "Анкета отправлена"
+    PROFILE_VERIFIED = "profile_verified", "Анкета проверена"
+    SERVICE_OFFER = "service_offer", "Сервисное предложение"
+    SERVICE_RECEIPT = "service_receipt", "Чек сервисного сбора"
+    SERVICE_PAID = "service_paid", "Сервисный сбор оплачен"
     ERROR = "error", "Ошибка"
     SETTINGS = "settings", "Настройки"
     OTHER = "other", "Прочее"
+
+
+class ProfileStatus(models.TextChoices):
+    INCOMPLETE = "incomplete", "Не заполнена"
+    PENDING_REVIEW = "pending_review", "Проверить данные"
+    VERIFIED = "verified", "Проверена"
+    REJECTED = "rejected", "Отклонена"
+
+
+class ServiceCategory(models.TextChoices):
+    SNOW = "snow", "Чистка снега"
+    PLAYGROUND = "playground", "Детская площадка"
+    LIGHTING = "lighting", "Освещение"
+    ROAD = "road", "Ремонт дороги"
+
+
+class CampaignStatus(models.TextChoices):
+    DRAFT = "draft", "Черновик"
+    ACTIVE = "active", "Активен"
+    CLOSED = "closed", "Закрыт"
+
+
+class InviteStatus(models.TextChoices):
+    OFFERED = "offered", "Предложено"
+    PAID = "paid", "Оплачено"
+    DECLINED = "declined", "Отказ"
+    CANCELLED = "cancelled", "Отменено"
 
 
 class ReceiptStatus(models.TextChoices):
@@ -101,7 +133,56 @@ class AppSettings(models.Model):
     )
     subscription_price_rub = models.PositiveIntegerField("Цена подписки, ₽/мес", default=100)
     grace_days = models.PositiveIntegerField("Дней на оплату после истечения", default=2)
+    service_payee_name = models.CharField(
+        "Сервис: получатель",
+        max_length=255,
+        default="Григорьев Д.В.",
+    )
+    service_payee_phone = models.CharField(
+        "Сервис: телефон",
+        max_length=32,
+        default="89625507832",
+    )
+    service_payee_status = models.CharField(
+        "Сервис: статус",
+        max_length=64,
+        default="Самозанятый",
+    )
+    service_tax_limit = models.DecimalField(
+        "Лимит самозанятого, ₽",
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("2400000"),
+    )
+    service_tax_collected = models.DecimalField(
+        "Собрано через самозанятого, ₽",
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0"),
+    )
     updated_at = models.DateTimeField(auto_now=True)
+
+    def tax_usage_ratio(self) -> float:
+        limit = float(self.service_tax_limit or 0)
+        if limit <= 0:
+            return 0.0
+        return float(self.service_tax_collected or 0) / limit
+
+    def tax_limit_warning(self) -> str:
+        ratio = self.tax_usage_ratio()
+        if ratio >= 1.0:
+            return (
+                "Лимит самозанятого исчерпан. Смените получателя в настройках "
+                "сервисных реквизитов."
+            )
+        if ratio >= 0.85:
+            left = Decimal(self.service_tax_limit or 0) - Decimal(self.service_tax_collected or 0)
+            return (
+                f"Приближение к лимиту самозанятого: собрано "
+                f"{self.service_tax_collected} из {self.service_tax_limit} ₽ "
+                f"(осталось ~{left} ₽). Рекомендуется сменить самозанятого."
+            )
+        return ""
 
     class Meta:
         verbose_name = "Настройки"
@@ -125,8 +206,21 @@ class AppSettings(models.Model):
 class BotUser(models.Model):
     max_user_id = models.CharField("MAX user id", max_length=64, unique=True)
     chat_id = models.CharField("MAX chat id", max_length=64, blank=True, default="")
-    display_name = models.CharField("Имя", max_length=255, blank=True, default="")
+    display_name = models.CharField("Имя в MAX", max_length=255, blank=True, default="")
     username = models.CharField("Username", max_length=255, blank=True, default="")
+    real_name = models.CharField("Имя (анкета)", max_length=255, blank=True, default="")
+    phone = models.CharField("Телефон", max_length=32, blank=True, default="")
+    address = models.TextField("Адрес", blank=True, default="")
+    locality = models.CharField("Населённый пункт", max_length=255, blank=True, default="")
+    profile_status = models.CharField(
+        "Статус анкеты",
+        max_length=32,
+        choices=ProfileStatus.choices,
+        default=ProfileStatus.INCOMPLETE,
+    )
+    profile_admin_note = models.TextField("Заметка по анкете", blank=True, default="")
+    profile_submitted_at = models.DateTimeField(null=True, blank=True)
+    profile_verified_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     subscription_until = models.DateTimeField(
         "Подписка до",
@@ -150,7 +244,10 @@ class BotUser(models.Model):
         ordering = ["-last_seen_at"]
 
     def __str__(self) -> str:
-        return self.display_name or self.username or self.max_user_id
+        return self.real_name or self.display_name or self.username or self.max_user_id
+
+    def profile_complete(self) -> bool:
+        return bool(self.real_name.strip() and self.phone.strip() and self.address.strip())
 
     def access_state(self) -> str:
         now = timezone.now()
@@ -228,6 +325,104 @@ class PaymentReceipt(models.Model):
         if not self.amount or self.amount <= 0:
             return 0
         return max(0, int(Decimal(self.amount) // Decimal(price)))
+
+
+class ServiceCampaign(models.Model):
+    category = models.CharField(max_length=32, choices=ServiceCategory.choices)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    locality = models.CharField("Населённый пункт", max_length=255)
+    total_amount = models.DecimalField("Общая сумма, ₽", max_digits=12, decimal_places=2)
+    status = models.CharField(
+        max_length=16,
+        choices=CampaignStatus.choices,
+        default=CampaignStatus.DRAFT,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Сервисное мероприятие"
+        verbose_name_plural = "Сервисные мероприятия"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        date_s = timezone.localtime(self.created_at).strftime("%d.%m.%Y") if self.created_at else ""
+        return f"{self.get_category_display()} — {self.title or self.get_category_display()} от {date_s}"
+
+    @property
+    def collected_amount(self) -> Decimal:
+        total = Decimal("0")
+        for inv in self.invites.all():
+            total += Decimal(inv.amount_paid or 0)
+        return total
+
+    @property
+    def progress_percent(self) -> int:
+        if not self.total_amount or self.total_amount <= 0:
+            return 0
+        return min(100, int(self.collected_amount * 100 / Decimal(self.total_amount)))
+
+
+class ServiceInvite(models.Model):
+    campaign = models.ForeignKey(
+        ServiceCampaign, on_delete=models.CASCADE, related_name="invites"
+    )
+    user = models.ForeignKey(BotUser, on_delete=models.CASCADE, related_name="service_invites")
+    amount_due = models.DecimalField("К оплате, ₽", max_digits=12, decimal_places=2)
+    amount_paid = models.DecimalField(
+        "Оплачено, ₽", max_digits=12, decimal_places=2, default=Decimal("0")
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=InviteStatus.choices,
+        default=InviteStatus.OFFERED,
+    )
+    offered_at = models.DateTimeField(auto_now_add=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Предложение сбора"
+        verbose_name_plural = "Предложения сборов"
+        ordering = ["-offered_at"]
+        unique_together = [("campaign", "user")]
+
+    def __str__(self) -> str:
+        return f"{self.user} → {self.campaign_id}: {self.amount_due}₽"
+
+
+class ServiceReceipt(models.Model):
+    invite = models.ForeignKey(
+        ServiceInvite, on_delete=models.CASCADE, related_name="receipts"
+    )
+    campaign = models.ForeignKey(
+        ServiceCampaign, on_delete=models.CASCADE, related_name="receipts"
+    )
+    user = models.ForeignKey(BotUser, on_delete=models.CASCADE, related_name="service_receipts")
+    image = models.ImageField("Файл чека", upload_to="service_receipts/%Y/%m/", blank=True)
+    ocr_text = models.TextField(blank=True, default="")
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    transfer_date = models.DateField(null=True, blank=True)
+    recipient_phone = models.CharField(max_length=64, blank=True, default="")
+    recipient_name = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=ReceiptStatus.choices,
+        default=ReceiptStatus.PENDING,
+    )
+    ai_notes = models.TextField(blank=True, default="")
+    details_match = models.BooleanField(default=False)
+    admin_comment = models.TextField(blank=True, default="")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Чек сервисного сбора"
+        verbose_name_plural = "Чеки сервисных сборов"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Сервис-чек #{self.pk} {self.amount or '?'}₽ ({self.status})"
 
 
 class MemoryItem(models.Model):

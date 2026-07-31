@@ -18,20 +18,36 @@ from ai.yandex import normalize_yandex_model
 from bot.client import MaxApiError, MaxClient
 from bot.status import set_bot_error, set_bot_status
 from database.dump import create_db_dump
+from decimal import Decimal, InvalidOperation
+
 from database.models import (
     ActivityKind,
     ActivityLog,
     AppSettings,
     BotRuntimeStatus,
     BotUser,
+    CampaignStatus,
     ChatMessage,
     MemoryItem,
     PaymentReceipt,
+    ProfileStatus,
     ReceiptStatus,
     Reminder,
+    ServiceCampaign,
+    ServiceCategory,
+    ServiceReceipt,
     TaskItem,
 )
 from logs.service import log_activity
+from services.ranking import citizen_stats, ranking_list
+from services.service import (
+    approve_service_receipt,
+    approved_service_message,
+    create_campaign,
+    offer_to_users,
+    reject_service_receipt,
+    rejected_service_message,
+)
 from subscriptions.service import (
     approve_receipt,
     approved_user_message,
@@ -100,10 +116,14 @@ def users_list(request: HttpRequest) -> HttpResponse:
         users = users.filter(
             Q(display_name__icontains=q)
             | Q(username__icontains=q)
+            | Q(real_name__icontains=q)
+            | Q(locality__icontains=q)
             | Q(max_user_id__icontains=q)
         )
     bot_status = BotRuntimeStatus.load()
     pending_receipts = PaymentReceipt.objects.filter(status=ReceiptStatus.PENDING).count()
+    pending_profiles = BotUser.objects.filter(profile_status=ProfileStatus.PENDING_REVIEW).count()
+    pending_service = ServiceReceipt.objects.filter(status=ReceiptStatus.PENDING).count()
     return render(
         request,
         "panel/users.html",
@@ -112,6 +132,9 @@ def users_list(request: HttpRequest) -> HttpResponse:
             "q": q,
             "bot_status": bot_status,
             "pending_receipts": pending_receipts,
+            "pending_profiles": pending_profiles,
+            "pending_service": pending_service,
+            "tax_warning": AppSettings.load().tax_limit_warning(),
             "stats": {
                 "users": BotUser.objects.count(),
                 "active": sum(1 for u in BotUser.objects.all() if u.access_state() == "active"),
@@ -119,6 +142,47 @@ def users_list(request: HttpRequest) -> HttpResponse:
             },
         },
     )
+
+
+@login_required
+@require_POST
+def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
+    bot_user = get_object_or_404(BotUser, pk=user_id)
+    action = request.POST.get("action")
+    note = request.POST.get("note", "").strip()
+    bot_user.profile_admin_note = note
+    if action == "verify":
+        bot_user.profile_status = ProfileStatus.VERIFIED
+        bot_user.profile_verified_at = timezone.now()
+        bot_user.locality = request.POST.get("locality", bot_user.locality).strip() or bot_user.locality
+        bot_user.real_name = request.POST.get("real_name", bot_user.real_name).strip() or bot_user.real_name
+        bot_user.phone = request.POST.get("phone", bot_user.phone).strip() or bot_user.phone
+        bot_user.address = request.POST.get("address", bot_user.address).strip() or bot_user.address
+        ActivityLog.objects.create(
+            user=bot_user,
+            kind=ActivityKind.PROFILE_VERIFIED,
+            title="Анкета проверена",
+            detail=note or "OK",
+        )
+        _notify_user(bot_user, "Администратор проверил ваши данные. Анкета принята.")
+        messages.success(request, "Анкета подтверждена.")
+    elif action == "reject":
+        bot_user.profile_status = ProfileStatus.REJECTED
+        ActivityLog.objects.create(
+            user=bot_user,
+            kind=ActivityKind.PROFILE_VERIFIED,
+            title="Анкета отклонена",
+            detail=note or "Отклонено",
+        )
+        _notify_user(
+            bot_user,
+            "Администратор отклонил анкету. "
+            + (f"Комментарий: {note}. " if note else "")
+            + "Напишите «регистрация», чтобы заполнить снова.",
+        )
+        messages.success(request, "Анкета отклонена, пользователь уведомлён.")
+    bot_user.save()
+    return redirect("panel:user_dashboard", user_id=user_id)
 
 
 @login_required
@@ -138,6 +202,7 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
         {
             "bot_user": bot_user,
             "access_state": bot_user.access_state(),
+            "citizen": citizen_stats(bot_user),
             "stats": {
                 "messages": ChatMessage.objects.filter(user=bot_user).count(),
                 "memories": MemoryItem.objects.filter(user=bot_user).count(),
@@ -313,11 +378,37 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             cfg.grace_days = int(request.POST.get("grace_days") or 2)
         except ValueError:
             cfg.grace_days = 2
+        cfg.service_payee_name = (
+            request.POST.get("service_payee_name", cfg.service_payee_name).strip()
+            or cfg.service_payee_name
+        )
+        cfg.service_payee_phone = (
+            request.POST.get("service_payee_phone", cfg.service_payee_phone).strip()
+            or cfg.service_payee_phone
+        )
+        cfg.service_payee_status = (
+            request.POST.get("service_payee_status", cfg.service_payee_status).strip()
+            or cfg.service_payee_status
+        )
+        try:
+            cfg.service_tax_limit = Decimal(
+                request.POST.get("service_tax_limit") or cfg.service_tax_limit or "2400000"
+            )
+        except (InvalidOperation, ValueError):
+            pass
+        try:
+            if request.POST.get("service_tax_collected") not in (None, ""):
+                cfg.service_tax_collected = Decimal(request.POST.get("service_tax_collected"))
+        except (InvalidOperation, ValueError):
+            pass
         cfg.save()
         log_activity(kind=ActivityKind.SETTINGS, title="Обновлены настройки", detail="Из панели")
         warn = _model_warning(cfg.yandex_model)
         if warn:
             messages.warning(request, warn)
+        tax_warn = cfg.tax_limit_warning()
+        if tax_warn:
+            messages.warning(request, tax_warn)
         messages.success(request, "Настройки сохранены.")
         return redirect("panel:settings")
     return render(
@@ -326,6 +417,7 @@ def settings_view(request: HttpRequest) -> HttpResponse:
         {
             "cfg": cfg,
             "model_warning": _model_warning(cfg.yandex_model),
+            "tax_warning": cfg.tax_limit_warning(),
             "has_token": bool(cfg.max_bot_token),
             "has_api_key": bool(cfg.yandex_api_key),
             "bot_status": BotRuntimeStatus.load(),
@@ -420,3 +512,194 @@ def dump_now(request: HttpRequest) -> HttpResponse:
 @login_required
 def dashboard(request: HttpRequest) -> HttpResponse:
     return redirect("panel:users")
+
+
+@login_required
+def services_home(request: HttpRequest) -> HttpResponse:
+    cfg = AppSettings.load()
+    categories = []
+    for value, label in ServiceCategory.choices:
+        qs = ServiceCampaign.objects.filter(category=value)
+        categories.append(
+            {
+                "value": value,
+                "label": label,
+                "count": qs.count(),
+                "active": qs.filter(status=CampaignStatus.ACTIVE).count(),
+                "pending_receipts": ServiceReceipt.objects.filter(
+                    campaign__category=value, status=ReceiptStatus.PENDING
+                ).count(),
+            }
+        )
+    return render(
+        request,
+        "panel/services_home.html",
+        {
+            "categories": categories,
+            "tax_warning": cfg.tax_limit_warning(),
+            "cfg": cfg,
+            "pending_service": ServiceReceipt.objects.filter(
+                status=ReceiptStatus.PENDING
+            ).count(),
+        },
+    )
+
+
+@login_required
+def services_category(request: HttpRequest, category: str) -> HttpResponse:
+    if category not in ServiceCategory.values:
+        messages.error(request, "Неизвестная категория")
+        return redirect("panel:services")
+    label = dict(ServiceCategory.choices)[category]
+    campaigns = ServiceCampaign.objects.filter(category=category)
+    return render(
+        request,
+        "panel/services_category.html",
+        {
+            "category": category,
+            "category_label": label,
+            "campaigns": campaigns,
+            "tax_warning": AppSettings.load().tax_limit_warning(),
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def service_campaign_create(request: HttpRequest, category: str) -> HttpResponse:
+    if category not in ServiceCategory.values:
+        return redirect("panel:services")
+    label = dict(ServiceCategory.choices)[category]
+    localities = (
+        BotUser.objects.exclude(locality="")
+        .values_list("locality", flat=True)
+        .distinct()
+        .order_by("locality")
+    )
+    if request.method == "POST":
+        try:
+            total = Decimal(request.POST.get("total_amount") or "0")
+        except (InvalidOperation, ValueError):
+            total = Decimal("0")
+        if total <= 0:
+            messages.error(request, "Укажите общую сумму сбора")
+            return redirect("panel:service_campaign_create", category=category)
+        locality = request.POST.get("locality", "").strip()
+        if not locality:
+            messages.error(request, "Укажите населённый пункт")
+            return redirect("panel:service_campaign_create", category=category)
+        campaign = create_campaign(
+            category=category,
+            title=request.POST.get("title", "").strip() or label,
+            description=request.POST.get("description", "").strip(),
+            locality=locality,
+            total_amount=total,
+        )
+        messages.success(request, "Мероприятие создано. Выберите жителей и отправьте предложение.")
+        return redirect("panel:service_campaign_detail", pk=campaign.id)
+    return render(
+        request,
+        "panel/service_campaign_form.html",
+        {
+            "category": category,
+            "category_label": label,
+            "localities": localities,
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    campaign = get_object_or_404(ServiceCampaign, pk=pk)
+    users = BotUser.objects.filter(locality__iexact=campaign.locality).order_by("real_name")
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "send":
+            try:
+                amount = Decimal(request.POST.get("amount_per_user") or "0")
+            except (InvalidOperation, ValueError):
+                amount = Decimal("0")
+            ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
+            if amount <= 0 or not ids:
+                messages.error(request, "Укажите сумму на человека и выберите пользователей")
+            else:
+                sent = offer_to_users(campaign, ids, amount, send_fn=_notify_user)
+                messages.success(request, f"Предложение отправлено: {sent} польз.")
+                tax_warn = AppSettings.load().tax_limit_warning()
+                if tax_warn:
+                    messages.warning(request, tax_warn)
+            return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "close":
+            campaign.status = CampaignStatus.CLOSED
+            campaign.closed_at = timezone.now()
+            campaign.save(update_fields=["status", "closed_at"])
+            messages.success(request, "Мероприятие закрыто")
+            return redirect("panel:service_campaign_detail", pk=pk)
+
+    from django.db.models import Sum
+
+    paid = campaign.invites.aggregate(s=Sum("amount_paid"))["s"] or Decimal("0")
+    total = Decimal(campaign.total_amount or 0)
+    pct = min(100, int(paid * 100 / total)) if total > 0 else 0
+    return render(
+        request,
+        "panel/service_campaign_detail.html",
+        {
+            "campaign": campaign,
+            "users": users,
+            "invites": campaign.invites.select_related("user").all(),
+            "receipts": campaign.receipts.select_related("user", "invite").all()[:200],
+            "collected": paid,
+            "progress_pct": pct,
+            "tax_warning": AppSettings.load().tax_limit_warning(),
+            "cfg": AppSettings.load(),
+        },
+    )
+
+
+@login_required
+@require_POST
+def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
+    receipt = get_object_or_404(ServiceReceipt, pk=pk)
+    comment = request.POST.get("comment", "").strip()
+    try:
+        approve_service_receipt(receipt, comment=comment)
+        _notify_user(receipt.user, approved_service_message(receipt))
+        messages.success(request, f"Сервис-чек #{pk} принят.")
+        tax_warn = AppSettings.load().tax_limit_warning()
+        if tax_warn:
+            messages.warning(request, tax_warn)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+    next_url = request.POST.get("next") or f"/panel/services/campaigns/{receipt.campaign_id}/"
+    return redirect(next_url)
+
+
+@login_required
+@require_POST
+def service_receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
+    receipt = get_object_or_404(ServiceReceipt, pk=pk)
+    comment = request.POST.get("comment", "").strip() or "Реквизиты не подтверждены"
+    reject_service_receipt(receipt, comment=comment)
+    _notify_user(receipt.user, rejected_service_message(receipt))
+    messages.success(request, f"Сервис-чек #{pk} отклонён.")
+    next_url = request.POST.get("next") or f"/panel/services/campaigns/{receipt.campaign_id}/"
+    return redirect(next_url)
+
+
+@login_required
+def services_ranking(request: HttpRequest) -> HttpResponse:
+    locality = request.GET.get("locality", "").strip()
+    rows = ranking_list(locality=locality)
+    localities = (
+        BotUser.objects.exclude(locality="")
+        .values_list("locality", flat=True)
+        .distinct()
+        .order_by("locality")
+    )
+    return render(
+        request,
+        "panel/services_ranking.html",
+        {"rows": rows, "locality": locality, "localities": localities},
+    )

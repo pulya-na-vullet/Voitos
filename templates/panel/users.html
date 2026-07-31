@@ -5,7 +5,9 @@
   <h1>Пользователи бота</h1>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <span class="badge {% if bot_status.state == 'polling' or bot_status.state == 'connected' %}ok{% elif bot_status.state == 'error' %}bad{% endif %}">{{ bot_status.state }}</span>
-    {% if pending_receipts %}<span class="badge bad">Чеков на проверке: {{ pending_receipts }}</span>{% endif %}
+    {% if pending_receipts %}<span class="badge bad">Чеков подписки: {{ pending_receipts }}</span>{% endif %}
+    {% if pending_service %}<span class="badge bad">Сервис-чеков: {{ pending_service }}</span>{% endif %}
+    {% if pending_profiles %}<span class="badge">Анкет на проверку: {{ pending_profiles }}</span>{% endif %}
     <form method="post" action="{% url 'panel:check_max' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Проверить MAX</button></form>
     <form method="post" action="{% url 'panel:dump_now' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Дамп БД</button></form>
   </div>
@@ -26,9 +28,10 @@
     <thead>
       <tr>
         <th>Имя</th>
-        <th>MAX id</th>
+        <th>Нас. пункт</th>
+        <th>Анкета</th>
         <th>Подписка</th>
-        <th>Статус</th>
+        <th>Доступ</th>
         <th>Активность</th>
         <th></th>
       </tr>
@@ -36,8 +39,15 @@
     <tbody>
     {% for u in users %}
       <tr>
-        <td>{{ u.display_name|default:u.username|default:"—" }}</td>
-        <td class="mono">{{ u.max_user_id }}</td>
+        <td>{{ u.real_name|default:u.display_name|default:u.username|default:"—" }}
+          <div class="muted mono">{{ u.max_user_id }}</div>
+        </td>
+        <td>{{ u.locality|default:"—" }}</td>
+        <td>
+          <span class="badge {% if u.profile_status == 'verified' %}ok{% elif u.profile_status == 'pending_review' %}{% elif u.profile_status == 'rejected' %}bad{% endif %}">
+            {{ u.get_profile_status_display }}
+          </span>
+        </td>
         <td class="mono">{% if u.subscription_until %}до {{ u.subscription_until|date:"d.m.Y" }}{% else %}нет{% endif %}</td>
         <td>
           {% with st=u.access_state %}
@@ -48,7 +58,7 @@
         <td><a class="btn small" href="{% url 'panel:user_dashboard' u.id %}">Открыть</a></td>
       </tr>
     {% empty %}
-      <tr><td colspan="6" class="muted">Пользователей пока нет — пусть напишут боту в MAX</td></tr>
+      <tr><td colspan="7" class="muted">Пользователей пока нет — пусть напишут боту в MAX</td></tr>
     {% endfor %}
     </tbody>
   </table>

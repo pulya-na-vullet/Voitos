@@ -1,0 +1,42 @@
+{% extends "panel/base.html" %}
+{% block title %}{{ category_label }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>{{ category_label }}</h1>
+  <div style="display:flex; gap:8px;">
+    <a class="btn secondary small" href="{% url 'panel:services' %}">← Все категории</a>
+    <a class="btn small" href="{% url 'panel:service_campaign_create' category %}">Новое мероприятие</a>
+  </div>
+</div>
+{% if tax_warning %}
+<div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ tax_warning }}</div>
+{% endif %}
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Мероприятие</th>
+        <th>Нас. пункт</th>
+        <th>Сумма</th>
+        <th>Статус</th>
+        <th>Создано</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in campaigns %}
+      <tr>
+        <td>{{ item.title }}</td>
+        <td>{{ item.locality }}</td>
+        <td class="mono">{{ item.total_amount }} ₽</td>
+        <td><span class="badge {% if item.status == 'active' %}ok{% elif item.status == 'closed' %}bad{% endif %}">{{ item.get_status_display }}</span></td>
+        <td class="mono">{{ item.created_at|date:"d.m.Y" }}</td>
+        <td><a class="btn small" href="{% url 'panel:service_campaign_detail' item.id %}">Открыть</a></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="muted">Пока нет мероприятий — создайте первое</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

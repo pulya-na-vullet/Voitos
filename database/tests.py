@@ -141,7 +141,17 @@ class ServicesTests(TestCase):
 
 class PipelineTests(TestCase):
     def setUp(self) -> None:
-        self.user = BotUser.objects.create(max_user_id="42", display_name="Client")
+        from database.models import ProfileStatus
+
+        self.user = BotUser.objects.create(
+            max_user_id="42",
+            display_name="Client",
+            real_name="Client",
+            phone="89001112233",
+            address="Казань, ул. Тестовая, 1",
+            locality="Казань",
+            profile_status=ProfileStatus.VERIFIED,
+        )
         self.pipeline = MessagePipeline()
 
     def test_explicit_remember(self):

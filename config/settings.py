@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "tasks",
     "logs",
     "subscriptions",
+    "services",
 ]
 
 MIDDLEWARE = [
