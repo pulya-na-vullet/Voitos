@@ -149,17 +149,35 @@ def users_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
+    from bot.registration import (
+        begin_incomplete_profile_flow,
+        missing_profile_fields,
+    )
+    from database.models import PendingAction
+
     bot_user = get_object_or_404(BotUser, pk=user_id)
     action = request.POST.get("action")
     note = request.POST.get("note", "").strip()
+    # Always apply form edits first
+    bot_user.locality = request.POST.get("locality", bot_user.locality).strip()
+    bot_user.real_name = request.POST.get("real_name", bot_user.real_name).strip()
+    bot_user.phone = request.POST.get("phone", bot_user.phone).strip()
+    bot_user.address = request.POST.get("address", bot_user.address).strip()
     bot_user.profile_admin_note = note
+
     if action == "verify":
+        missing = missing_profile_fields(bot_user)
+        if missing:
+            labels = ", ".join(label for _, label in missing)
+            messages.error(
+                request,
+                f"Нельзя подтвердить: не заполнены поля — {labels}. "
+                "Нажмите «Данных не хватает» или дозаполните поля.",
+            )
+            bot_user.save()
+            return redirect("panel:user_dashboard", user_id=user_id)
         bot_user.profile_status = ProfileStatus.VERIFIED
         bot_user.profile_verified_at = timezone.now()
-        bot_user.locality = request.POST.get("locality", bot_user.locality).strip() or bot_user.locality
-        bot_user.real_name = request.POST.get("real_name", bot_user.real_name).strip() or bot_user.real_name
-        bot_user.phone = request.POST.get("phone", bot_user.phone).strip() or bot_user.phone
-        bot_user.address = request.POST.get("address", bot_user.address).strip() or bot_user.address
         ActivityLog.objects.create(
             user=bot_user,
             kind=ActivityKind.PROFILE_VERIFIED,
@@ -168,6 +186,32 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
         )
         _notify_user(bot_user, "Администратор проверил ваши данные. Анкета принята.")
         messages.success(request, "Анкета подтверждена.")
+    elif action == "incomplete":
+        missing = missing_profile_fields(bot_user)
+        if not missing:
+            messages.error(
+                request,
+                "Все основные поля заполнены. Если нужно переспросить — очистите нужные поля и сохраните снова.",
+            )
+            bot_user.save()
+            return redirect("panel:user_dashboard", user_id=user_id)
+        bot_user.profile_status = ProfileStatus.INCOMPLETE
+        bot_user.save()
+        pending, _ = PendingAction.objects.get_or_create(user=bot_user)
+        text = begin_incomplete_profile_flow(bot_user, pending, admin_note=note)
+        _notify_user(bot_user, text)
+        ActivityLog.objects.create(
+            user=bot_user,
+            kind=ActivityKind.PROFILE_VERIFIED,
+            title="Запрошено дозаполнение анкеты",
+            detail="; ".join(label for _, label in missing),
+        )
+        labels = ", ".join(label for _, label in missing)
+        messages.success(
+            request,
+            f"Пользователю отправлено: данных не хватает ({labels}).",
+        )
+        return redirect("panel:user_dashboard", user_id=user_id)
     elif action == "reject":
         bot_user.profile_status = ProfileStatus.REJECTED
         ActivityLog.objects.create(
@@ -189,6 +233,8 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
 
 @login_required
 def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
+    from bot.registration import missing_profile_fields
+
     bot_user = get_object_or_404(BotUser, pk=user_id)
     since = timezone.now() - timedelta(days=14)
     activity_qs = (
@@ -198,12 +244,14 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
         .annotate(count=Count("id"))
         .order_by("day")
     )
+    missing_fields = missing_profile_fields(bot_user)
     return render(
         request,
         "panel/user_dashboard.html",
         {
             "bot_user": bot_user,
             "access_state": bot_user.access_state(),
+            "missing_fields": missing_fields,
             "citizen": citizen_stats(bot_user),
             "stats": {
                 "messages": ChatMessage.objects.filter(user=bot_user).count(),

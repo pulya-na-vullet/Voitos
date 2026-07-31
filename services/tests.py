@@ -42,6 +42,20 @@ class RegistrationTests(TestCase):
         self.assertEqual(self.user.profile_status, ProfileStatus.PENDING_REVIEW)
         self.assertIn("Администратор проверит", reply)
 
+    def test_incomplete_profile_message_lists_fields(self):
+        from bot.registration import begin_incomplete_profile_flow, missing_profile_fields
+
+        self.user.real_name = "Иван"
+        self.user.save()
+        missing = missing_profile_fields(self.user)
+        labels = [label for _, label in missing]
+        self.assertIn("Телефон", labels)
+        self.assertIn("Адрес места жительства", labels)
+        text = begin_incomplete_profile_flow(self.user, self.pending, admin_note="нужен телефон")
+        self.assertIn("Администратор проверил", text)
+        self.assertIn("Телефон", text)
+        self.assertIn("нужен телефон", text)
+
 
 class ServiceCampaignTests(TestCase):
     def setUp(self) -> None:
