@@ -86,14 +86,14 @@
 <div class="card" style="margin-top:16px;">
   <h3 style="margin-top:0;">Чеки пользователя</h3>
   <table>
-    <thead><tr><th>Дата</th><th>Сумма</th><th>Статус</th><th>Мес.</th></tr></thead>
+    <thead><tr><th>Дата</th><th>Сумма</th><th>Статус</th><th>Срок</th></tr></thead>
     <tbody>
     {% for r in receipts %}
       <tr>
         <td class="mono">{{ r.created_at|date:"d.m.Y H:i" }}</td>
         <td>{{ r.amount|default:"—" }}</td>
         <td>{{ r.get_status_display }}</td>
-        <td>{{ r.months_granted }}</td>
+        <td>{{ r.period_label }}</td>
       </tr>
     {% empty %}
       <tr><td colspan="4" class="muted">Чеков нет</td></tr>

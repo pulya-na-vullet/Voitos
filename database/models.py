@@ -294,11 +294,16 @@ class BotUser(models.Model):
             self.grace_until = self.first_seen_at + timedelta(days=cfg.grace_days or 2)
             self.save(update_fields=["grace_until"])
 
-    def extend_subscription(self, months: int) -> None:
-        months = max(1, int(months))
+    def extend_subscription(self, months: int = 0, days: int = 0) -> None:
+        """Extend access by calendar-ish months (30 days each) plus extra days."""
+        months = max(0, int(months))
+        days = max(0, int(days))
+        total_days = 30 * months + days
+        if total_days < 1:
+            raise ValueError("Срок продления должен быть больше нуля")
         now = timezone.now()
         base = self.subscription_until if self.subscription_until and self.subscription_until > now else now
-        self.subscription_until = base + timedelta(days=30 * months)
+        self.subscription_until = base + timedelta(days=total_days)
         self.grace_until = None
         self.save(update_fields=["subscription_until", "grace_until", "last_seen_at"])
 
@@ -313,6 +318,7 @@ class PaymentReceipt(models.Model):
     recipient_phone = models.CharField(max_length=64, blank=True, default="")
     recipient_name = models.CharField(max_length=255, blank=True, default="")
     months_granted = models.PositiveIntegerField(default=0)
+    days_granted = models.PositiveIntegerField("Дней (остаток)", default=0)
     status = models.CharField(
         max_length=16,
         choices=ReceiptStatus.choices,
@@ -341,6 +347,14 @@ class PaymentReceipt(models.Model):
         if not self.amount or self.amount <= 0:
             return 0
         return max(0, int(Decimal(self.amount) // Decimal(price)))
+
+    def period_label(self) -> str:
+        parts = []
+        if self.months_granted:
+            parts.append(f"{self.months_granted} мес.")
+        if self.days_granted:
+            parts.append(f"{self.days_granted} дн.")
+        return " ".join(parts) if parts else "0"
 
 
 class ServiceGroup(models.Model):

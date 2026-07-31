@@ -458,7 +458,7 @@ def receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
         _notify_user(receipt.user, approved_user_message(receipt))
         messages.success(
             request,
-            f"Чек #{pk} принят: {receipt.amount} ₽ → +{receipt.months_granted} мес.",
+            f"Чек #{pk} принят: {receipt.amount} ₽ → +{receipt.period_label()}.",
         )
     except ValueError as exc:
         messages.error(request, str(exc))

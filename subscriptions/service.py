@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from django.conf import settings
@@ -20,6 +20,46 @@ from database.models import (
 from subscriptions.receipts import analyze_receipt_text, ocr_image_bytes
 
 logger = logging.getLogger(__name__)
+
+DAYS_PER_MONTH = 30
+
+
+def period_from_amount(amount: Decimal, price: Decimal) -> tuple[int, int]:
+    """
+    Convert payment amount to (months, days).
+
+    Full months cost `price`; remainder is converted to days as
+    remainder/price * 30 (rounded).
+    Example: 450 ₽ at 100 ₽/мес → 4 мес. + 15 дн.
+    """
+    amount = Decimal(amount)
+    price = Decimal(price)
+    if price <= 0:
+        raise ValueError("Некорректная цена подписки")
+    if amount <= 0:
+        return 0, 0
+    months = int(amount // price)
+    remainder = amount % price
+    days = 0
+    if remainder > 0:
+        days = int(
+            (remainder / price * Decimal(DAYS_PER_MONTH)).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        if days >= DAYS_PER_MONTH:
+            months += days // DAYS_PER_MONTH
+            days = days % DAYS_PER_MONTH
+    return months, days
+
+
+def format_period(months: int, days: int = 0) -> str:
+    parts = []
+    if months:
+        parts.append(f"{months} мес.")
+    if days:
+        parts.append(f"{days} дн.")
+    return " ".join(parts) if parts else "0"
 
 
 PAYMENT_HELP = (
@@ -69,9 +109,12 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
     ocr_text = ocr_image_bytes(image_bytes)
     parsed = analyze_receipt_text(ocr_text)
     cfg = AppSettings.load()
-    months = 0
+    months, days = (0, 0)
     if parsed.amount:
-        months = max(0, int(parsed.amount // Decimal(cfg.subscription_price_rub or 100)))
+        months, days = period_from_amount(
+            Decimal(parsed.amount),
+            Decimal(cfg.subscription_price_rub or 100),
+        )
 
     receipt = PaymentReceipt(
         user=user,
@@ -81,6 +124,7 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
         recipient_phone=parsed.recipient_phone,
         recipient_name=parsed.recipient_name,
         months_granted=months,
+        days_granted=days,
         status=ReceiptStatus.PENDING,
         ai_notes=parsed.notes,
         details_match=parsed.details_match,
@@ -124,26 +168,34 @@ def approve_receipt(
     if amount <= 0:
         raise ValueError("Сумма должна быть больше нуля.")
 
-    months = int(amount // price)
-    if months < 1:
+    months, days = period_from_amount(amount, price)
+    if months < 1 and days < 1:
         raise ValueError(
-            f"Сумма {amount:.0f} ₽ меньше стоимости месяца ({price:.0f} ₽)."
+            f"Сумма {amount:.0f} ₽ слишком мала для начисления срока "
+            f"(цена месяца {price:.0f} ₽)."
         )
 
     user = receipt.user
-    user.extend_subscription(months)
+    user.extend_subscription(months=months, days=days)
     receipt.amount = amount
     receipt.status = ReceiptStatus.APPROVED
     receipt.months_granted = months
+    receipt.days_granted = days
     receipt.admin_comment = comment
     receipt.reviewed_at = timezone.now()
     receipt.save()
+    period = format_period(months, days)
     ActivityLog.objects.create(
         user=user,
         kind=ActivityKind.RECEIPT_APPROVED,
         title="Чек принят",
-        detail=f"{amount:.0f} ₽ → +{months} мес. до {user.subscription_until}",
-        meta={"receipt_id": receipt.id, "amount": str(amount), "months": months},
+        detail=f"{amount:.0f} ₽ → +{period} до {user.subscription_until}",
+        meta={
+            "receipt_id": receipt.id,
+            "amount": str(amount),
+            "months": months,
+            "days": days,
+        },
     )
     return receipt
 
@@ -201,9 +253,10 @@ def approved_user_message(receipt: PaymentReceipt) -> str:
     until = receipt.user.subscription_until
     until_s = timezone.localtime(until).strftime("%d.%m.%Y") if until else "—"
     amount_s = f"{receipt.amount:.0f} ₽" if receipt.amount is not None else "—"
+    period = receipt.period_label()
     return (
         f"Чек принят. Зачтено: {amount_s}.\n"
-        f"Подписка активна на {receipt.months_granted} мес.\n"
+        f"Подписка продлена на {period}.\n"
         f"Доступ открыт до {until_s}."
     )
 

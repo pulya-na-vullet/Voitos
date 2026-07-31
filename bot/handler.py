@@ -277,7 +277,8 @@ class UpdateHandler:
                 f"Чек получен и отправлен администратору на проверку.\n"
                 f"Сумма: {receipt.amount or 'не распознана'} ₽"
                 f"{', дата: ' + receipt.transfer_date.strftime('%d.%m.%Y') if receipt.transfer_date else ''}.\n"
-                f"Предварительно: ~{receipt.months_granted or 0} мес. подписки."
+                f"Предварительно: ~{receipt.period_label()} подписки "
+                f"(точный срок подтвердит администратор)."
             )
         else:
             msg = (

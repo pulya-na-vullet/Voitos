@@ -8,7 +8,11 @@ from django.utils import timezone
 
 from database.models import AccessState, BotUser, PaymentReceipt, ReceiptStatus
 from subscriptions.receipts import names_match, normalize_phone
-from subscriptions.service import approve_receipt, reject_receipt
+from subscriptions.service import (
+    approve_receipt,
+    period_from_amount,
+    reject_receipt,
+)
 
 
 class SubscriptionTests(TestCase):
@@ -37,6 +41,11 @@ class SubscriptionTests(TestCase):
         self.assertEqual(self.user.access_state(), AccessState.BLOCKED)
         self.assertFalse(self.user.has_feature_access())
 
+    def test_period_from_amount_includes_days(self):
+        self.assertEqual(period_from_amount(Decimal("450"), Decimal("100")), (4, 15))
+        self.assertEqual(period_from_amount(Decimal("100"), Decimal("100")), (1, 0))
+        self.assertEqual(period_from_amount(Decimal("50"), Decimal("100")), (0, 15))
+
     def test_approve_extends_subscription(self):
         receipt = PaymentReceipt.objects.create(
             user=self.user,
@@ -44,13 +53,20 @@ class SubscriptionTests(TestCase):
             details_match=True,
             status=ReceiptStatus.PENDING,
         )
-        approve_receipt(receipt, amount=Decimal("250"))
+        before = timezone.now()
+        approve_receipt(receipt, amount=Decimal("450"))
         receipt.refresh_from_db()
         self.user.refresh_from_db()
         self.assertEqual(receipt.status, ReceiptStatus.APPROVED)
-        self.assertEqual(receipt.amount, Decimal("250"))
-        self.assertEqual(receipt.months_granted, 2)
+        self.assertEqual(receipt.amount, Decimal("450"))
+        self.assertEqual(receipt.months_granted, 4)
+        self.assertEqual(receipt.days_granted, 15)
+        self.assertEqual(receipt.period_label(), "4 мес. 15 дн.")
         self.assertIsNotNone(self.user.subscription_until)
+        # 4*30 + 15 = 135 days
+        delta = self.user.subscription_until - before
+        self.assertGreaterEqual(delta.days, 134)
+        self.assertLessEqual(delta.days, 135)
         self.assertEqual(self.user.access_state(), AccessState.ACTIVE)
 
     def test_approve_requires_manual_amount(self):
