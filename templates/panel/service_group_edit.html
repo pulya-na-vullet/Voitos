@@ -40,4 +40,76 @@
     </div>
   </form>
 </div>
+
+<div class="card" style="max-width:900px; margin-top:16px;">
+  <h3 style="margin-top:0;">Пожелания группы <span class="badge">{{ wish_total }}</span></h3>
+  <p class="muted">Что пишут участники в бот — сгруппировано по темам (как голосование).</p>
+  {% if wish_stats %}
+  <div class="grid two" style="margin-bottom:14px;">
+    <div>
+      <table>
+        <thead><tr><th>Тема</th><th>Голосов</th></tr></thead>
+        <tbody>
+        {% for s in wish_stats %}
+          <tr>
+            <td>{{ s.label }}</td>
+            <td class="mono"><strong>{{ s.count }}</strong></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <canvas id="wishTopicsChart" height="160"></canvas>
+    </div>
+  </div>
+  <script>
+  (function () {
+    const labels = {{ wish_chart_labels_json|safe }};
+    const values = {{ wish_chart_values_json|safe }};
+    if (!labels.length) return;
+    new Chart(document.getElementById('wishTopicsChart'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Голосов',
+          data: values,
+          backgroundColor: 'rgba(61,156,253,0.45)',
+          borderColor: '#3d9cfd',
+          borderWidth: 1,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { color: '#8b9bb0', precision: 0 } },
+          y: { ticks: { color: '#8b9bb0' } },
+        },
+      },
+    });
+  })();
+  </script>
+  {% else %}
+  <p class="muted">Пока нет пожеланий. Участники могут написать в бот, например: «Хочу чтобы починили дорогу».</p>
+  {% endif %}
+
+  <h3>Последние сообщения</h3>
+  <table>
+    <thead><tr><th>Когда</th><th>Кто</th><th>Тема</th><th>Текст</th></tr></thead>
+    <tbody>
+    {% for w in recent_wishes %}
+      <tr>
+        <td class="mono">{{ w.created_at|date:"d.m H:i" }}</td>
+        <td><a href="{% url 'panel:user_dashboard' w.user_id %}">{{ w.user }}</a></td>
+        <td><span class="badge">{{ w.get_topic_display }}</span></td>
+        <td>{{ w.text }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Пусто</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}

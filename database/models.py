@@ -52,8 +52,22 @@ class ActivityKind(models.TextChoices):
     SERVICE_RECEIPT = "service_receipt", "Чек сервисного сбора"
     SERVICE_PAID = "service_paid", "Сервисный сбор оплачен"
     SERVICE_NOTICE = "service_notice", "Уведомление по сбору"
+    SERVICE_WISH = "service_wish", "Пожелание по группе"
     ERROR = "error", "Ошибка"
     SETTINGS = "settings", "Настройки"
+    OTHER = "other", "Прочее"
+
+
+class WishTopic(models.TextChoices):
+    ROAD = "road", "Дороги"
+    PLAYGROUND = "playground", "Детская площадка"
+    LIGHTING = "lighting", "Освещение"
+    SNOW = "snow", "Чистка снега"
+    DOGS = "dogs", "Собаки / намордники"
+    TRASH = "trash", "Мусор"
+    PARKING = "parking", "Парковка"
+    SAFETY = "safety", "Безопасность"
+    GREEN = "green", "Озеленение"
     OTHER = "other", "Прочее"
 
 
@@ -491,6 +505,41 @@ class ServiceGroup(models.Model):
     @property
     def member_count(self) -> int:
         return self.members.count()
+
+
+class NeighborhoodWish(models.Model):
+    """Resident idea / vote for improvements in their ServiceGroup."""
+
+    user = models.ForeignKey(BotUser, on_delete=models.CASCADE, related_name="wishes")
+    group = models.ForeignKey(
+        ServiceGroup,
+        on_delete=models.CASCADE,
+        related_name="wishes",
+        verbose_name="Группа",
+    )
+    text = models.TextField("Пожелание")
+    source_message = models.TextField("Исходное сообщение", blank=True, default="")
+    topic = models.CharField(
+        "Тема",
+        max_length=32,
+        choices=WishTopic.choices,
+        default=WishTopic.OTHER,
+        db_index=True,
+    )
+    confidence = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Пожелание жителей"
+        verbose_name_plural = "Пожелания жителей"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["group", "topic"]),
+            models.Index(fields=["-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"[{self.get_topic_display()}] {self.text[:60]}"
 
 
 class ServiceCampaign(models.Model):

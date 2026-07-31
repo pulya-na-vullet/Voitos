@@ -6,7 +6,7 @@ from typing import Any
 import base64
 
 from ai.factory import AINotConfiguredError, get_stt_provider
-from ai.intent import HELP_RE, SERVICE_COLLECTIONS_RE, SUBSCRIPTION_RE
+from ai.intent import HELP_RE, SERVICE_COLLECTIONS_RE, SUBSCRIPTION_RE, WISHES_LIST_RE, WISH_PREFIX_RE
 from bot.access import AccessDenied, resolve_or_create_user
 from bot.client import MaxClient
 from bot.messages import help_message
@@ -15,6 +15,7 @@ from bot.registration import needs_registration, start_registration
 from bot.status import normalize_sender
 from database.models import AccessState, ChatMessage, MessageRole, PendingAction
 from services.service import format_receipt_pick_menu, open_invites_for_user
+from services.wishes import looks_like_wish
 from subscriptions.service import (
     access_message,
     approved_user_message,
@@ -178,18 +179,19 @@ class UpdateHandler:
         if not text:
             return
 
-        # Help / subscription / collections / registration stay available when blocked
+        # Help / subscription / collections / wishes / registration stay available when blocked
         is_help = bool(HELP_RE.match(text))
         is_subscription = bool(SUBSCRIPTION_RE.match(text))
         is_collections = bool(SERVICE_COLLECTIONS_RE.match(text))
+        is_wishes = bool(WISHES_LIST_RE.match(text) or WISH_PREFIX_RE.match(text) or looks_like_wish(text))
         lower = text.lower()
         payment_topic = any(k in lower for k in ("оплат", "подписк", "чек", "перевод"))
 
         user.ensure_grace_period()
         state = user.access_state()
         pending, _ = PendingAction.objects.get_or_create(user=user)
-        # Allow answering receipt destination pick even when blocked
-        if pending.pending_kind == "service_invite_pick":
+        # Allow answering receipt destination / wish group pick even when blocked
+        if pending.pending_kind in {"service_invite_pick", "wish_group_pick"}:
             try:
                 reply = self.pipeline.handle(
                     user,
@@ -198,7 +200,7 @@ class UpdateHandler:
                     voice_transcript=transcript,
                 )
             except Exception:
-                logger.exception("Pipeline failed on receipt pick")
+                logger.exception("Pipeline failed on pending pick")
                 reply = "Произошла ошибка. Попробуй ещё раз."
             self._reply(user, reply)
             return
@@ -207,19 +209,33 @@ class UpdateHandler:
             from bot.messages import subscription_detail_message
             from services.service import format_collections_for_user
 
-            if needs_registration(user) and not (is_help or is_subscription or is_collections):
+            if needs_registration(user) and not (
+                is_help or is_subscription or is_collections or is_wishes
+            ):
                 self._reply(user, start_registration(user, pending))
             elif is_help:
                 self._reply(user, help_message(user))
             elif is_collections:
                 self._reply(user, format_collections_for_user(user))
+            elif is_wishes:
+                try:
+                    reply = self.pipeline.handle(
+                        user,
+                        text,
+                        is_voice=is_voice,
+                        voice_transcript=transcript,
+                    )
+                except Exception:
+                    logger.exception("Pipeline failed on wish while blocked")
+                    reply = "Не удалось сохранить пожелание. Попробуйте ещё раз."
+                self._reply(user, reply)
             elif is_subscription or payment_topic:
                 self._reply(user, subscription_detail_message(user))
             else:
                 self._reply(user, access_message(user) or payment_help_text())
             return
 
-        if state == AccessState.GRACE and not is_help and not is_subscription and not is_collections:
+        if state == AccessState.GRACE and not is_help and not is_subscription and not is_collections and not is_wishes:
             notice = access_message(user)
             if notice and self._should_send_grace_notice(user):
                 self._reply(user, notice)

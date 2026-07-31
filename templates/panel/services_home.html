@@ -31,7 +31,7 @@
     <h3 style="margin-top:0;">Группы жителей</h3>
     <p class="muted">Объедините людей вручную — потом запустите сбор сразу на всю группу.</p>
     <table>
-      <thead><tr><th>Группа</th><th>Участников</th><th></th></tr></thead>
+      <thead><tr><th>Группа</th><th>Участников</th><th>Пожелания</th><th></th></tr></thead>
       <tbody>
       {% for g in groups %}
         <tr>
@@ -40,10 +40,11 @@
             {% if g.description %}<div class="muted">{{ g.description|truncatechars:60 }}</div>{% endif %}
           </td>
           <td class="mono">{{ g.member_count }}</td>
+          <td class="mono">{% if g.wish_count %}<span class="badge">{{ g.wish_count }}</span>{% else %}0{% endif %}</td>
           <td><a class="btn small" href="{% url 'panel:service_group_edit' g.id %}">Состав</a></td>
         </tr>
       {% empty %}
-        <tr><td colspan="3" class="muted">Групп пока нет — создайте первую справа</td></tr>
+        <tr><td colspan="4" class="muted">Групп пока нет — создайте первую справа</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -123,6 +124,43 @@
     </div>
     <button class="btn" type="submit">Запустить и разослать</button>
   </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Пожелания жителей по темам</h3>
+  <p class="muted" style="margin-top:0;">
+    Соседи пишут в бот, что хотят улучшить у дома — сообщения собираются и группируются по темам
+    (дороги, площадка, собаки…). Так видно, за что «голосуют» люди.
+  </p>
+  {% if wish_topics_all %}
+  <table style="margin-bottom:14px;">
+    <thead><tr><th>Тема (все группы)</th><th>Голосов</th></tr></thead>
+    <tbody>
+    {% for s in wish_topics_all %}
+      <tr>
+        <td>{{ s.label }}</td>
+        <td class="mono"><strong>{{ s.count }}</strong></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Пока пусто — жители ещё не писали пожелания в чат.</p>
+  {% endif %}
+  {% if wish_overview %}
+  <table>
+    <thead><tr><th>Группа</th><th>Всего</th><th>Лидер темы</th></tr></thead>
+    <tbody>
+    {% for row in wish_overview %}
+      <tr>
+        <td><a href="{% url 'panel:service_group_edit' row.group.id %}">{{ row.group.name }}</a></td>
+        <td class="mono">{{ row.total }}</td>
+        <td>{% if row.top %}{{ row.top.label }} — {{ row.top.count }}{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 </div>
 
 <div class="card" style="margin-bottom:16px;">

@@ -35,10 +35,13 @@ INTENT_SYSTEM_PROMPT = """Ты классификатор намерений п�
 - help — просьба показать справку / команды / что умеешь
 - subscription_info — «подписка», статус оплаты, условия
 - service_collections — «сборы» / сервисные мероприятия / доступные сборы
+- neighborhood_wish — идея/голос за улучшение двора, улицы, придомовой территории для группы жителей
+- list_wishes — «пожелания» — показать статистику тем по группе
 - registration — начать или продолжить анкету
 - chat — обычный вопрос или разговор
 
 Категории памяти: purchases, home, car, finance, health, preferences, people, ideas, other
+Темы пожеланий (topic): road, playground, lighting, snow, dogs, trash, parking, safety, green, other
 
 Правила:
 - Погода, новости, сиюминутные факты без личной ценности → should_save=false, intent=chat
@@ -47,6 +50,8 @@ INTENT_SYSTEM_PROMPT = """Ты классификатор намерений п�
 - "Сделай каждодневное напоминание..." / "каждый день" / "каждое утро" → create_reminder, repeat=daily
 - "Нужно купить подарок маме" → create_task
 - "Выполнил подарок" / "Сделал ..." → complete_task
+- Идеи про двор/дорогу/площадку/собак/мусор/свет → neighborhood_wish (НЕ create_task и НЕ save_memory)
+  Примеры: «Хочу чтобы починили дорогу», «Собаки без намордников», «Нужна детская площадка»
 - Если время неясно — due_at=null, needs_time_clarify=true (НЕ ставь ночь 01:00 и не выдумывай)
 - «Утро» / завтрак без часа → due_hint="утро", НЕ 01:00
 - Короткие спокойные ответы потом даст система, тебе нужна только классификация
@@ -57,6 +62,8 @@ JSON схема:
   "should_save": true/false,
   "memory_text": "краткая формулировка факта или null",
   "category": "preferences|...",
+  "topic": "road|playground|lighting|snow|dogs|trash|parking|safety|green|other",
+  "wish_text": "краткий текст пожелания или null",
   "task_text": "текст задачи или null",
   "reminder_text": "текст напоминания или null",
   "repeat": "none|daily",
@@ -80,6 +87,8 @@ class IntentResult:
     should_save: bool = False
     memory_text: str | None = None
     category: str = MemoryCategory.OTHER
+    topic: str | None = None
+    wish_text: str | None = None
     task_text: str | None = None
     reminder_text: str | None = None
     due_at: datetime | None = None
@@ -134,6 +143,14 @@ HELP_RE = re.compile(
     r"^\s*(/)?(help|start|помощь|справка|команды|меню|описание|"
     r"о\s+боте|визитка|что\s+ты\s+умеешь|что\s+умеешь)\s*[.!]?\s*$",
     re.IGNORECASE,
+)
+WISHES_LIST_RE = re.compile(
+    r"^\s*(/)?(пожелания|мои\s+пожелания|темы\s+группы|голосование)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+WISH_PREFIX_RE = re.compile(
+    r"^\s*(пожелание|идея|предложение)\s*[:\-–—]\s*(.+)$",
+    re.IGNORECASE | re.DOTALL,
 )
 SUBSCRIPTION_RE = re.compile(
     r"^\s*(/)?(подписка|subscription|podpiska|моя\s+подписка|"
@@ -530,6 +547,19 @@ class IntentAnalyzer:
             return IntentResult(intent="subscription_info", confidence=1.0)
         if SERVICE_COLLECTIONS_RE.match(text):
             return IntentResult(intent="service_collections", confidence=1.0)
+        if WISHES_LIST_RE.match(text):
+            return IntentResult(intent="list_wishes", confidence=1.0)
+        wish_m = WISH_PREFIX_RE.match(text)
+        if wish_m:
+            body = (wish_m.group(2) or "").strip()
+            from services.wishes import detect_topic
+
+            return IntentResult(
+                intent="neighborhood_wish",
+                wish_text=body or text,
+                topic=detect_topic(body or text),
+                confidence=0.98,
+            )
         if REGISTRATION_RE.match(text):
             return IntentResult(intent="registration", confidence=1.0)
         if FORCE_REMEMBER_RE.match(text) or text.lower().startswith("запомни это"):
@@ -581,11 +611,27 @@ class IntentAnalyzer:
         repeat = data.get("repeat") or detect_reminder_repeat(text)
         if repeat not in {"none", "daily"}:
             repeat = detect_reminder_repeat(text)
+        topic = data.get("topic") or None
+        wish_text = data.get("wish_text") or None
+        # Prefer civic wish over task/memory/chat when keywords clearly match
+        from services.wishes import detect_topic, extract_wish_text, looks_like_wish
+
+        if looks_like_wish(text) and intent in {
+            "chat",
+            "create_task",
+            "save_memory",
+            "complete_task",
+        }:
+            intent = "neighborhood_wish"
+            wish_text = wish_text or extract_wish_text(text)
+            topic = topic or detect_topic(wish_text)
         return IntentResult(
             intent=intent,
             should_save=bool(data.get("should_save")),
             memory_text=data.get("memory_text") or None,
             category=data.get("category") or MemoryCategory.OTHER,
+            topic=topic,
+            wish_text=wish_text,
             task_text=data.get("task_text") or None,
             reminder_text=data.get("reminder_text") or None,
             due_at=due,
@@ -599,6 +645,16 @@ class IntentAnalyzer:
 
     def _heuristic_fallback(self, text: str) -> IntentResult:
         lower = text.lower()
+        from services.wishes import detect_topic, extract_wish_text, looks_like_wish
+
+        if looks_like_wish(text):
+            body = extract_wish_text(text)
+            return IntentResult(
+                intent="neighborhood_wish",
+                wish_text=body,
+                topic=detect_topic(body),
+                confidence=0.7,
+            )
         if "напомн" in lower or "напоминани" in lower:
             due = _parse_due(text, None)
             return IntentResult(

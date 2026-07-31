@@ -896,13 +896,16 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 ).count(),
             }
         )
-    groups = ServiceGroup.objects.prefetch_related("members").all()
+    groups = ServiceGroup.objects.prefetch_related("members").annotate(
+        wish_count=Count("wishes")
+    ).all()
     recent = (
         ServiceCampaign.objects.select_related("group")
         .prefetch_related("invites")
         .all()[:20]
     )
     from services.tax import sync_self_employed_tax_collected
+    from services.wishes import aggregate_home_stats, topic_stats
 
     tax_stats = sync_self_employed_tax_collected(cfg)
     cfg.refresh_from_db()
@@ -920,6 +923,8 @@ def services_home(request: HttpRequest) -> HttpResponse:
             "pending_service": ServiceReceipt.objects.filter(
                 status=ReceiptStatus.PENDING
             ).count(),
+            "wish_overview": aggregate_home_stats(),
+            "wish_topics_all": topic_stats(),
         },
     )
 
@@ -969,6 +974,15 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
     member_ids = set(group.members.values_list("id", flat=True))
     users = BotUser.objects.all().order_by("real_name", "display_name")
+    from database.models import NeighborhoodWish
+    from services.wishes import topic_stats
+
+    wish_stats = topic_stats(group)
+    recent_wishes = (
+        NeighborhoodWish.objects.filter(group=group)
+        .select_related("user")
+        .order_by("-created_at")[:40]
+    )
     return render(
         request,
         "panel/service_group_edit.html",
@@ -976,6 +990,13 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "group": group,
             "users": users,
             "member_ids": member_ids,
+            "wish_stats": wish_stats,
+            "wish_total": sum(s["count"] for s in wish_stats),
+            "recent_wishes": recent_wishes,
+            "wish_chart_labels_json": json.dumps(
+                [s["label"] for s in wish_stats], ensure_ascii=False
+            ),
+            "wish_chart_values_json": json.dumps([s["count"] for s in wish_stats]),
         },
     )
 

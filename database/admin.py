@@ -8,6 +8,7 @@ from database.models import (
     BotUser,
     ChatMessage,
     MemoryItem,
+    NeighborhoodWish,
     PaymentReceipt,
     PendingAction,
     Reminder,
@@ -68,6 +69,13 @@ class PaymentReceiptAdmin(admin.ModelAdmin):
 class ServiceGroupAdmin(admin.ModelAdmin):
     list_display = ("name", "created_at", "updated_at")
     filter_horizontal = ("members",)
+
+
+@admin.register(NeighborhoodWish)
+class NeighborhoodWishAdmin(admin.ModelAdmin):
+    list_display = ("id", "topic", "text", "group", "user", "created_at")
+    list_filter = ("topic", "group")
+    search_fields = ("text", "source_message")
 
 
 @admin.register(ServiceCampaign)

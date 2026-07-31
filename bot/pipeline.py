@@ -81,14 +81,21 @@ class MessagePipeline:
                 self._store_out(user, reply, "service_collections")
                 return reply
 
+        if pending.pending_kind == "wish_group_pick":
+            reply = self._pick_wish_group(user, text, pending)
+            if reply is not None:
+                self._store_out(user, reply, "neighborhood_wish")
+                return reply
+
         if needs_registration(user):
             # Allow help/subscription/collections meta commands before forcing form
-            from ai.intent import HELP_RE, SERVICE_COLLECTIONS_RE, SUBSCRIPTION_RE
+            from ai.intent import HELP_RE, SERVICE_COLLECTIONS_RE, SUBSCRIPTION_RE, WISHES_LIST_RE
 
             if not (
                 HELP_RE.match(text)
                 or SUBSCRIPTION_RE.match(text)
                 or SERVICE_COLLECTIONS_RE.match(text)
+                or WISHES_LIST_RE.match(text)
             ):
                 reply = start_registration(user, pending)
                 self._store_out(user, reply, "registration")
@@ -142,6 +149,14 @@ class MessagePipeline:
             from services.service import format_collections_for_user
 
             return format_collections_for_user(user)
+
+        if intent.intent == "list_wishes":
+            from services.wishes import format_user_wishes_reply
+
+            return format_user_wishes_reply(user)
+
+        if intent.intent == "neighborhood_wish":
+            return self._capture_neighborhood_wish(user, text, intent, pending)
 
         if intent.intent == "registration":
             from bot.registration import start_registration
@@ -395,6 +410,106 @@ class MessagePipeline:
         return (
             f"Ваш чек по «{chosen.campaign.title}» отправлен на проверку администратору.\n"
             f"Сумма: {receipt.amount or 'будет проверена администратором'} ₽."
+        )
+
+    def _capture_neighborhood_wish(
+        self,
+        user: BotUser,
+        text: str,
+        intent: IntentResult,
+        pending: PendingAction,
+    ) -> str:
+        from services.wishes import (
+            capture_wish,
+            detect_topic,
+            extract_wish_text,
+            user_groups,
+        )
+
+        body = (intent.wish_text or extract_wish_text(text)).strip()
+        topic = intent.topic or detect_topic(body)
+        groups = user_groups(user)
+        if not groups:
+            return (
+                "Записал бы пожелание, но вас пока нет в группе жителей. "
+                "Попросите администратора добавить вас в состав группы — "
+                "тогда голоса соседей будут считаться вместе."
+            )
+        if len(groups) == 1:
+            wish = capture_wish(
+                user,
+                body,
+                group=groups[0],
+                topic=topic,
+                confidence=intent.confidence or 0.7,
+                source_message=text,
+            )
+            return (
+                f"Принято для группы «{groups[0].name}».\n"
+                f"Тема: {wish.get_topic_display()}.\n"
+                "Соседи могут писать идеи так же — смотреть итог: «пожелания»."
+            )
+
+        pending.pending_kind = "wish_group_pick"
+        pending.pending_payload = {
+            "text": body,
+            "topic": topic,
+            "confidence": intent.confidence or 0.7,
+            "group_ids": [g.id for g in groups],
+        }
+        pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+        lines = ["Вы в нескольких группах. Куда записать пожелание? Напишите номер:"]
+        for i, g in enumerate(groups, start=1):
+            lines.append(f"{i}. {g.name}")
+        return "\n".join(lines)
+
+    def _pick_wish_group(
+        self, user: BotUser, text: str, pending: PendingAction
+    ) -> str | None:
+        from database.models import ServiceGroup
+        from services.wishes import capture_wish
+
+        lower = text.lower().strip()
+        if lower in {"отмена", "отменить", "стоп", "не надо"}:
+            pending.clear_pending()
+            return "Ок, пожелание не сохраняю."
+
+        payload = pending.pending_payload or {}
+        group_ids = list(payload.get("group_ids") or [])
+        groups = list(ServiceGroup.objects.filter(id__in=group_ids).order_by("id"))
+        if not groups:
+            pending.clear_pending()
+            return "Группы не найдены. Напишите пожелание ещё раз."
+
+        chosen = None
+        if text.strip().isdigit():
+            idx = int(text.strip())
+            if 1 <= idx <= len(groups):
+                chosen = groups[idx - 1]
+        if chosen is None:
+            for g in groups:
+                if g.name.lower() in lower or lower in g.name.lower():
+                    chosen = g
+                    break
+        if chosen is None:
+            lines = ["Не понял номер. Выберите группу:"]
+            for i, g in enumerate(groups, start=1):
+                lines.append(f"{i}. {g.name}")
+            return "\n".join(lines)
+
+        wish = capture_wish(
+            user,
+            payload.get("text") or text,
+            group=chosen,
+            topic=payload.get("topic"),
+            confidence=float(payload.get("confidence") or 0.7),
+            source_message=payload.get("text") or text,
+        )
+        pending.clear_pending()
+        return (
+            f"Принято для группы «{chosen.name}».\n"
+            f"Тема: {wish.get_topic_display()}.\n"
+            "Смотреть итог голосования: «пожелания»."
         )
 
     def _chat(self, user: BotUser, text: str) -> str:
