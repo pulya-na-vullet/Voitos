@@ -136,13 +136,19 @@ def sync_env_into_settings() -> None:
         cfg.save(update_fields=["payment_phone", "updated_at"])
     # Safety net: never leave unpaid users on a gifted full subscription
     try:
-        from subscriptions.service import revoke_unpaid_subscriptions
+        from subscriptions.service import (
+            recalculate_approved_receipt_periods,
+            revoke_unpaid_subscriptions,
+        )
 
         revoked = revoke_unpaid_subscriptions()
         if revoked:
             logger.info("Startup: revoked unpaid free access for %s user(s)", revoked)
+        fixed = recalculate_approved_receipt_periods()
+        if fixed:
+            logger.info("Startup: recalculated %s approved receipt period(s)", fixed)
     except Exception:
-        logger.exception("Startup: failed to revoke unpaid subscriptions")
+        logger.exception("Startup: failed subscription maintenance")
     logger.info(
         "AI settings: model=%s folder_set=%s key_set=%s multi_user=on",
         cfg.yandex_model,

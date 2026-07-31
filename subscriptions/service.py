@@ -177,12 +177,17 @@ def approve_receipt(
 
     user = receipt.user
     user.extend_subscription(months=months, days=days)
+    now = timezone.now()
     receipt.amount = amount
     receipt.status = ReceiptStatus.APPROVED
     receipt.months_granted = months
     receipt.days_granted = days
+    # Admin confirmation becomes the payment transfer date.
+    receipt.transfer_date = timezone.localdate(now)
+    # Mark requisites as accepted by admin (shown as «распознано администратором»).
+    receipt.details_match = True
     receipt.admin_comment = comment
-    receipt.reviewed_at = timezone.now()
+    receipt.reviewed_at = now
     receipt.save()
     period = format_period(months, days)
     ActivityLog.objects.create(
@@ -213,6 +218,57 @@ def reject_receipt(receipt: PaymentReceipt, comment: str = "") -> PaymentReceipt
         meta={"receipt_id": receipt.id},
     )
     return receipt
+
+
+def recalculate_approved_receipt_periods() -> int:
+    """
+    Fix legacy approved receipts that stored only whole months.
+
+    Recalculates months/days from amount, extends subscription_until by the
+    missing days, fills transfer_date from reviewed_at, marks details_match.
+    Idempotent: second run does nothing when periods already match.
+    """
+    from datetime import timedelta
+
+    cfg = AppSettings.load()
+    price = Decimal(cfg.subscription_price_rub or 100)
+    fixed = 0
+    qs = (
+        PaymentReceipt.objects.filter(status=ReceiptStatus.APPROVED)
+        .exclude(amount__isnull=True)
+        .select_related("user")
+    )
+    for receipt in qs.iterator():
+        amount = Decimal(receipt.amount or 0)
+        if amount <= 0:
+            continue
+        new_months, new_days = period_from_amount(amount, price)
+        old_total = 30 * int(receipt.months_granted or 0) + int(receipt.days_granted or 0)
+        new_total = 30 * new_months + new_days
+        delta = new_total - old_total
+        changed_fields: list[str] = []
+        if receipt.months_granted != new_months or receipt.days_granted != new_days:
+            receipt.months_granted = new_months
+            receipt.days_granted = new_days
+            changed_fields.extend(["months_granted", "days_granted"])
+        if receipt.reviewed_at and not receipt.transfer_date:
+            receipt.transfer_date = timezone.localtime(receipt.reviewed_at).date()
+            changed_fields.append("transfer_date")
+        if not receipt.details_match:
+            receipt.details_match = True
+            changed_fields.append("details_match")
+        if changed_fields:
+            receipt.save(update_fields=changed_fields)
+        if delta and receipt.user.subscription_until:
+            receipt.user.subscription_until = receipt.user.subscription_until + timedelta(
+                days=delta
+            )
+            receipt.user.save(update_fields=["subscription_until"])
+        if changed_fields or delta:
+            fixed += 1
+    if fixed:
+        logger.info("Recalculated period for %s approved receipt(s)", fixed)
+    return fixed
 
 
 def revoke_unpaid_subscriptions() -> int:

@@ -62,12 +62,47 @@ class SubscriptionTests(TestCase):
         self.assertEqual(receipt.months_granted, 4)
         self.assertEqual(receipt.days_granted, 15)
         self.assertEqual(receipt.period_label(), "4 мес. 15 дн.")
+        self.assertTrue(receipt.details_match)
+        self.assertEqual(receipt.transfer_date, timezone.localdate())
         self.assertIsNotNone(self.user.subscription_until)
         # 4*30 + 15 = 135 days
         delta = self.user.subscription_until - before
         self.assertGreaterEqual(delta.days, 134)
         self.assertLessEqual(delta.days, 135)
         self.assertEqual(self.user.access_state(), AccessState.ACTIVE)
+
+    def test_recalculate_old_whole_months(self):
+        """Old approved 450₽ → 4 months should become 4 months + 15 days."""
+        from datetime import timedelta
+
+        from subscriptions.service import recalculate_approved_receipt_periods
+
+        receipt = PaymentReceipt.objects.create(
+            user=self.user,
+            amount=Decimal("450"),
+            status=ReceiptStatus.APPROVED,
+            months_granted=4,
+            days_granted=0,
+            details_match=False,
+            reviewed_at=timezone.now(),
+            transfer_date=None,
+        )
+        self.user.subscription_until = timezone.now() + timedelta(days=120)
+        self.user.save(update_fields=["subscription_until"])
+
+        n = recalculate_approved_receipt_periods()
+        self.assertEqual(n, 1)
+        receipt.refresh_from_db()
+        self.user.refresh_from_db()
+        self.assertEqual(receipt.months_granted, 4)
+        self.assertEqual(receipt.days_granted, 15)
+        self.assertTrue(receipt.details_match)
+        self.assertIsNotNone(receipt.transfer_date)
+        remaining = (self.user.subscription_until - timezone.now()).days
+        self.assertGreaterEqual(remaining, 134)
+        self.assertLessEqual(remaining, 135)
+        # Idempotent
+        self.assertEqual(recalculate_approved_receipt_periods(), 0)
 
     def test_approve_requires_manual_amount(self):
         receipt = PaymentReceipt.objects.create(

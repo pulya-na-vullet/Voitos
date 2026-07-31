@@ -43,7 +43,13 @@
         <td>{{ item.amount|default:"—" }} ₽</td>
         <td class="mono">{{ item.transfer_date|date:"d.m.Y"|default:"—" }}</td>
         <td>
-          {% if item.details_match %}<span class="badge ok">совпали</span>{% else %}<span class="badge bad">сомнительно</span>{% endif %}
+          {% if item.status == "approved" %}
+            <span class="badge ok">распознано администратором</span>
+          {% elif item.details_match %}
+            <span class="badge ok">совпали</span>
+          {% else %}
+            <span class="badge bad">сомнительно</span>
+          {% endif %}
           <div class="muted">{{ item.recipient_phone }} · {{ item.recipient_name|truncatechars:40 }}</div>
         </td>
         <td>{{ item.get_status_display }}</td>
