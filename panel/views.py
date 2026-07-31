@@ -46,6 +46,7 @@ from services.service import (
     approved_service_message,
     invite_new_members_to_group_campaigns,
     launch_campaign_to_group,
+    notify_members_added_to_group,
     offer_to_users,
     reject_service_receipt,
     rejected_service_message,
@@ -165,6 +166,30 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
     bot_user.address = request.POST.get("address", bot_user.address).strip()
     bot_user.profile_admin_note = note
 
+    if action == "save":
+        missing = missing_profile_fields(bot_user)
+        if not missing and bot_user.profile_status in {
+            ProfileStatus.INCOMPLETE,
+            ProfileStatus.REJECTED,
+        }:
+            bot_user.profile_status = ProfileStatus.PENDING_REVIEW
+            bot_user.profile_submitted_at = timezone.now()
+        bot_user.save()
+        ActivityLog.objects.create(
+            user=bot_user,
+            kind=ActivityKind.PROFILE_VERIFIED,
+            title="Анкета отредактирована администратором",
+            detail=note or "Сохранено из панели",
+        )
+        if missing:
+            labels = ", ".join(label for _, label in missing)
+            messages.success(
+                request,
+                f"Данные сохранены. Ещё не заполнены: {labels}.",
+            )
+        else:
+            messages.success(request, "Данные анкеты сохранены.")
+        return redirect("panel:user_dashboard", user_id=user_id)
     if action == "verify":
         missing = missing_profile_fields(bot_user)
         if missing:
@@ -172,7 +197,7 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
             messages.error(
                 request,
                 f"Нельзя подтвердить: не заполнены поля — {labels}. "
-                "Нажмите «Данных не хватает» или дозаполните поля.",
+                "Дозаполните сами («Сохранить данные») или нажмите «Данных не хватает».",
             )
             bot_user.save()
             return redirect("panel:user_dashboard", user_id=user_id)
@@ -665,18 +690,21 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
         group.members.set(BotUser.objects.filter(id__in=ids))
         new_ids = [i for i in ids if i not in old_ids]
-        notified = 0
+        group_notices = 0
+        campaign_notices = 0
         if new_ids:
-            notified = invite_new_members_to_group_campaigns(
+            group_notices = notify_members_added_to_group(
                 group, new_ids, send_fn=_notify_user
             )
-        if notified:
-            messages.success(
-                request,
-                f"Группа сохранена. Новым участникам отправлено сборов: {notified}.",
+            campaign_notices = invite_new_members_to_group_campaigns(
+                group, new_ids, send_fn=_notify_user
             )
-        else:
-            messages.success(request, "Группа сохранена")
+        parts = ["Группа сохранена"]
+        if group_notices:
+            parts.append(f"уведомлений о группе: {group_notices}")
+        if campaign_notices:
+            parts.append(f"отправленных сборов: {campaign_notices}")
+        messages.success(request, ". ".join(parts) + ".")
         return redirect("panel:service_group_edit", pk=pk)
 
     member_ids = set(group.members.values_list("id", flat=True))

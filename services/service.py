@@ -223,6 +223,43 @@ def launch_campaign_to_group(
     return campaign, sent
 
 
+def user_groups_list_message(user: BotUser, *, added_group: ServiceGroup | None = None) -> str:
+    """Inform user about a new group membership and list all their groups."""
+    groups = list(user.service_groups.order_by("name"))
+    lines = [f"• {g.name}" for g in groups] or ["• (групп пока нет)"]
+    if added_group:
+        header = f"Вас добавили в группу: «{added_group.name}».\n\nВаши группы:\n"
+    else:
+        header = "Ваши группы:\n"
+    return header + "\n".join(lines)
+
+
+def notify_members_added_to_group(
+    group: ServiceGroup,
+    user_ids: list[int],
+    send_fn=None,
+) -> int:
+    """Send MAX notice to newly added members: which group + full group list."""
+    if not user_ids or not send_fn:
+        return 0
+    sent = 0
+    for user in BotUser.objects.filter(id__in=user_ids):
+        text = user_groups_list_message(user, added_group=group)
+        try:
+            send_fn(user, text)
+            sent += 1
+            ActivityLog.objects.create(
+                user=user,
+                kind=ActivityKind.SERVICE_OFFER,
+                title="Добавлен в группу",
+                detail=group.name,
+                meta={"group_id": group.id},
+            )
+        except Exception:
+            logger.exception("Failed to notify user %s about group %s", user.max_user_id, group.id)
+    return sent
+
+
 def invite_new_members_to_group_campaigns(
     group: ServiceGroup,
     user_ids: list[int],

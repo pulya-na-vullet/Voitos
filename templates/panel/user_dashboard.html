@@ -32,7 +32,7 @@
   <div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12); margin-bottom:12px;">
     Не заполнены поля:
     <strong>{% for key, label in missing_fields %}{{ label }}{% if not forloop.last %}, {% endif %}{% endfor %}</strong>.
-    Нажмите «Данных не хватает» — пользователю уйдёт сообщение с перечислением и запросом дозаполнить.
+    Можете дописать их здесь и нажать «Сохранить данные», либо запросить у пользователя кнопкой «Данных не хватает».
   </div>
   {% endif %}
   <form method="post" action="{% url 'panel:user_profile_verify' bot_user.id %}">
@@ -41,9 +41,10 @@
     <div class="form-row"><label>Телефон</label><input type="text" name="phone" value="{{ bot_user.phone }}"></div>
     <div class="form-row"><label>Населённый пункт</label><input type="text" name="locality" value="{{ bot_user.locality }}"></div>
     <div class="form-row"><label>Адрес</label><textarea name="address" rows="2">{{ bot_user.address }}</textarea></div>
-    <div class="form-row"><label>Комментарий админа</label><input type="text" name="note" value="{{ bot_user.profile_admin_note }}" placeholder="опционально, уйдёт пользователю"></div>
+    <div class="form-row"><label>Комментарий админа</label><input type="text" name="note" value="{{ bot_user.profile_admin_note }}" placeholder="опционально, уйдёт пользователю при запросе дозаполнения"></div>
     <p class="muted">Статус: {{ bot_user.get_profile_status_display }}</p>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn small" type="submit" name="action" value="save">Сохранить данные</button>
       <button class="btn small" type="submit" name="action" value="verify">Подтвердить анкету</button>
       <button class="btn secondary small" type="submit" name="action" value="incomplete">Данных не хватает</button>
       <button class="btn danger small" type="submit" name="action" value="reject">Отклонить</button>

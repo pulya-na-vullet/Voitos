@@ -19,6 +19,7 @@ from services.service import (
     format_collections_for_user,
     invite_new_members_to_group_campaigns,
     launch_campaign_to_group,
+    user_groups_list_message,
 )
 
 
@@ -101,6 +102,14 @@ class ServiceCampaignTests(TestCase):
                 total_amount=Decimal("1000"),
                 amount_per_user=Decimal("100"),
             )
+
+    def test_group_join_message_lists_groups(self):
+        other = ServiceGroup.objects.create(name="двор 2")
+        other.members.add(self.user)
+        text = user_groups_list_message(self.user, added_group=self.group)
+        self.assertIn("ул. А", text)
+        self.assertIn("двор 2", text)
+        self.assertIn("Вас добавили в группу", text)
 
     def test_new_member_gets_active_campaigns_only(self):
         campaign, _ = launch_campaign_to_group(
