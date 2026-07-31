@@ -21,15 +21,19 @@
 </div>
 
 <div class="card" style="margin-top:16px;">
-  <form method="get" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+  <form method="get" autocomplete="off" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
     <div class="form-row" style="margin:0; flex:1; min-width:160px;">
       <label>Поиск</label>
-      <input type="text" name="q" value="{{ q }}" placeholder="Имя / id / телефон...">
+      <input type="search" name="q" value="{{ q }}" placeholder="Имя / id / телефон..." autocomplete="off">
     </div>
-    <div class="form-row" style="margin:0; flex:1; min-width:160px;">
+    <div class="form-row" style="margin:0; flex:1; min-width:180px;">
       <label>Населённый пункт</label>
-      <input type="text" name="locality" list="locs" value="{{ locality }}" placeholder="Куюки, Казань…">
-      <datalist id="locs">{% for loc in localities %}<option value="{{ loc }}">{% endfor %}</datalist>
+      <select name="locality" autocomplete="off">
+        <option value="">Все из базы</option>
+        {% for loc in localities %}
+          <option value="{{ loc }}" {% if locality == loc %}selected{% endif %}>{{ loc }}</option>
+        {% endfor %}
+      </select>
     </div>
     <div class="form-row" style="margin:0; min-width:180px;">
       <label>Сортировка</label>

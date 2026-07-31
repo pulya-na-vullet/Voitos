@@ -172,12 +172,15 @@ def users_list(request: HttpRequest) -> HttpResponse:
     sort = request.GET.get("sort", "-rating").strip() or "-rating"
     rows = ranking_list(locality=locality, q=q)
     rows = sort_ranking_rows(rows, sort=sort)[:500]
-    localities = (
+    localities = list(
         BotUser.objects.exclude(locality="")
+        .exclude(locality__isnull=True)
         .values_list("locality", flat=True)
         .distinct()
         .order_by("locality")
     )
+    if locality and locality not in localities:
+        localities = [locality, *localities]
     bot_status = BotRuntimeStatus.load()
     pending_receipts = PaymentReceipt.objects.filter(status=ReceiptStatus.PENDING).count()
     pending_profiles = BotUser.objects.filter(profile_status=ProfileStatus.PENDING_REVIEW).count()
@@ -1052,12 +1055,17 @@ def services_ranking(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
     sort = request.GET.get("sort", "-rating").strip() or "-rating"
     rows = sort_ranking_rows(ranking_list(locality=locality, q=q), sort=sort)
-    localities = (
+    # Distinct localities already stored on users — no external suggest/Yandex.
+    localities = list(
         BotUser.objects.exclude(locality="")
+        .exclude(locality__isnull=True)
         .values_list("locality", flat=True)
         .distinct()
         .order_by("locality")
     )
+    if locality and locality not in localities:
+        # Keep current filter visible even if spelling no longer matches any user.
+        localities = [locality, *localities]
     return render(
         request,
         "panel/services_ranking.html",
