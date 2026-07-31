@@ -454,20 +454,34 @@ def receipts_list(request: HttpRequest) -> HttpResponse:
         return redirect("panel:receipts")
 
     status = request.GET.get("status", "").strip()
+    find_dupes = request.GET.get("find_dupes", "").strip() in {"1", "true", "yes"}
     qs = PaymentReceipt.objects.select_related("user").all()
     if status:
         qs = qs.filter(status=status)
+    items = list(qs[:300])
+    dupe_labels: dict[int, str] = {}
+    dupe_groups: list[dict] = []
+    if find_dupes:
+        from subscriptions.duplicates import duplicate_labels_for_items
+
+        dupe_labels, dupe_groups = duplicate_labels_for_items(items)
+    # Attach label for template convenience
+    for item in items:
+        item.dupe_label = dupe_labels.get(item.id, "")
     finance = build_finance_snapshot()
     return render(
         request,
         "panel/receipts.html",
         {
-            "items": qs[:300],
+            "items": items,
             "status": status,
             "statuses": ReceiptStatus.choices,
             "pending_count": finance["pending_count"],
             "finance": finance,
             "today": timezone.localdate().isoformat(),
+            "find_dupes": find_dupes,
+            "dupe_groups": dupe_groups,
+            "dupe_labels": dupe_labels,
         },
     )
 
@@ -495,6 +509,7 @@ def user_receipts(request: HttpRequest, user_id: int) -> HttpResponse:
 def receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
     receipt = get_object_or_404(PaymentReceipt, pk=pk)
     comment = request.POST.get("comment", "").strip()
+    force_duplicate = request.POST.get("force_duplicate") in {"1", "on", "true", "yes"}
     raw_amount = (request.POST.get("amount") or "").strip().replace(",", ".")
     try:
         amount = Decimal(raw_amount) if raw_amount else None
@@ -506,7 +521,12 @@ def receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
             return redirect(next_url)
         return redirect("panel:receipts")
     try:
-        approve_receipt(receipt, comment=comment, amount=amount)
+        approve_receipt(
+            receipt,
+            comment=comment,
+            amount=amount,
+            force_duplicate=force_duplicate,
+        )
         receipt.refresh_from_db()
         receipt.user.refresh_from_db()
         _notify_user(receipt.user, approved_user_message(receipt))

@@ -149,6 +149,9 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
     if not image_bytes:
         raise ValueError("Пустой файл чека")
     filename = _safe_receipt_filename(filename, default="receipt.pdf")
+    from subscriptions.duplicates import file_sha256
+
+    content_hash = file_sha256(image_bytes)
     parsed = _parse_receipt_or_empty(image_bytes, filename)
     cfg = AppSettings.load()
     months, days = (0, 0)
@@ -158,8 +161,22 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
             Decimal(cfg.subscription_price_rub or 100),
         )
 
+    notes = parsed.notes or ""
+    details_match = parsed.details_match
+    # Soft-flag pixel-identical reuploads before admin review.
+    prior = list(
+        PaymentReceipt.objects.filter(content_hash=content_hash)
+        .select_related("user")
+        .order_by("created_at")[:5]
+    )
+    if prior:
+        ids = ", ".join(f"#{r.id}" for r in prior)
+        notes = (notes + "; " if notes else "") + f"pixel_duplicate_of={ids}"
+        details_match = False
+
     receipt = PaymentReceipt(
         user=user,
+        content_hash=content_hash,
         ocr_text=parsed.ocr_text,
         amount=parsed.amount,
         transfer_date=parsed.transfer_date,
@@ -168,8 +185,8 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
         months_granted=months,
         days_granted=days,
         status=ReceiptStatus.PENDING,
-        ai_notes=parsed.notes,
-        details_match=parsed.details_match,
+        ai_notes=notes,
+        details_match=details_match,
     )
     media_name = f"{user.max_user_id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
     receipt.image.save(media_name, ContentFile(image_bytes), save=False)
@@ -179,8 +196,11 @@ def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.j
         user=user,
         kind=ActivityKind.RECEIPT_SUBMITTED,
         title="Отправлен чек на проверку",
-        detail=f"Сумма={parsed.amount} match={parsed.details_match}",
-        meta={"receipt_id": receipt.id, "months": months},
+        detail=(
+            f"Сумма={parsed.amount} match={details_match}"
+            + (f" DUPLICATE of {ids}" if prior else "")
+        ),
+        meta={"receipt_id": receipt.id, "months": months, "content_hash": content_hash},
     )
     try:
         from panel.admin_tasks import task_payment_receipt
@@ -198,6 +218,7 @@ def approve_receipt(
     comment: str = "",
     *,
     amount: Decimal | None = None,
+    force_duplicate: bool = False,
 ) -> PaymentReceipt:
     """
     Accept a subscription receipt.
@@ -207,6 +228,19 @@ def approve_receipt(
     """
     if receipt.status == ReceiptStatus.APPROVED:
         return receipt
+
+    from subscriptions.duplicates import approved_identical, ensure_receipt_hash
+
+    ensure_receipt_hash(receipt)
+    approved_dupes = approved_identical(receipt)
+    if approved_dupes and not force_duplicate:
+        first = approved_dupes[0]
+        raise ValueError(
+            f"Чек #{receipt.id} попиксельно совпадает с уже принятым "
+            f"#{first.id} ({first.user}, {first.amount or '—'} ₽, "
+            f"{first.period_label()}). Повторное принятие удвоит срок подписки. "
+            "Чтобы всё равно принять — отметьте «Принять несмотря на дубль»."
+        )
 
     cfg = AppSettings.load()
     price = Decimal(cfg.subscription_price_rub or 100)

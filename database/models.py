@@ -363,6 +363,14 @@ class PaymentReceipt(models.Model):
     user = models.ForeignKey(BotUser, on_delete=models.CASCADE, related_name="receipts")
     image = models.FileField("Файл чека", upload_to="receipts/%Y/%m/", blank=True)
     image_url = models.URLField(blank=True, default="")
+    content_hash = models.CharField(
+        "SHA-256 файла",
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Хеш байтов файла для поиска попиксельно одинаковых чеков.",
+    )
     ocr_text = models.TextField("Распознанный текст", blank=True, default="")
     amount = models.DecimalField("Сумма", max_digits=12, decimal_places=2, null=True, blank=True)
     transfer_date = models.DateField("Дата перевода", null=True, blank=True)

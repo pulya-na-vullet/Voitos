@@ -3,7 +3,7 @@
 {% block content %}
 <div class="topbar">
   <h1>{% if bot_user %}Чеки: {{ bot_user }}{% else %}Оплата подписок{% endif %}</h1>
-  <div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
     {% if pending_count %}<span class="badge bad">На проверке: {{ pending_count }}</span>{% endif %}
     {% if not bot_user %}
     <form method="get" style="display:inline;">
@@ -14,6 +14,16 @@
         {% endfor %}
       </select>
     </form>
+    <form method="get" style="display:inline;">
+      {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+      <input type="hidden" name="find_dupes" value="1">
+      <button class="btn {% if find_dupes %}{% else %}secondary{% endif %} small" type="submit">
+        {% if find_dupes %}Дубли найдены{% else %}Найти одинаковые чеки{% endif %}
+      </button>
+    </form>
+    {% if find_dupes %}
+    <a class="btn secondary small" href="{% url 'panel:receipts' %}{% if status %}?status={{ status }}{% endif %}">Сбросить подсветку</a>
+    {% endif %}
     {% endif %}
   </div>
 </div>
@@ -186,6 +196,31 @@
 </script>
 {% endif %}
 
+{% if find_dupes and not dupe_groups %}
+<div class="card" style="margin-bottom:16px;">
+  <p class="muted" style="margin:0;">Попиксельно одинаковых чеков среди загруженных не найдено.</p>
+</div>
+{% endif %}
+{% if find_dupes and dupe_groups %}
+<div class="card" style="margin-bottom:16px; border-color: rgba(230,192,123,0.45);">
+  <h3 style="margin-top:0;">Одинаковые чеки (попиксельно / SHA-256) — {{ dupe_groups|length }} групп</h3>
+  <p class="muted" style="margin-top:0;">Файлы совпадают байт-в-байт. Повторное принятие удваивает срок подписки.</p>
+  <table>
+    <thead><tr><th>Группа</th><th>Чеки</th><th>Пользователи</th><th>Статусы</th></tr></thead>
+    <tbody>
+    {% for g in dupe_groups %}
+      <tr>
+        <td><span class="badge bad">Дубль {{ g.letter }}</span> <span class="mono muted">{{ g.hash }}…</span></td>
+        <td class="mono">{% for id in g.ids %}#{{ id }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+        <td>{{ g.users|join:", " }}</td>
+        <td>{{ g.statuses|join:", " }}{% if g.has_approved and g.has_pending %} · <strong>есть принятый + новый</strong>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 <div class="card">
   <h3 style="margin-top:0;">{% if bot_user %}Чеки пользователя{% else %}Чеки{% endif %}</h3>
   <table>
@@ -204,7 +239,7 @@
     </thead>
     <tbody>
     {% for item in items %}
-      <tr>
+      <tr {% if item.dupe_label %}style="background: rgba(230,192,123,0.12); outline: 1px solid rgba(230,192,123,0.35);"{% endif %}>
         <td class="mono">{{ item.created_at|date:"d.m.Y H:i" }}</td>
         {% if not bot_user %}
           <td><a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></td>
@@ -212,6 +247,7 @@
         <td>{{ item.amount|default:"—" }} ₽</td>
         <td class="mono">{{ item.transfer_date|date:"d.m.Y"|default:"—" }}</td>
         <td>
+          {% if item.dupe_label %}<div><span class="badge bad">{{ item.dupe_label }}</span></div>{% endif %}
           {% if item.status == "approved" %}
             <span class="badge ok">распознано администратором</span>
           {% elif item.status == "rejected" %}
@@ -237,6 +273,10 @@
                    title="Сколько денег принимаете по этому чеку"
                    style="width:100px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
             <button class="btn small" type="submit">Принять</button>
+            <label class="muted" style="display:flex; gap:4px; align-items:center; font-size:0.85rem;" title="Нужно только если система блокирует принятие из‑за попиксельного дубля">
+              <input type="checkbox" name="force_duplicate" value="1">
+              Принять несмотря на дубль
+            </label>
           </form>
           <form method="post" action="{% url 'panel:receipt_reject' item.id %}" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
             {% csrf_token %}

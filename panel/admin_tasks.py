@@ -79,19 +79,32 @@ def task_payment_receipt(receipt: PaymentReceipt) -> AdminTask | None:
             AdminTaskKind.PAYMENT_RECEIPT, "PaymentReceipt", receipt.id
         )
         return None
+    dupe_note = ""
+    priority = 10
+    try:
+        from subscriptions.duplicates import find_identical_receipts
+
+        twins = find_identical_receipts(receipt)
+        if twins:
+            ids = ", ".join(f"#{t.id}" for t in twins[:5])
+            dupe_note = f" ВНИМАНИЕ: попиксельный дубль чека {ids}."
+            priority = 3
+    except Exception:
+        logger.exception("Duplicate check failed for receipt #%s", receipt.id)
     return upsert_task(
         kind=AdminTaskKind.PAYMENT_RECEIPT,
         title=f"Чек подписки #{receipt.id}",
         description=(
             f"Сумма OCR: {receipt.amount or '—'} ₽. "
             f"Реквизиты: {'совпали' if receipt.details_match else 'сомнительно'}."
+            f"{dupe_note}"
         ),
         user=receipt.user,
-        action_url=f"/panel/receipts/?status=pending",
+        action_url=f"/panel/receipts/?status=pending&find_dupes=1",
         source_model="PaymentReceipt",
         source_id=receipt.id,
-        priority=10,
-        meta={"receipt_id": receipt.id},
+        priority=priority,
+        meta={"receipt_id": receipt.id, "duplicate": bool(dupe_note)},
     )
 
 
