@@ -46,7 +46,9 @@
             <a class="btn small" href="{{ task.action_url }}">Открыть</a>
           {% endif %}
           <form method="post" action="{% url 'panel:admin_task_done' task.id %}" style="display:inline;">{% csrf_token %}
-            <button class="btn secondary small" type="submit">Готово</button>
+            <button class="btn {% if task.kind == 'family_claim' and task.meta.claimed_family %}{% else %}secondary{% endif %} small" type="submit">
+              {% if task.kind == "family_claim" and task.meta.claimed_family %}Подтвердить семью{% else %}Готово{% endif %}
+            </button>
           </form>
           <form method="post" action="{% url 'panel:admin_task_dismiss' task.id %}" style="display:inline;">{% csrf_token %}
             <button class="btn danger small" type="submit">Скрыть</button>

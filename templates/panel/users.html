@@ -84,7 +84,7 @@
             {{ u.get_profile_status_display }}
           </span>
         </td>
-        <td class="mono">{% if u.subscription_until %}до {{ u.subscription_until|date:"d.m.Y" }}{% else %}нет{% endif %}</td>
+        <td class="mono">{{ u.subscription_label }}</td>
         <td>
           {% with st=u.access_state %}
             <span class="badge {% if st == 'active' %}ok{% elif st == 'grace' %}{% else %}bad{% endif %}">{{ st }}</span>

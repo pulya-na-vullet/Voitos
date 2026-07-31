@@ -12,15 +12,90 @@
 <div class="card" style="margin-bottom:16px;">
   <p class="muted" style="margin:0;">MAX id: <span class="mono">{{ bot_user.max_user_id }}</span>
     · chat: <span class="mono">{{ bot_user.chat_id|default:"—" }}</span></p>
-  <p class="muted" style="margin:6px 0 0;">Подписка до:
-    <strong>{% if bot_user.subscription_until %}{{ bot_user.subscription_until|date:"d.m.Y H:i" }}{% else %}не оформлена{% endif %}</strong>
+  <p class="muted" style="margin:6px 0 0;">Подписка:
+    <strong>{{ subscription_label }}</strong>
+    {% if subscription_paid_by %}
+      <span class="badge ok">семья</span>
+      <span class="muted">· собственная дата:
+        {% if bot_user.subscription_until %}{{ bot_user.subscription_until|date:"d.m.Y" }}{% else %}нет{% endif %}
+      </span>
+    {% elif effective_subscription_until %}
+      <span class="muted">(до {{ effective_subscription_until|date:"d.m.Y H:i" }})</span>
+    {% endif %}
     · льготный период до:
     <strong>{% if bot_user.grace_until %}{{ bot_user.grace_until|date:"d.m.Y H:i" }}{% else %}—{% endif %}</strong>
   </p>
+  {% if family_dependents %}
+  <p class="muted" style="margin:6px 0 0;">Через эту оплату пользуются:
+    {% for d in family_dependents %}
+      <a href="{% url 'panel:user_dashboard' d.id %}">{{ d }}</a>{% if not forloop.last %}, {% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
   <p style="margin:8px 0 0;">Рейтинг гражданина:
     <strong>{{ citizen.label }}</strong>
     <span class="muted">({{ citizen.paid }}/{{ citizen.offered }} оплат, {{ citizen.ratio|floatformat:0 }}%)</span>
   </p>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Семья / общая подписка</h3>
+  <p class="muted" style="margin-top:0;">
+    Если Елена и Дмитрий — одна семья, привяжите Елену к Дмитрию: у неё отобразится
+    «оплачена Дмитрием до …» и доступ будет как у оплатившего.
+  </p>
+  <form method="post" action="{% url 'panel:user_family_link' bot_user.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="link">
+    <input type="hidden" name="member_ids" value="{{ bot_user.id }}">
+    {% if family_payer_choices %}
+    <div class="form-row">
+      <label>Члены семьи по адресу</label>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label class="muted"><input type="checkbox" checked disabled> {{ bot_user }} (текущий)</label>
+        {% for c in family_payer_choices %}
+          {% if c.id != bot_user.id %}
+          <label>
+            <input type="checkbox" name="member_ids" value="{{ c.id }}" {% if bot_user.family_payer_id == c.id or c.family_payer_id == bot_user.id %}checked{% endif %}>
+            {{ c }}
+            <span class="muted mono">
+              · {% if c.subscription_until %}до {{ c.subscription_until|date:"d.m.Y" }}{% else %}без своей подписки{% endif %}
+            </span>
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <div class="form-row">
+      <label>ID пользователя, который оплатил (если нет в списке)</label>
+      <input type="number" name="extra_member_id" min="1" placeholder="например id Дмитрия из списка пользователей"
+             value="{% if bot_user.family_payer_id %}{{ bot_user.family_payer_id }}{% endif %}"
+             style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+    </div>
+    <div class="form-row">
+      <label>Кто оплатил подписку</label>
+      <select name="payer_id" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+        <option value="">Авто (у кого длиннее срок) / или id выше</option>
+        {% if bot_user.subscription_until %}
+        <option value="{{ bot_user.id }}" {% if not bot_user.family_payer_id %}selected{% endif %}>{{ bot_user }}</option>
+        {% endif %}
+        {% for c in family_payer_choices %}
+          {% if c.id != bot_user.id %}
+          <option value="{{ c.id }}" {% if bot_user.family_payer_id == c.id %}selected{% endif %}>{{ c }}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn small" type="submit">Связать семью и продублировать подписку</button>
+  </form>
+  {% if bot_user.family_payer_id %}
+  <form method="post" action="{% url 'panel:user_family_link' bot_user.id %}" style="margin-top:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="unlink">
+    <button class="btn secondary small" type="submit">Отвязать от {{ bot_user.family_payer }}</button>
+  </form>
+  {% endif %}
 </div>
 
 <div class="card" style="margin-bottom:16px; {% if bot_user.profile_status == 'pending_review' or missing_fields %}border-color: rgba(230,192,123,0.5);{% endif %}">

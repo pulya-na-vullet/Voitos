@@ -302,6 +302,15 @@ class BotUser(models.Model):
         help_text="После истечения подписки ждём оплату до этой даты.",
     )
     last_payment_notice_at = models.DateTimeField(null=True, blank=True)
+    family_payer = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="family_dependents",
+        verbose_name="Подписку оплатил (семья)",
+        help_text="Если указан — доступ дублируется с подписки этого члена семьи.",
+    )
     first_seen_at = models.DateTimeField(auto_now_add=True)
     last_seen_at = models.DateTimeField(auto_now=True)
 
@@ -316,14 +325,57 @@ class BotUser(models.Model):
     def profile_complete(self) -> bool:
         return bool(self.real_name.strip() and self.phone.strip() and self.address.strip())
 
+    def effective_subscription_until(self):
+        """Own date or family payer's date (whichever is later)."""
+        own = self.subscription_until
+        payer_id = getattr(self, "family_payer_id", None)
+        if not payer_id:
+            return own
+        payer = self.family_payer
+        if not payer or not payer.subscription_until:
+            return own
+        if own and own >= payer.subscription_until:
+            return own
+        return payer.subscription_until
+
+    def subscription_paid_by(self):
+        """
+        Member who currently covers access via family link.
+
+        Returns the payer only when their subscription is what grants access
+        (payer's until is not worse than own).
+        """
+        payer_id = getattr(self, "family_payer_id", None)
+        if not payer_id:
+            return None
+        payer = self.family_payer
+        if not payer or not payer.subscription_until:
+            return None
+        own = self.subscription_until
+        if own and own >= payer.subscription_until:
+            return None
+        return payer
+
+    def subscription_label(self) -> str:
+        """Human-readable subscription line for admin panel."""
+        until = self.effective_subscription_until()
+        if not until:
+            return "нет"
+        date_s = timezone.localtime(until).strftime("%d.%m.%Y")
+        payer = self.subscription_paid_by()
+        if payer:
+            return f"оплачена {payer} до {date_s}"
+        return f"до {date_s}"
+
     def access_state(self) -> str:
         now = timezone.now()
-        if self.subscription_until and self.subscription_until > now:
+        until = self.effective_subscription_until()
+        if until and until > now:
             return AccessState.ACTIVE
         if self.grace_until and self.grace_until > now:
             return AccessState.GRACE
         # New user without subscription: start grace from first_seen
-        if not self.subscription_until and not self.grace_until:
+        if not until and not self.grace_until:
             cfg = AppSettings.load()
             grace_end = self.first_seen_at + timedelta(days=cfg.grace_days or 2)
             if grace_end > now:
@@ -337,11 +389,12 @@ class BotUser(models.Model):
         """When subscription ends, open a grace window once."""
         now = timezone.now()
         cfg = AppSettings.load()
-        if self.subscription_until and self.subscription_until <= now:
-            if not self.grace_until or self.grace_until < self.subscription_until:
-                self.grace_until = self.subscription_until + timedelta(days=cfg.grace_days or 2)
+        until = self.effective_subscription_until()
+        if until and until <= now:
+            if not self.grace_until or self.grace_until < until:
+                self.grace_until = until + timedelta(days=cfg.grace_days or 2)
                 self.save(update_fields=["grace_until"])
-        elif not self.subscription_until and not self.grace_until:
+        elif not until and not self.grace_until:
             self.grace_until = self.first_seen_at + timedelta(days=cfg.grace_days or 2)
             self.save(update_fields=["grace_until"])
 

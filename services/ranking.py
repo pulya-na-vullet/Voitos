@@ -28,7 +28,7 @@ def rank_label(ratio_percent: float) -> str:
 
 def _annotate_users(qs=None):
     qs = qs if qs is not None else BotUser.objects.all()
-    return qs.annotate(
+    return qs.select_related("family_payer").annotate(
         offered=Count(
             "service_invites",
             filter=~Q(service_invites__status=InviteStatus.CANCELLED),

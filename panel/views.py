@@ -330,8 +330,12 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
 @login_required
 def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
     from bot.registration import missing_profile_fields
+    from services.address_overlap import heuristic_candidates
 
-    bot_user = get_object_or_404(BotUser, pk=user_id)
+    bot_user = get_object_or_404(
+        BotUser.objects.select_related("family_payer"),
+        pk=user_id,
+    )
     since = timezone.now() - timedelta(days=14)
     activity_qs = (
         ActivityLog.objects.filter(user=bot_user, created_at__gte=since)
@@ -341,12 +345,25 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
         .order_by("day")
     )
     missing_fields = missing_profile_fields(bot_user)
+    family_candidates = heuristic_candidates(bot_user)
+    family_dependents = list(bot_user.family_dependents.all()[:20])
+    # Also allow picking any verified/local neighbor from candidates + dependents + payer
+    payer_choices = {u.id: u for u in family_candidates}
+    if bot_user.family_payer_id and bot_user.family_payer:
+        payer_choices[bot_user.family_payer_id] = bot_user.family_payer
+    for u in family_dependents:
+        payer_choices[u.id] = u
     return render(
         request,
         "panel/user_dashboard.html",
         {
             "bot_user": bot_user,
             "access_state": bot_user.access_state(),
+            "subscription_label": bot_user.subscription_label(),
+            "effective_subscription_until": bot_user.effective_subscription_until(),
+            "subscription_paid_by": bot_user.subscription_paid_by(),
+            "family_dependents": family_dependents,
+            "family_payer_choices": sorted(payer_choices.values(), key=lambda u: str(u)),
             "missing_fields": missing_fields,
             "citizen": citizen_stats(bot_user),
             "stats": {
@@ -365,6 +382,58 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
             "chart_values_json": json.dumps([row["count"] for row in activity_qs]),
         },
     )
+
+
+@login_required
+@require_POST
+def user_family_link(request: HttpRequest, user_id: int) -> HttpResponse:
+    from subscriptions.family import link_family_members, unlink_family_member
+
+    bot_user = get_object_or_404(BotUser, pk=user_id)
+    action = (request.POST.get("action") or "link").strip()
+    if action == "unlink":
+        unlink_family_member(bot_user)
+        messages.success(request, "Семейная привязка подписки снята.")
+        return redirect("panel:user_dashboard", user_id=user_id)
+
+    raw_ids = request.POST.getlist("member_ids")
+    payer_raw = (request.POST.get("payer_id") or "").strip()
+    extra_raw = (request.POST.get("extra_member_id") or "").strip()
+    try:
+        member_ids = [int(x) for x in raw_ids if str(x).strip().isdigit()]
+    except ValueError:
+        member_ids = []
+    if extra_raw.isdigit():
+        member_ids.append(int(extra_raw))
+    if bot_user.id not in member_ids:
+        member_ids.insert(0, bot_user.id)
+    payer_id = int(payer_raw) if payer_raw.isdigit() else None
+    if payer_id is None and extra_raw.isdigit():
+        payer_id = int(extra_raw)
+    if len(set(member_ids)) < 2:
+        messages.error(
+            request,
+            "Укажите ещё одного члена семьи: отметьте в списке или введите его id.",
+        )
+        return redirect("panel:user_dashboard", user_id=user_id)
+    payer = link_family_members(
+        member_ids,
+        payer=payer_id,
+        note="Связано вручную из карточки пользователя",
+    )
+    if payer:
+        until = (
+            timezone.localtime(payer.subscription_until).strftime("%d.%m.%Y")
+            if payer.subscription_until
+            else "—"
+        )
+        messages.success(
+            request,
+            f"Семья связана. Подписка дублируется через {payer} до {until}.",
+        )
+    else:
+        messages.error(request, "Не удалось связать семью.")
+    return redirect("panel:user_dashboard", user_id=user_id)
 
 
 @login_required
@@ -1159,11 +1228,30 @@ def admin_tasks_feed(request: HttpRequest) -> JsonResponse:
 @login_required
 @require_POST
 def admin_task_done(request: HttpRequest, pk: int) -> HttpResponse:
-    from database.models import AdminTask
+    from database.models import AdminTask, AdminTaskKind
+    from subscriptions.family import confirm_family_from_task
 
     task = get_object_or_404(AdminTask, pk=pk)
+    family_note = ""
+    if task.kind == AdminTaskKind.FAMILY_CLAIM:
+        try:
+            payer = confirm_family_from_task(task)
+            if payer:
+                family_note = (
+                    f" Семья объединена: подписка через {payer}"
+                    + (
+                        f" до {timezone.localtime(payer.subscription_until).strftime('%d.%m.%Y')}."
+                        if payer.subscription_until
+                        else "."
+                    )
+                )
+            elif (task.meta or {}).get("claimed_family"):
+                family_note = " Семейная заявка закрыта, но связать некого (нет кандидатов)."
+        except Exception:
+            logger.exception("Family confirm failed for task #%s", pk)
+            messages.error(request, "Не удалось объединить семью — проверьте карточку пользователя.")
     task.mark_done()
-    messages.success(request, f"Задача «{task.title}» выполнена.")
+    messages.success(request, f"Задача «{task.title}» выполнена.{family_note}")
     return redirect("panel:admin_tasks_today")
 
 

@@ -20,8 +20,9 @@ def _days_until(dt) -> int:
 def subscription_days_remaining(user: BotUser) -> int:
     user.ensure_grace_period()
     now = timezone.now()
-    if user.subscription_until and user.subscription_until > now:
-        return _days_until(user.subscription_until)
+    until = user.effective_subscription_until()
+    if until and until > now:
+        return _days_until(until)
     if user.grace_until and user.grace_until > now:
         return _days_until(user.grace_until)
     return 0
@@ -32,9 +33,16 @@ def subscription_short_line(user: BotUser) -> str:
     user.ensure_grace_period()
     state = user.access_state()
     days = subscription_days_remaining(user)
-    if state == AccessState.ACTIVE and user.subscription_until:
-        until = timezone.localtime(user.subscription_until).strftime("%d.%m.%Y")
-        return f"Подписка активна: осталось {days} дн. (до {until})."
+    until = user.effective_subscription_until()
+    if state == AccessState.ACTIVE and until:
+        until_s = timezone.localtime(until).strftime("%d.%m.%Y")
+        payer = user.subscription_paid_by()
+        if payer:
+            return (
+                f"Подписка активна (оплачена {payer}): осталось {days} дн. "
+                f"(до {until_s})."
+            )
+        return f"Подписка активна: осталось {days} дн. (до {until_s})."
     if state == AccessState.GRACE:
         until = (
             timezone.localtime(user.grace_until).strftime("%d.%m.%Y")
@@ -73,15 +81,19 @@ def subscription_detail_message(user: BotUser) -> str:
     days = subscription_days_remaining(user)
 
     if state == AccessState.ACTIVE:
+        until_dt = user.effective_subscription_until()
         until = (
-            timezone.localtime(user.subscription_until).strftime("%d.%m.%Y %H:%M")
-            if user.subscription_until
+            timezone.localtime(until_dt).strftime("%d.%m.%Y %H:%M")
+            if until_dt
             else "—"
         )
+        payer = user.subscription_paid_by()
+        paid_line = f"\nОплачена: {payer}" if payer else ""
         status_block = (
             f"Статус: активна\n"
             f"Осталось дней: {days}\n"
             f"Действует до: {until}"
+            f"{paid_line}"
         )
     elif state == AccessState.GRACE:
         grace = (

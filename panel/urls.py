@@ -16,6 +16,7 @@ urlpatterns = [
     path("tasks/address-scan/", views.admin_address_scan, name="admin_address_scan"),
     path("users/<int:user_id>/", views.user_dashboard, name="user_dashboard"),
     path("users/<int:user_id>/profile/", views.user_profile_verify, name="user_profile_verify"),
+    path("users/<int:user_id>/family/", views.user_family_link, name="user_family_link"),
     path("users/<int:user_id>/messages/", views.user_messages, name="user_messages"),
     path("users/<int:user_id>/memories/", views.user_memories, name="user_memories"),
     path("users/<int:user_id>/tasks/", views.user_tasks, name="user_tasks"),
