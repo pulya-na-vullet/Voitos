@@ -10,6 +10,7 @@ urlpatterns = [
     path("", views.users_list, name="users"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("tasks/today/", views.admin_tasks_today, name="admin_tasks_today"),
+    path("tasks/today/feed/", views.admin_tasks_feed, name="admin_tasks_feed"),
     path("tasks/<int:pk>/done/", views.admin_task_done, name="admin_task_done"),
     path("tasks/<int:pk>/dismiss/", views.admin_task_dismiss, name="admin_task_dismiss"),
     path("tasks/address-scan/", views.admin_address_scan, name="admin_address_scan"),

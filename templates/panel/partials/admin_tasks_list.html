@@ -1,0 +1,66 @@
+{% for section in sections %}
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">{{ section.label }} <span class="badge">{{ section.tasks|length }}</span></h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Когда</th>
+        <th>Пользователь</th>
+        <th>Задача</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for task in section.tasks %}
+      <tr>
+        <td class="mono">{{ task.created_at|date:"d.m H:i" }}</td>
+        <td>
+          {% if task.user %}
+            <a href="{% url 'panel:user_dashboard' task.user.id %}">{{ task.user }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <strong>{{ task.title }}</strong>
+          {% if task.description %}
+            <div class="muted" style="white-space:pre-wrap; margin-top:4px;">{{ task.description|truncatechars:280 }}</div>
+          {% endif %}
+          {% if task.meta.candidate_user_ids %}
+            <div class="muted" style="margin-top:4px;">
+              Кандидаты семьи:
+              {% for cid in task.meta.candidate_user_ids %}
+                <a href="{% url 'panel:user_dashboard' cid %}">#{{ cid }}</a>{% if not forloop.last %}, {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+          {% if task.meta.user_ids and task.kind == "address_overlap" %}
+            <div class="muted" style="margin-top:4px;">
+              Группа:
+              {% for cid in task.meta.user_ids %}
+                <a href="{% url 'panel:user_dashboard' cid %}">#{{ cid }}</a>{% if not forloop.last %}, {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        </td>
+        <td style="white-space:nowrap;">
+          {% if task.action_url %}
+            <a class="btn small" href="{{ task.action_url }}">Открыть</a>
+          {% endif %}
+          <form method="post" action="{% url 'panel:admin_task_done' task.id %}" style="display:inline;">{% csrf_token %}
+            <button class="btn secondary small" type="submit">Готово</button>
+          </form>
+          <form method="post" action="{% url 'panel:admin_task_dismiss' task.id %}" style="display:inline;">{% csrf_token %}
+            <button class="btn danger small" type="submit">Скрыть</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Пусто</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% empty %}
+<div class="card">
+  <p class="muted" style="margin:0;">На сегодня открытых задач нет. Можно запустить сканирование адресов.</p>
+</div>
+{% endfor %}

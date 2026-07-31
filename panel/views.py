@@ -1073,35 +1073,51 @@ def services_ranking(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def admin_tasks_today(request: HttpRequest) -> HttpResponse:
-    from collections import defaultdict
-
     from database.models import AdminTaskKind
-    from panel.admin_tasks import list_today_tasks, sync_admin_tasks
+    from panel.admin_tasks import build_task_sections, sync_admin_tasks
 
     sync_admin_tasks()
-    tasks = list(list_today_tasks())
-    grouped: dict[str, list] = defaultdict(list)
-    for t in tasks:
-        grouped[t.kind].append(t)
-    kind_order = [k for k, _ in AdminTaskKind.choices]
-    sections = []
-    for kind in kind_order:
-        if kind in grouped:
-            sections.append(
-                {
-                    "kind": kind,
-                    "label": dict(AdminTaskKind.choices).get(kind, kind),
-                    "tasks": grouped[kind],
-                }
-            )
+    sections, total, fingerprint = build_task_sections()
     return render(
         request,
         "panel/admin_tasks_today.html",
         {
             "sections": sections,
-            "total": len(tasks),
+            "total": total,
+            "fingerprint": fingerprint,
             "kind_choices": AdminTaskKind.choices,
+            "feed_url": "/panel/tasks/today/feed/",
         },
+    )
+
+
+@login_required
+def admin_tasks_feed(request: HttpRequest) -> JsonResponse:
+    """Lightweight live feed for «Задачи на сегодня» auto-refresh."""
+    from django.template.loader import render_to_string
+
+    from panel.admin_tasks import build_task_sections, sync_admin_tasks
+
+    # Keep inbox in sync with pending receipts/profiles while the page is open.
+    sync_admin_tasks()
+    sections, total, fingerprint = build_task_sections()
+    client_fp = (request.GET.get("fp") or "").strip()
+    if client_fp and client_fp == fingerprint:
+        return JsonResponse(
+            {"changed": False, "fingerprint": fingerprint, "total": total}
+        )
+    html = render_to_string(
+        "panel/partials/admin_tasks_list.html",
+        {"sections": sections, "total": total},
+        request=request,
+    )
+    return JsonResponse(
+        {
+            "changed": True,
+            "fingerprint": fingerprint,
+            "total": total,
+            "html": html,
+        }
     )
 
 

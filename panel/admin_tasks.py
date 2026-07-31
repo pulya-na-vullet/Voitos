@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 
-from django.db.models import Q
 from django.utils import timezone
 
 from database.models import (
@@ -258,10 +257,35 @@ def sync_admin_tasks() -> dict[str, int]:
 
 
 def list_today_tasks():
-    today = timezone.localdate()
+    """All open admin inbox tasks (live panel)."""
     return (
         AdminTask.objects.filter(status=AdminTaskStatus.OPEN)
-        .filter(Q(due_at__isnull=True) | Q(due_at__date__lte=today) | Q(created_at__date__lte=today))
         .select_related("user")
         .order_by("priority", "created_at")
     )
+
+
+def tasks_fingerprint() -> str:
+    from django.db.models import Count, Max
+
+    agg = AdminTask.objects.filter(status=AdminTaskStatus.OPEN).aggregate(
+        n=Count("id"),
+        max_id=Max("id"),
+        latest=Max("updated_at"),
+    )
+    latest = agg["latest"].isoformat() if agg["latest"] else "-"
+    return f"{agg['n'] or 0}:{agg['max_id'] or 0}:{latest}"
+
+
+def build_task_sections() -> tuple[list[dict], int, str]:
+    from collections import defaultdict
+
+    tasks = list(list_today_tasks())
+    grouped: dict[str, list] = defaultdict(list)
+    for t in tasks:
+        grouped[t.kind].append(t)
+    sections = []
+    for kind, label in AdminTaskKind.choices:
+        if kind in grouped:
+            sections.append({"kind": kind, "label": label, "tasks": grouped[kind]})
+    return sections, len(tasks), tasks_fingerprint()
