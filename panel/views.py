@@ -39,10 +39,14 @@ from database.models import (
     ServiceGroup,
     ServiceReceipt,
     TaskItem,
+    WorkStage,
 )
 from logs.service import log_activity
 from services.ranking import citizen_stats, ranking_list, sort_ranking_rows
 from services.service import (
+    WORK_STAGE_NEXT,
+    WORK_STAGE_ORDER,
+    advance_work_stage,
     approve_service_receipt,
     approved_service_message,
     invite_new_members_to_group_campaigns,
@@ -87,6 +91,38 @@ def _notify_user(user: BotUser, text: str) -> None:
     except Exception:
         try:
             client.send_message(text, user_id=user.max_user_id)
+        except Exception:
+            pass
+
+
+def _notify_user_with_images(
+    user: BotUser,
+    text: str,
+    images: list[tuple[bytes, str]],
+    *,
+    _token_cache: dict | None = None,
+) -> None:
+    """Send text + up to 2 images via MAX. Reuses upload tokens via _token_cache."""
+    cfg = get_runtime_settings()
+    if not cfg.max_bot_token:
+        return
+    client = MaxClient(cfg.max_bot_token)
+    cache = _token_cache if _token_cache is not None else {}
+    if "tokens" not in cache:
+        tokens: list[str] = []
+        for raw, filename in images[:2]:
+            tokens.append(client.upload_image(raw, filename or "photo.jpg"))
+        cache["tokens"] = tokens
+        cache["attachments"] = client.image_attachments(tokens)
+    attachments = cache.get("attachments") or []
+    try:
+        if user.chat_id:
+            client.send_message(text, chat_id=user.chat_id, attachments=attachments or None)
+        else:
+            client.send_message(text, user_id=user.max_user_id, attachments=attachments or None)
+    except Exception:
+        try:
+            client.send_message(text, user_id=user.max_user_id, attachments=attachments or None)
         except Exception:
             pass
 
@@ -775,8 +811,10 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "resend":
-            if campaign.status == CampaignStatus.CLOSED:
-                messages.error(request, "Сбор уже закрыт")
+            if campaign.work_stage != WorkStage.COLLECTING:
+                messages.error(request, "Повторная рассылка доступна только на этапе сбора денег")
+            elif campaign.status == CampaignStatus.CLOSED:
+                messages.error(request, "Сбор денег уже закрыт")
             elif (campaign.amount_per_user or 0) <= 0:
                 messages.error(request, "Нет суммы для рассылки")
             else:
@@ -792,11 +830,37 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
                         "Некому напоминать — все участники уже оплатили или приглашений нет.",
                     )
             return redirect("panel:service_campaign_detail", pk=pk)
-        if action == "close":
-            campaign.status = CampaignStatus.CLOSED
-            campaign.closed_at = timezone.now()
-            campaign.save(update_fields=["status", "closed_at"])
-            messages.success(request, "Мероприятие закрыто")
+        if action == "advance_stage":
+            photo_uploads: list[tuple[bytes, str]] = []
+            next_stage = WORK_STAGE_NEXT.get(campaign.work_stage or WorkStage.COLLECTING)
+            if next_stage == WorkStage.WORK_DONE:
+                for f in request.FILES.getlist("result_photos")[:2]:
+                    photo_uploads.append((f.read(), f.name))
+            token_cache: dict = {}
+
+            def send_media(user, text, images, _cache=token_cache):
+                _notify_user_with_images(user, text, images, _token_cache=_cache)
+
+            try:
+                new_stage = advance_work_stage(
+                    campaign,
+                    photo_uploads=photo_uploads,
+                    send_fn=_notify_user,
+                    send_media_fn=send_media,
+                )
+                labels = dict(WorkStage.choices)
+                messages.success(request, f"Этап: {labels.get(new_stage, new_stage)}")
+                if new_stage == WorkStage.WORK_DONE:
+                    n_photos = campaign.result_photos.count()
+                    if n_photos:
+                        messages.info(
+                            request,
+                            f"Результат разослан участникам с фото ({n_photos}).",
+                        )
+                    else:
+                        messages.info(request, "Результат разослан участникам без фото.")
+            except ValueError as exc:
+                messages.error(request, str(exc))
             return redirect("panel:service_campaign_detail", pk=pk)
 
     from django.db.models import Sum
@@ -805,6 +869,9 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     total = Decimal(campaign.total_amount or 0)
     pct = min(100, int(paid * 100 / total)) if total > 0 else 0
     surplus = paid - total if paid > total else Decimal("0")
+    stage = campaign.work_stage or WorkStage.COLLECTING
+    next_stage = WORK_STAGE_NEXT.get(stage)
+    stage_labels = dict(WorkStage.choices)
     return render(
         request,
         "panel/service_campaign_detail.html",
@@ -812,11 +879,18 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "campaign": campaign,
             "invites": campaign.invites.select_related("user").all(),
             "receipts": campaign.receipts.select_related("user", "invite").all()[:200],
+            "result_photos": campaign.result_photos.all(),
             "collected": paid,
             "progress_pct": pct,
             "surplus": surplus,
             "tax_warning": AppSettings.load().tax_limit_warning(),
             "cfg": AppSettings.load(),
+            "work_stages": WORK_STAGE_ORDER,
+            "work_stage_labels": stage_labels,
+            "current_work_stage": stage,
+            "next_work_stage": next_stage,
+            "next_work_stage_label": stage_labels.get(next_stage or "", ""),
+            "needs_result_photos": next_stage == WorkStage.WORK_DONE,
         },
     )
 

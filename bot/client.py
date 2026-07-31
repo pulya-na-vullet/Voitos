@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import requests
@@ -125,13 +126,108 @@ class MaxClient:
         *,
         user_id: str | int | None = None,
         chat_id: str | int | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        retries: int = 3,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if user_id is not None:
             params["user_id"] = user_id
         if chat_id is not None:
             params["chat_id"] = chat_id
-        return self._request("POST", "/messages", params=params, json={"text": text})
+        body: dict[str, Any] = {"text": text or ""}
+        if attachments:
+            body["attachments"] = attachments
+        last_exc: Exception | None = None
+        for attempt in range(max(1, retries)):
+            try:
+                return self._request("POST", "/messages", params=params, json=body)
+            except MaxApiError as exc:
+                last_exc = exc
+                # MAX may need a moment after upload before attachment is ready
+                if "attachment.not.ready" in (exc.body or "") or "attachment.not.ready" in str(exc):
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise
+        assert last_exc is not None
+        raise last_exc
+
+    def get_upload_url(self, media_type: str = "image") -> dict[str, Any]:
+        return self._request("POST", "/uploads", params={"type": media_type})
+
+    @staticmethod
+    def _extract_image_token(data: Any) -> str:
+        if isinstance(data, dict):
+            token = data.get("token")
+            if isinstance(token, str) and token.strip():
+                return token.strip()
+            photos = data.get("photos")
+            if isinstance(photos, dict):
+                for value in photos.values():
+                    if isinstance(value, dict):
+                        nested = value.get("token")
+                        if isinstance(nested, str) and nested.strip():
+                            return nested.strip()
+            # Some responses nest under payload
+            payload = data.get("payload")
+            if isinstance(payload, dict):
+                nested = payload.get("token")
+                if isinstance(nested, str) and nested.strip():
+                    return nested.strip()
+        raise MaxApiError(f"No image token in upload response: {str(data)[:300]}")
+
+    def upload_image(self, image_bytes: bytes, filename: str = "photo.jpg") -> str:
+        """Upload image bytes to MAX and return attachment token."""
+        meta = self.get_upload_url("image")
+        upload_url = (meta.get("url") or "").strip()
+        if not upload_url:
+            raise MaxApiError("MAX /uploads did not return url")
+        headers = {
+            k: v
+            for k, v in self.session.headers.items()
+            if k.lower() != "content-type"
+        }
+        headers["Authorization"] = self.token
+        content_type = "image/jpeg"
+        lower = filename.lower()
+        if lower.endswith(".png"):
+            content_type = "image/png"
+        elif lower.endswith(".gif"):
+            content_type = "image/gif"
+        elif lower.endswith(".webp"):
+            content_type = "image/webp"
+        files = {"data": (filename or "photo.jpg", image_bytes, content_type)}
+        response = self.session.post(
+            upload_url,
+            files=files,
+            headers=headers,
+            timeout=120,
+            verify=self.session.verify,
+        )
+        if response.status_code >= 400:
+            raise MaxApiError(
+                f"MAX image upload failed {response.status_code}: {response.text[:300]}",
+                status_code=response.status_code,
+                body=response.text[:1000],
+            )
+        try:
+            data = response.json() if response.content else {}
+        except ValueError:
+            data = {"raw": response.text}
+        # Prefer token from upload response; fall back to token from /uploads
+        try:
+            return self._extract_image_token(data)
+        except MaxApiError:
+            fallback = meta.get("token")
+            if isinstance(fallback, str) and fallback.strip():
+                return fallback.strip()
+            raise
+
+    def image_attachments(self, tokens: list[str]) -> list[dict[str, Any]]:
+        return [
+            {"type": "image", "payload": {"token": token}}
+            for token in tokens
+            if token
+        ]
 
     def download(self, url: str) -> bytes:
         response = self.session.get(url, timeout=60, verify=self.session.verify)

@@ -77,6 +77,13 @@ class CampaignStatus(models.TextChoices):
     CLOSED = "closed", "Закрыт"
 
 
+class WorkStage(models.TextChoices):
+    COLLECTING = "collecting", "Сбор денег"
+    WORK_STARTED = "work_started", "Начало работ"
+    WORK_DONE = "work_done", "Работа выполнена"
+    WORK_CLOSED = "work_closed", "Работа закрыта"
+
+
 class InviteStatus(models.TextChoices):
     OFFERED = "offered", "Предложено"
     PAID = "paid", "Оплачено"
@@ -391,6 +398,13 @@ class ServiceCampaign(models.Model):
         choices=CampaignStatus.choices,
         default=CampaignStatus.DRAFT,
     )
+    work_stage = models.CharField(
+        "Этап работ",
+        max_length=32,
+        choices=WorkStage.choices,
+        default=WorkStage.COLLECTING,
+    )
+    work_stage_changed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
@@ -415,6 +429,24 @@ class ServiceCampaign(models.Model):
         if not self.total_amount or self.total_amount <= 0:
             return 0
         return min(100, int(self.collected_amount * 100 / Decimal(self.total_amount)))
+
+
+class ServiceCampaignResultPhoto(models.Model):
+    campaign = models.ForeignKey(
+        ServiceCampaign,
+        on_delete=models.CASCADE,
+        related_name="result_photos",
+    )
+    image = models.ImageField("Фото результата", upload_to="service_results/%Y/%m/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Фото результата работ"
+        verbose_name_plural = "Фото результатов работ"
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return f"Результат #{self.pk} → кампания {self.campaign_id}"
 
 
 class ServiceCampaignNotice(models.Model):

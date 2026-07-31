@@ -19,11 +19,26 @@ from database.models import (
     ReceiptStatus,
     ServiceCampaign,
     ServiceCampaignNotice,
+    ServiceCampaignResultPhoto,
     ServiceCategory,
     ServiceGroup,
     ServiceInvite,
     ServiceReceipt,
+    WorkStage,
 )
+
+WORK_STAGE_ORDER = [
+    WorkStage.COLLECTING,
+    WorkStage.WORK_STARTED,
+    WorkStage.WORK_DONE,
+    WorkStage.WORK_CLOSED,
+]
+
+WORK_STAGE_NEXT = {
+    WorkStage.COLLECTING: WorkStage.WORK_STARTED,
+    WorkStage.WORK_STARTED: WorkStage.WORK_DONE,
+    WorkStage.WORK_DONE: WorkStage.WORK_CLOSED,
+}
 from subscriptions.receipts import analyze_receipt_text, normalize_phone, ocr_image_bytes
 
 logger = logging.getLogger(__name__)
@@ -280,7 +295,7 @@ def broadcast_campaign_message(
 
 
 def close_campaign_goal_reached(campaign: ServiceCampaign, send_fn=None) -> bool:
-    """Close campaign when goal is met and notify everyone: «Сбор закрыт.»"""
+    """Close money collection when goal is met and notify everyone: «Сбор закрыт.»"""
     campaign.refresh_from_db()
     if campaign.status == CampaignStatus.CLOSED:
         return False
@@ -288,8 +303,7 @@ def close_campaign_goal_reached(campaign: ServiceCampaign, send_fn=None) -> bool
     if paid < Decimal(campaign.total_amount or 0):
         return False
     campaign.status = CampaignStatus.CLOSED
-    campaign.closed_at = timezone.now()
-    campaign.save(update_fields=["status", "closed_at"])
+    campaign.save(update_fields=["status"])
     broadcast_campaign_message(
         campaign,
         "Сбор закрыт.",
@@ -297,6 +311,110 @@ def close_campaign_goal_reached(campaign: ServiceCampaign, send_fn=None) -> bool
         kind=CampaignNoticeKind.CLOSED,
     )
     return True
+
+
+def work_done_message(campaign: ServiceCampaign, photo_count: int = 0) -> str:
+    extra = ""
+    if photo_count:
+        extra = f"\nПриложены фото результата: {photo_count}."
+    return (
+        f"Работа выполнена по мероприятию «{campaign.title}».{extra}\n"
+        "Спасибо за участие!"
+    )
+
+
+def save_result_photos(
+    campaign: ServiceCampaign,
+    uploads: list[tuple[bytes, str]],
+) -> list[ServiceCampaignResultPhoto]:
+    """Save up to 2 result photos. Existing photos are kept; total capped at 2."""
+    existing = campaign.result_photos.count()
+    remaining = max(0, 2 - existing)
+    saved: list[ServiceCampaignResultPhoto] = []
+    for raw, filename in uploads[:remaining]:
+        if not raw:
+            continue
+        photo = ServiceCampaignResultPhoto(campaign=campaign)
+        safe_name = Path(filename or "result.jpg").name
+        media_name = (
+            f"{campaign.id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
+        )
+        photo.image.save(media_name, ContentFile(raw), save=False)
+        photo.save()
+        saved.append(photo)
+    return saved
+
+
+def advance_work_stage(
+    campaign: ServiceCampaign,
+    *,
+    photo_uploads: list[tuple[bytes, str]] | None = None,
+    send_fn=None,
+    send_media_fn=None,
+) -> WorkStage:
+    """
+    Move campaign to the next work stage.
+    On WORK_DONE: optional 1–2 photos and broadcast to all invitees.
+    On WORK_CLOSED: finalize campaign.
+    """
+    current = campaign.work_stage or WorkStage.COLLECTING
+    nxt = WORK_STAGE_NEXT.get(current)
+    if not nxt:
+        raise ValueError("Работы уже закрыты")
+
+    photo_uploads = photo_uploads or []
+    if len(photo_uploads) > 2:
+        raise ValueError("Можно приложить не больше 2 фотографий")
+
+    saved_photos: list[ServiceCampaignResultPhoto] = []
+    if nxt == WorkStage.WORK_DONE and photo_uploads:
+        saved_photos = save_result_photos(campaign, photo_uploads)
+
+    campaign.work_stage = nxt
+    campaign.work_stage_changed_at = timezone.now()
+    update_fields = ["work_stage", "work_stage_changed_at"]
+    if nxt == WorkStage.WORK_CLOSED:
+        campaign.status = CampaignStatus.CLOSED
+        campaign.closed_at = timezone.now()
+        update_fields.extend(["status", "closed_at"])
+    campaign.save(update_fields=update_fields)
+
+    if nxt == WorkStage.WORK_DONE:
+        text = work_done_message(campaign, photo_count=len(saved_photos))
+        image_payloads = []
+        for photo in saved_photos:
+            try:
+                with photo.image.open("rb") as fh:
+                    image_payloads.append(
+                        (fh.read(), Path(photo.image.name).name)
+                    )
+            except Exception:
+                logger.exception("Could not read result photo %s", photo.id)
+        users = [inv.user for inv in campaign.invites.select_related("user").all()]
+        for user in users:
+            try:
+                if image_payloads and send_media_fn:
+                    send_media_fn(user, text, image_payloads)
+                elif send_fn:
+                    send_fn(user, text)
+                ActivityLog.objects.create(
+                    user=user,
+                    kind=ActivityKind.SERVICE_NOTICE,
+                    title="Работа выполнена",
+                    detail=campaign.title,
+                    meta={
+                        "campaign_id": campaign.id,
+                        "photos": len(image_payloads),
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Failed work-done notice to %s (campaign %s)",
+                    user.max_user_id,
+                    campaign.id,
+                )
+
+    return WorkStage(nxt)
 
 
 def maybe_notify_surplus(campaign: ServiceCampaign, send_fn=None) -> bool:

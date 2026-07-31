@@ -18,10 +18,12 @@ from database.models import (
     ServiceCategory,
     ServiceGroup,
     ServiceReceipt,
+    WorkStage,
 )
 from bot.registration import handle_registration_step, start_registration
 from services.ranking import citizen_stats, rank_label, ranking_list
 from services.service import (
+    advance_work_stage,
     approve_service_receipt,
     format_collections_for_user,
     invite_new_members_to_group_campaigns,
@@ -226,6 +228,48 @@ class ServiceCampaignTests(TestCase):
                 campaign=campaign, kind=CampaignNoticeKind.SURPLUS
             ).exists()
         )
+
+    def test_work_stage_flow_and_result_photos(self):
+        campaign, _ = self._launch()
+        self.assertEqual(campaign.work_stage, WorkStage.COLLECTING)
+        advance_work_stage(campaign)
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.work_stage, WorkStage.WORK_STARTED)
+
+        inbox = []
+        media = []
+
+        def capture(user, text):
+            inbox.append((user.id, text))
+
+        def capture_media(user, text, images):
+            media.append((user.id, text, len(images)))
+
+        tiny_png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00"
+            b"\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        advance_work_stage(
+            campaign,
+            photo_uploads=[(tiny_png, "a.png"), (tiny_png, "b.png")],
+            send_fn=capture,
+            send_media_fn=capture_media,
+        )
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.work_stage, WorkStage.WORK_DONE)
+        self.assertEqual(campaign.result_photos.count(), 2)
+        self.assertEqual(len(media), 1)
+        self.assertIn("Работа выполнена", media[0][1])
+        self.assertEqual(media[0][2], 2)
+
+        advance_work_stage(campaign)
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.work_stage, WorkStage.WORK_CLOSED)
+        self.assertEqual(campaign.status, CampaignStatus.CLOSED)
+        with self.assertRaises(ValueError):
+            advance_work_stage(campaign)
 
     def test_resend_skips_paid_and_uses_reminder_text(self):
         other = BotUser.objects.create(max_user_id="u5", real_name="Кира")

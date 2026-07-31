@@ -116,7 +116,7 @@
 <div class="card" style="margin-bottom:16px;">
   <h3 style="margin-top:0;">Последние сборы</h3>
   <table>
-    <thead><tr><th>Мероприятие</th><th>Группа</th><th>Сумма</th><th>Статус</th><th></th></tr></thead>
+    <thead><tr><th>Мероприятие</th><th>Группа</th><th>Сумма</th><th>Сбор</th><th>Этап</th><th></th></tr></thead>
     <tbody>
     {% for item in recent_campaigns %}
       <tr>
@@ -124,10 +124,11 @@
         <td>{% if item.group %}{{ item.group.name }}{% else %}{{ item.locality|default:"—" }}{% endif %}</td>
         <td class="mono">{{ item.total_amount }} ₽</td>
         <td><span class="badge {% if item.status == 'active' %}ok{% elif item.status == 'closed' %}bad{% endif %}">{{ item.get_status_display }}</span></td>
+        <td><span class="badge">{{ item.get_work_stage_display }}</span></td>
         <td><a class="btn small" href="{% url 'panel:service_campaign_detail' item.id %}">Открыть</a></td>
       </tr>
     {% empty %}
-      <tr><td colspan="5" class="muted">Сборов ещё не было</td></tr>
+      <tr><td colspan="6" class="muted">Сборов ещё не было</td></tr>
     {% endfor %}
     </tbody>
   </table>

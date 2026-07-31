@@ -10,9 +10,59 @@
 {% endif %}
 
 <div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Статус работ</h3>
+  <ol class="work-stage-list" style="list-style:none; padding:0; margin:0 0 14px; display:flex; gap:8px; flex-wrap:wrap;">
+    {% for stage in work_stages %}
+      <li style="flex:1; min-width:140px; padding:10px 12px; border-radius:10px; border:1px solid var(--border);
+        {% if stage == current_work_stage %}background:rgba(90,160,120,0.18); border-color:rgba(90,160,120,0.55);{% else %}background:var(--bg-soft); opacity:0.85;{% endif %}">
+        <div class="muted" style="font-size:12px;">Шаг {{ forloop.counter }}</div>
+        <strong>
+          {% if stage == "collecting" %}Сбор денег
+          {% elif stage == "work_started" %}Начало работ
+          {% elif stage == "work_done" %}Работа выполнена
+          {% elif stage == "work_closed" %}Закрыть работу
+          {% else %}{{ stage }}{% endif %}
+        </strong>
+        {% if stage == current_work_stage %}<div class="badge ok" style="margin-top:6px;">текущий</div>{% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+  {% if result_photos %}
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+    {% for photo in result_photos %}
+      <a href="{{ photo.image.url }}" target="_blank" rel="noopener">
+        <img src="{{ photo.image.url }}" alt="Результат" style="width:120px; height:120px; object-fit:cover; border-radius:8px; border:1px solid var(--border);">
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if next_work_stage %}
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="advance_stage">
+    {% if needs_result_photos %}
+    <div class="form-row">
+      <label>Фото результата (необязательно, до 2 шт.)</label>
+      <input type="file" name="result_photos" accept="image/*" multiple>
+      <div class="hint">При переводе в «Работа выполнена» фотографии уйдут всем участникам сбора.</div>
+    </div>
+    {% endif %}
+    <button class="btn" type="submit">
+      {% if next_work_stage == "work_started" %}Начало работ
+      {% elif next_work_stage == "work_done" %}Работа выполнена
+      {% elif next_work_stage == "work_closed" %}Закрыть работу
+      {% else %}Далее: {{ next_work_stage_label }}{% endif %}
+    </button>
+  </form>
+  {% else %}
+  <p class="muted" style="margin:0;">Работы по мероприятию закрыты.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-bottom:16px;">
   <p style="margin:0;">
     {% if campaign.group %}Группа: <strong>{{ campaign.group.name }}</strong> · {% endif %}
-    {{ campaign.get_status_display }}
+    Сбор: {{ campaign.get_status_display }} · Этап: {{ campaign.get_work_stage_display }}
   </p>
   <p class="muted">{{ campaign.description|default:"—" }}</p>
   {% if campaign.event_at %}
@@ -30,16 +80,10 @@
   <p class="muted" style="margin-top:10px;">Реквизиты: {{ cfg.service_payee_name }} / {{ cfg.service_payee_phone }} / {{ cfg.service_payee_status }}</p>
   <p class="muted">При достижении цели всем уходит «Сбор закрыт.» Неоплатившим — напоминания за 3 дня / 1 день / 2 часа до мероприятия.</p>
   <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-    {% if campaign.status != 'closed' %}
+    {% if current_work_stage == "collecting" and campaign.status != "closed" %}
     <form method="post">{% csrf_token %}
       <input type="hidden" name="action" value="resend">
       <button class="btn secondary small" type="submit">Повторить рассылку неоплатившим</button>
-    </form>
-    {% endif %}
-    {% if campaign.status != 'closed' %}
-    <form method="post">{% csrf_token %}
-      <input type="hidden" name="action" value="close">
-      <button class="btn danger small" type="submit">Закрыть мероприятие</button>
     </form>
     {% endif %}
   </div>
