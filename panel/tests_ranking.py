@@ -38,4 +38,4 @@ class RankingLocalityDropdownTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Анна")
         self.assertNotContains(resp, "Борис")
-        self.assertContains(resp, 'selected">Куюки</option>')
+        self.assertContains(resp, 'value="Куюки" selected')
