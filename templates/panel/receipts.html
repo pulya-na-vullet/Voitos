@@ -1,0 +1,90 @@
+{% extends "panel/base.html" %}
+{% block title %}Чеки — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>{% if bot_user %}Чеки: {{ bot_user }}{% else %}Чеки оплаты{% endif %}</h1>
+  <div>
+    {% if pending_count %}<span class="badge bad">На проверке: {{ pending_count }}</span>{% endif %}
+    {% if not bot_user %}
+    <form method="get" style="display:inline;">
+      <select name="status" onchange="this.form.submit()" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+        <option value="">Все статусы</option>
+        {% for value, label in statuses %}
+          <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Когда</th>
+        {% if not bot_user %}<th>Пользователь</th>{% endif %}
+        <th>Сумма</th>
+        <th>Дата перевода</th>
+        <th>Реквизиты</th>
+        <th>Статус</th>
+        <th>Срок</th>
+        <th>Чек</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.created_at|date:"d.m.Y H:i" }}</td>
+        {% if not bot_user %}
+          <td><a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></td>
+        {% endif %}
+        <td>{{ item.amount|default:"—" }} ₽</td>
+        <td class="mono">{{ item.transfer_date|date:"d.m.Y"|default:"—" }}</td>
+        <td>
+          {% if item.status == "approved" %}
+            <span class="badge ok">распознано администратором</span>
+          {% elif item.status == "rejected" %}
+            <span class="badge bad">не принят</span>
+          {% elif item.details_match %}
+            <span class="badge ok">совпали</span>
+          {% else %}
+            <span class="badge bad">сомнительно</span>
+          {% endif %}
+          <div class="muted">{{ item.recipient_phone }} · {{ item.recipient_name|truncatechars:40 }}</div>
+        </td>
+        <td>{{ item.get_status_display }}</td>
+        <td>{{ item.period_label }}</td>
+        <td>{% if item.image %}<a href="{{ item.image.url }}" target="_blank">открыть</a>{% else %}—{% endif %}</td>
+        <td>
+          {% if item.status == "pending" %}
+          <form method="post" action="{% url 'panel:receipt_approve' item.id %}" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:6px;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <input type="number" name="amount" min="1" step="1" required
+                   value="{{ item.amount|default_if_none:'' }}"
+                   placeholder="Сумма, ₽"
+                   title="Сколько денег принимаете по этому чеку"
+                   style="width:100px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+            <button class="btn small" type="submit">Принять</button>
+          </form>
+          <form method="post" action="{% url 'panel:receipt_reject' item.id %}" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <input type="text" name="comment" placeholder="Причина" style="width:120px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+            <button class="btn danger small" type="submit">Отклонить</button>
+          </form>
+          {% else %}
+            <div class="mono">{{ item.amount|default:"—" }} ₽ · {{ item.period_label }}</div>
+            <span class="muted">{{ item.reviewed_at|date:"d.m H:i"|default:"" }}</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="9" class="muted">Чеков нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

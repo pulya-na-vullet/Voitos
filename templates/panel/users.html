@@ -1,0 +1,99 @@
+{% extends "panel/base.html" %}
+{% block title %}Пользователи — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Пользователи бота</h1>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <span class="badge {% if bot_status.state == 'polling' or bot_status.state == 'connected' %}ok{% elif bot_status.state == 'error' %}bad{% endif %}">{{ bot_status.state }}</span>
+    {% if pending_receipts %}<span class="badge bad">Чеков подписки: {{ pending_receipts }}</span>{% endif %}
+    {% if pending_service %}<span class="badge bad">Сервис-чеков: {{ pending_service }}</span>{% endif %}
+    {% if pending_profiles %}<span class="badge">Анкет на проверку: {{ pending_profiles }}</span>{% endif %}
+    {% if open_admin_tasks %}<a class="badge bad" href="{% url 'panel:admin_tasks_today' %}">Задач: {{ open_admin_tasks }}</a>{% endif %}
+    <form method="post" action="{% url 'panel:check_max' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Проверить MAX</button></form>
+    <form method="post" action="{% url 'panel:dump_now' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Дамп БД</button></form>
+  </div>
+</div>
+
+<div class="grid stats" style="grid-template-columns: repeat(3, minmax(0,1fr));">
+  <div class="card"><div class="stat-label">Всего пользователей</div><div class="stat-value">{{ stats.users }}</div></div>
+  <div class="card"><div class="stat-label">С активной подпиской</div><div class="stat-value">{{ stats.active }}</div></div>
+  <div class="card"><div class="stat-label">Чеков</div><div class="stat-value">{{ stats.receipts }}</div></div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <form method="get" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+    <div class="form-row" style="margin:0; flex:1; min-width:160px;">
+      <label>Поиск</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="Имя / id / телефон...">
+    </div>
+    <div class="form-row" style="margin:0; flex:1; min-width:160px;">
+      <label>Населённый пункт</label>
+      <input type="text" name="locality" list="locs" value="{{ locality }}" placeholder="Куюки, Казань…">
+      <datalist id="locs">{% for loc in localities %}<option value="{{ loc }}">{% endfor %}</datalist>
+    </div>
+    <div class="form-row" style="margin:0; min-width:180px;">
+      <label>Сортировка</label>
+      <select name="sort">
+        <option value="-rating" {% if sort == "-rating" %}selected{% endif %}>Рейтинг ↓</option>
+        <option value="rating" {% if sort == "rating" %}selected{% endif %}>Рейтинг ↑</option>
+        <option value="-paid" {% if sort == "-paid" %}selected{% endif %}>Оплатил ↓</option>
+        <option value="-offered" {% if sort == "-offered" %}selected{% endif %}>Предложено ↓</option>
+        <option value="locality" {% if sort == "locality" %}selected{% endif %}>Нас. пункт А–Я</option>
+        <option value="-locality" {% if sort == "-locality" %}selected{% endif %}>Нас. пункт Я–А</option>
+        <option value="name" {% if sort == "name" %}selected{% endif %}>Имя А–Я</option>
+        <option value="-seen" {% if sort == "-seen" %}selected{% endif %}>Активность ↓</option>
+      </select>
+    </div>
+    <button class="btn secondary small" type="submit">Найти</button>
+  </form>
+  <table>
+    <thead>
+      <tr>
+        <th>Имя</th>
+        <th>Нас. пункт</th>
+        <th>Соц. рейтинг</th>
+        <th>Предл. / оплатил</th>
+        <th>Анкета</th>
+        <th>Подписка</th>
+        <th>Доступ</th>
+        <th>Активность</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+      {% with u=row.user %}
+      <tr>
+        <td>{{ u.real_name|default:u.display_name|default:u.username|default:"—" }}
+          <div class="muted mono">{{ u.max_user_id }}</div>
+        </td>
+        <td>{{ u.locality|default:"—" }}</td>
+        <td>
+          <span class="badge {% if row.ratio >= 80 %}ok{% elif row.offered == 0 %}{% elif row.ratio < 40 %}bad{% endif %}">
+            {{ row.label }}
+          </span>
+          <div class="muted mono">{{ row.ratio|floatformat:0 }}%</div>
+        </td>
+        <td class="mono">{{ row.offered }} / {{ row.paid }}</td>
+        <td>
+          <span class="badge {% if u.profile_status == 'verified' %}ok{% elif u.profile_status == 'pending_review' %}{% elif u.profile_status == 'rejected' %}bad{% endif %}">
+            {{ u.get_profile_status_display }}
+          </span>
+        </td>
+        <td class="mono">{% if u.subscription_until %}до {{ u.subscription_until|date:"d.m.Y" }}{% else %}нет{% endif %}</td>
+        <td>
+          {% with st=u.access_state %}
+            <span class="badge {% if st == 'active' %}ok{% elif st == 'grace' %}{% else %}bad{% endif %}">{{ st }}</span>
+          {% endwith %}
+        </td>
+        <td class="mono">{{ u.last_seen_at|date:"d.m.Y H:i" }}</td>
+        <td><a class="btn small" href="{% url 'panel:user_dashboard' u.id %}">Открыть</a></td>
+      </tr>
+      {% endwith %}
+    {% empty %}
+      <tr><td colspan="9" class="muted">Никого не найдено</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "panel/base.html" %}
+{% block title %}Группа {{ group.name }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Группа: {{ group.name }}</h1>
+  <a class="btn secondary small" href="{% url 'panel:services' %}">← К сервисам</a>
+</div>
+<div class="card" style="max-width:900px;">
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-row">
+      <label>Название</label>
+      <input type="text" name="name" value="{{ group.name }}" required>
+    </div>
+    <div class="form-row">
+      <label>Описание</label>
+      <input type="text" name="description" value="{{ group.description }}">
+    </div>
+    <h3>Участники</h3>
+    <p class="muted">Отметьте жителей группы. Новым участникам автоматически придут все активные сборы этой группы (остальным повторно не шлём).</p>
+    <table>
+      <thead><tr><th></th><th>Имя</th><th>Телефон</th><th>Нас. пункт</th><th>Адрес</th></tr></thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td><input type="checkbox" name="user_ids" value="{{ u.id }}" {% if u.id in member_ids %}checked{% endif %}></td>
+          <td>{{ u.real_name|default:u.display_name|default:u.max_user_id }}</td>
+          <td class="mono">{{ u.phone|default:"—" }}</td>
+          <td>{{ u.locality|default:"—" }}</td>
+          <td>{{ u.address|truncatechars:50 }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted">Пользователей бота пока нет</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn" type="submit">Сохранить состав</button>
+      <button class="btn danger" type="submit" name="action" value="delete" onclick="return confirm('Удалить группу?');">Удалить группу</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
