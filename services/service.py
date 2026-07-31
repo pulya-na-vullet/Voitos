@@ -84,6 +84,52 @@ def campaign_collected(campaign: ServiceCampaign) -> Decimal:
     )
 
 
+def campaign_surplus(campaign: ServiceCampaign) -> Decimal:
+    """Amount above the goal that goes to the group budget after close."""
+    paid = campaign_collected(campaign)
+    total = Decimal(campaign.total_amount or 0)
+    if paid <= total:
+        return Decimal("0")
+    return paid - total
+
+
+def group_accumulated_budget(group: ServiceGroup) -> Decimal:
+    """
+    Budget accumulated for a resident group: sum of surpluses from closed
+    campaigns (collected over the goal → «общий бюджет»).
+    """
+    total = Decimal("0")
+    closed = (
+        ServiceCampaign.objects.filter(group=group, status=CampaignStatus.CLOSED)
+        .prefetch_related("invites")
+        .all()
+    )
+    for campaign in closed:
+        total += campaign_surplus(campaign)
+    return total
+
+
+def budgets_by_group_ids(group_ids: list[int]) -> dict[int, Decimal]:
+    """Map group_id -> accumulated surplus budget for closed campaigns."""
+    if not group_ids:
+        return {}
+    result = {gid: Decimal("0") for gid in group_ids}
+    closed = (
+        ServiceCampaign.objects.filter(
+            group_id__in=group_ids, status=CampaignStatus.CLOSED
+        )
+        .prefetch_related("invites")
+        .all()
+    )
+    for campaign in closed:
+        if campaign.group_id is None:
+            continue
+        result[campaign.group_id] = result.get(campaign.group_id, Decimal("0")) + campaign_surplus(
+            campaign
+        )
+    return result
+
+
 def format_collections_for_user(user: BotUser) -> str:
     invites = (
         ServiceInvite.objects.filter(user=user)

@@ -267,6 +267,8 @@ class ServiceCampaignTests(TestCase):
         )
 
     def test_surplus_goes_to_budget_notice(self):
+        from services.service import group_accumulated_budget
+
         campaign, _ = self._launch(
             total_amount=Decimal("400"),
             amount_per_user=Decimal("500"),
@@ -293,6 +295,7 @@ class ServiceCampaignTests(TestCase):
                 campaign=campaign, kind=CampaignNoticeKind.SURPLUS
             ).exists()
         )
+        self.assertEqual(group_accumulated_budget(self.group), Decimal("100"))
 
     def test_launch_with_offer_photos_broadcast(self):
         tiny_png = (

@@ -896,16 +896,23 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 ).count(),
             }
         )
-    groups = ServiceGroup.objects.prefetch_related("members").annotate(
-        wish_count=Count("wishes")
-    ).all()
+    groups = list(
+        ServiceGroup.objects.prefetch_related("members")
+        .annotate(wish_count=Count("wishes"))
+        .all()
+    )
+    from services.service import budgets_by_group_ids
+    from services.tax import sync_self_employed_tax_collected
+    from services.wishes import aggregate_home_stats, topic_stats
+
+    budget_map = budgets_by_group_ids([g.id for g in groups])
+    for g in groups:
+        g.budget = budget_map.get(g.id) or Decimal("0")
     recent = (
         ServiceCampaign.objects.select_related("group")
         .prefetch_related("invites")
         .all()[:20]
     )
-    from services.tax import sync_self_employed_tax_collected
-    from services.wishes import aggregate_home_stats, topic_stats
 
     tax_stats = sync_self_employed_tax_collected(cfg)
     cfg.refresh_from_db()
@@ -975,6 +982,7 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
     member_ids = set(group.members.values_list("id", flat=True))
     users = BotUser.objects.all().order_by("real_name", "display_name")
     from database.models import NeighborhoodWish
+    from services.service import group_accumulated_budget
     from services.wishes import topic_stats
 
     wish_stats = topic_stats(group)
@@ -990,6 +998,7 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "group": group,
             "users": users,
             "member_ids": member_ids,
+            "group_budget": group_accumulated_budget(group),
             "wish_stats": wish_stats,
             "wish_total": sum(s["count"] for s in wish_stats),
             "recent_wishes": recent_wishes,

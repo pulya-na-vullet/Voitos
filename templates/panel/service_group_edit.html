@@ -5,6 +5,13 @@
   <h1>Группа: {{ group.name }}</h1>
   <a class="btn secondary small" href="{% url 'panel:services' %}">← К сервисам</a>
 </div>
+<div class="card" style="max-width:900px; margin-bottom:16px;">
+  <p style="margin:0;">Накопленный бюджет группы:
+    <strong class="mono">{{ group_budget }} ₽</strong>
+    <span class="muted">— остатки сверх цели после закрытых сборов</span>
+  </p>
+</div>
+
 <div class="card" style="max-width:900px;">
   <form method="post">
     {% csrf_token %}
