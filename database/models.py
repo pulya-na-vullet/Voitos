@@ -459,6 +459,26 @@ class ServiceCampaign(models.Model):
         return min(100, int(self.collected_amount * 100 / Decimal(self.total_amount)))
 
 
+class ServiceCampaignOfferPhoto(models.Model):
+    """Optional photos of what needs to be done — sent with the initial offer."""
+
+    campaign = models.ForeignKey(
+        ServiceCampaign,
+        on_delete=models.CASCADE,
+        related_name="offer_photos",
+    )
+    image = models.ImageField("Фото задачи", upload_to="service_offers/%Y/%m/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Фото задачи сбора"
+        verbose_name_plural = "Фото задач сборов"
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return f"Задача-фото #{self.pk} → кампания {self.campaign_id}"
+
+
 class ServiceCampaignResultPhoto(models.Model):
     campaign = models.ForeignKey(
         ServiceCampaign,

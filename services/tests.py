@@ -270,6 +270,28 @@ class ServiceCampaignTests(TestCase):
             ).exists()
         )
 
+    def test_launch_with_offer_photos_broadcast(self):
+        tiny_png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00"
+            b"\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        media = []
+
+        def capture_media(user, text, images):
+            media.append((user.id, text, len(images)))
+
+        campaign, sent = self._launch(
+            photo_uploads=[(tiny_png, "task.png")],
+            send_media_fn=capture_media,
+        )
+        self.assertEqual(sent, 1)
+        self.assertEqual(campaign.offer_photos.count(), 1)
+        self.assertEqual(len(media), 1)
+        self.assertEqual(media[0][2], 1)
+        self.assertIn("фото того, что нужно сделать", media[0][1])
+
     def test_work_stage_flow_and_result_photos(self):
         campaign, _ = self._launch()
         self.assertEqual(campaign.work_stage, WorkStage.COLLECTING)

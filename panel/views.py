@@ -698,6 +698,14 @@ def services_home(request: HttpRequest) -> HttpResponse:
                     if timezone.is_naive(dt):
                         dt = timezone.make_aware(dt, timezone.get_current_timezone())
                     event_at = dt
+            photo_uploads: list[tuple[bytes, str]] = []
+            for f in request.FILES.getlist("offer_photos")[:2]:
+                photo_uploads.append((f.read(), f.name))
+            token_cache: dict = {}
+
+            def send_media(user, text, images, _cache=token_cache):
+                _notify_user_with_images(user, text, images, _token_cache=_cache)
+
             try:
                 campaign, sent = launch_campaign_to_group(
                     category=category,
@@ -708,11 +716,15 @@ def services_home(request: HttpRequest) -> HttpResponse:
                     total_amount=total,
                     amount_per_user=per_user,
                     event_at=event_at,
+                    photo_uploads=photo_uploads,
                     send_fn=_notify_user,
+                    send_media_fn=send_media,
                 )
+                photo_n = campaign.offer_photos.count()
+                extra = f", с фото ({photo_n})" if photo_n else ""
                 messages.success(
                     request,
-                    f"Сбор запущен для группы «{group.name}»: разослано {sent} сообщ.",
+                    f"Сбор запущен для группы «{group.name}»: разослано {sent} сообщ.{extra}",
                 )
                 tax_warn = AppSettings.load().tax_limit_warning()
                 if tax_warn:
@@ -780,8 +792,16 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             group_notices = notify_members_added_to_group(
                 group, new_ids, send_fn=_notify_user
             )
+            token_cache: dict = {}
+
+            def send_media(user, text, images, _cache=token_cache):
+                _notify_user_with_images(user, text, images, _token_cache=_cache)
+
             campaign_notices = invite_new_members_to_group_campaigns(
-                group, new_ids, send_fn=_notify_user
+                group,
+                new_ids,
+                send_fn=_notify_user,
+                send_media_fn=send_media,
             )
         parts = ["Группа сохранена"]
         if group_notices:
@@ -843,7 +863,16 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             elif (campaign.amount_per_user or 0) <= 0:
                 messages.error(request, "Нет суммы для рассылки")
             else:
-                sent = resend_to_unpaid(campaign, send_fn=_notify_user)
+                token_cache: dict = {}
+
+                def send_media(user, text, images, _cache=token_cache):
+                    _notify_user_with_images(user, text, images, _token_cache=_cache)
+
+                sent = resend_to_unpaid(
+                    campaign,
+                    send_fn=_notify_user,
+                    send_media_fn=send_media,
+                )
                 if sent:
                     messages.success(
                         request,
@@ -904,6 +933,7 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "campaign": campaign,
             "invites": campaign.invites.select_related("user").all(),
             "receipts": campaign.receipts.select_related("user", "invite").all()[:200],
+            "offer_photos": campaign.offer_photos.all(),
             "result_photos": campaign.result_photos.all(),
             "collected": paid,
             "progress_pct": pct,

@@ -19,6 +19,7 @@ from database.models import (
     ReceiptStatus,
     ServiceCampaign,
     ServiceCampaignNotice,
+    ServiceCampaignOfferPhoto,
     ServiceCampaignResultPhoto,
     ServiceCategory,
     ServiceGroup,
@@ -172,18 +173,62 @@ def _campaign_date_lines(campaign: ServiceCampaign) -> tuple[str, str, str]:
 
 def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
     date_s, date_label, extra = _campaign_date_lines(campaign)
+    photo_n = campaign.offer_photos.count() if campaign.pk else 0
+    photo_line = (
+        f"\nК сообщению приложены фото того, что нужно сделать ({photo_n}).\n"
+        if photo_n
+        else ""
+    )
     return (
         f"Начат сбор: {campaign.get_category_display()}\n"
         f"{campaign.title}\n"
         f"{extra}"
         f"{date_label}: {date_s}\n"
         f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
-        f"Вам нужно перевести: {amount_per_user:.0f} ₽\n\n"
+        f"Вам нужно перевести: {amount_per_user:.0f} ₽\n"
+        f"{photo_line}\n"
         f"Реквизиты:\n{service_payment_requisites()}\n\n"
         f"{campaign_progress_line(campaign)}\n\n"
         "Пришлите фото чека о переводе в этот чат.\n"
         "Список сборов — команда «сборы»."
     )
+
+
+def save_offer_photos(
+    campaign: ServiceCampaign,
+    uploads: list[tuple[bytes, str]],
+    *,
+    max_photos: int = 2,
+) -> list[ServiceCampaignOfferPhoto]:
+    """Save up to max_photos task photos attached at campaign launch."""
+    existing = campaign.offer_photos.count()
+    remaining = max(0, max_photos - existing)
+    saved: list[ServiceCampaignOfferPhoto] = []
+    for raw, filename in uploads[:remaining]:
+        if not raw:
+            continue
+        photo = ServiceCampaignOfferPhoto(campaign=campaign)
+        safe_name = Path(filename or "task.jpg").name
+        media_name = (
+            f"{campaign.id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
+        )
+        photo.image.save(media_name, ContentFile(raw), save=False)
+        photo.save()
+        saved.append(photo)
+    return saved
+
+
+def campaign_offer_image_payloads(
+    campaign: ServiceCampaign,
+) -> list[tuple[bytes, str]]:
+    payloads: list[tuple[bytes, str]] = []
+    for photo in campaign.offer_photos.all()[:2]:
+        try:
+            with photo.image.open("rb") as fh:
+                payloads.append((fh.read(), Path(photo.image.name).name))
+        except Exception:
+            logger.exception("Could not read offer photo %s", photo.id)
+    return payloads
 
 
 def resend_offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
@@ -203,7 +248,7 @@ def resend_offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) ->
     )
 
 
-def resend_to_unpaid(campaign: ServiceCampaign, send_fn=None) -> int:
+def resend_to_unpaid(campaign: ServiceCampaign, send_fn=None, send_media_fn=None) -> int:
     """
     Admin resend: remind only users who have not paid yet.
     Does not message invitees with status PAID.
@@ -218,6 +263,7 @@ def resend_to_unpaid(campaign: ServiceCampaign, send_fn=None) -> int:
         .select_related("user")
     )
     text = resend_offer_message(campaign, amount)
+    image_payloads = campaign_offer_image_payloads(campaign)
     sent = 0
     for inv in unpaid:
         ActivityLog.objects.create(
@@ -227,18 +273,21 @@ def resend_to_unpaid(campaign: ServiceCampaign, send_fn=None) -> int:
             detail=campaign.title,
             meta={"campaign_id": campaign.id, "invite_id": inv.id},
         )
-        if send_fn:
-            try:
+        try:
+            if image_payloads and send_media_fn:
+                send_media_fn(inv.user, text, image_payloads)
+                sent += 1
+            elif send_fn:
                 send_fn(inv.user, text)
                 sent += 1
-            except Exception:
-                logger.exception(
-                    "Failed resend to user %s about campaign %s",
-                    inv.user.max_user_id,
-                    campaign.id,
-                )
-        else:
-            sent += 1
+            else:
+                sent += 1
+        except Exception:
+            logger.exception(
+                "Failed resend to user %s about campaign %s",
+                inv.user.max_user_id,
+                campaign.id,
+            )
     return sent
 
 
@@ -521,12 +570,14 @@ def offer_to_users(
     user_ids: list[int],
     amount_per_user: Decimal,
     send_fn=None,
+    send_media_fn=None,
 ) -> int:
-    """Create invites and notify users via send_fn(user, text)."""
+    """Create invites and notify users via send_fn / send_media_fn(user, text, images)."""
     cfg = AppSettings.load()
     users = BotUser.objects.filter(id__in=user_ids)
     campaign.amount_per_user = amount_per_user
     campaign.save(update_fields=["amount_per_user"])
+    image_payloads = campaign_offer_image_payloads(campaign)
     sent = 0
     for user in users:
         invite, created = ServiceInvite.objects.get_or_create(
@@ -552,16 +603,23 @@ def offer_to_users(
             kind=ActivityKind.SERVICE_OFFER,
             title="Предложение сервисного сбора",
             detail=campaign.title,
-            meta={"campaign_id": campaign.id, "invite_id": invite.id},
+            meta={
+                "campaign_id": campaign.id,
+                "invite_id": invite.id,
+                "photos": len(image_payloads),
+            },
         )
-        if send_fn:
-            try:
+        try:
+            if image_payloads and send_media_fn:
+                send_media_fn(user, text, image_payloads)
+                sent += 1
+            elif send_fn:
                 send_fn(user, text)
                 sent += 1
-            except Exception:
-                logger.exception("Failed to notify user %s about campaign", user.max_user_id)
-        else:
-            sent += 1
+            else:
+                sent += 1
+        except Exception:
+            logger.exception("Failed to notify user %s about campaign", user.max_user_id)
 
     campaign.status = CampaignStatus.ACTIVE
     campaign.save(update_fields=["status"])
@@ -580,7 +638,9 @@ def launch_campaign_to_group(
     total_amount: Decimal,
     amount_per_user: Decimal,
     event_at=None,
+    photo_uploads: list[tuple[bytes, str]] | None = None,
     send_fn=None,
+    send_media_fn=None,
 ) -> tuple[ServiceCampaign, int]:
     """Create campaign for a group and broadcast to all members."""
     members = list(group.members.values_list("id", flat=True))
@@ -592,6 +652,9 @@ def launch_campaign_to_group(
         raise ValueError("Укажите общую сумму")
     if event_at is None:
         raise ValueError("Укажите дату мероприятия")
+    photo_uploads = photo_uploads or []
+    if len(photo_uploads) > 2:
+        raise ValueError("Можно приложить не больше 2 фотографий")
     campaign = create_campaign(
         category=category,
         title=title,
@@ -601,7 +664,15 @@ def launch_campaign_to_group(
         amount_per_user=amount_per_user,
         event_at=event_at,
     )
-    sent = offer_to_users(campaign, members, amount_per_user, send_fn=send_fn)
+    if photo_uploads:
+        save_offer_photos(campaign, photo_uploads)
+    sent = offer_to_users(
+        campaign,
+        members,
+        amount_per_user,
+        send_fn=send_fn,
+        send_media_fn=send_media_fn,
+    )
     return campaign, sent
 
 
@@ -646,6 +717,7 @@ def invite_new_members_to_group_campaigns(
     group: ServiceGroup,
     user_ids: list[int],
     send_fn=None,
+    send_media_fn=None,
 ) -> int:
     """
     When users are added to a group, send them all active collections of this group.
@@ -684,6 +756,7 @@ def invite_new_members_to_group_campaigns(
                     status=InviteStatus.OFFERED,
                 )
             text = offer_message(campaign, amount)
+            image_payloads = campaign_offer_image_payloads(campaign)
             ActivityLog.objects.create(
                 user=user,
                 kind=ActivityKind.SERVICE_OFFER,
@@ -693,20 +766,24 @@ def invite_new_members_to_group_campaigns(
                     "campaign_id": campaign.id,
                     "invite_id": invite.id,
                     "group_id": group.id,
+                    "photos": len(image_payloads),
                 },
             )
-            if send_fn:
-                try:
+            try:
+                if image_payloads and send_media_fn:
+                    send_media_fn(user, text, image_payloads)
+                    sent += 1
+                elif send_fn:
                     send_fn(user, text)
                     sent += 1
-                except Exception:
-                    logger.exception(
-                        "Failed to notify new member %s about campaign %s",
-                        user.max_user_id,
-                        campaign.id,
-                    )
-            else:
-                sent += 1
+                else:
+                    sent += 1
+            except Exception:
+                logger.exception(
+                    "Failed to notify new member %s about campaign %s",
+                    user.max_user_id,
+                    campaign.id,
+                )
     return sent
 
 

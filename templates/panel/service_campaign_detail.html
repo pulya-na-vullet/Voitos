@@ -27,7 +27,18 @@
       </li>
     {% endfor %}
   </ol>
+  {% if offer_photos %}
+  <p class="muted" style="margin:0 0 6px;">Фото задачи (разосланы при объявлении):</p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+    {% for photo in offer_photos %}
+      <a href="{{ photo.image.url }}" target="_blank" rel="noopener">
+        <img src="{{ photo.image.url }}" alt="Задача" style="width:120px; height:120px; object-fit:cover; border-radius:8px; border:1px solid var(--border);">
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if result_photos %}
+  <p class="muted" style="margin:0 0 6px;">Фото результата:</p>
   <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
     {% for photo in result_photos %}
       <a href="{{ photo.image.url }}" target="_blank" rel="noopener">

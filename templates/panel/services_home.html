@@ -63,7 +63,7 @@
 <div class="card" style="margin-bottom:16px;">
   <h3 style="margin-top:0;">Запустить сбор на группу</h3>
   <p class="muted">Сообщение уйдёт всем участникам группы автоматически.</p>
-  <form method="post">
+  <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="action" value="launch">
     <div class="grid two">
@@ -98,6 +98,11 @@
       <label>Дата и время мероприятия</label>
       <input type="datetime-local" name="event_at" required>
       <div class="hint">Неоплатившим уйдёт напоминание за 3 дня, за 1 день и за 2 часа. При достижении цели — «Сбор закрыт.»</div>
+    </div>
+    <div class="form-row">
+      <label>Фото того, что нужно сделать (необязательно, до 2 шт.)</label>
+      <input type="file" name="offer_photos" accept="image/*" multiple>
+      <div class="hint">Если приложите фото — они уйдут всем участникам вместе с объявлением сбора.</div>
     </div>
     <div class="grid two">
       <div class="form-row">
