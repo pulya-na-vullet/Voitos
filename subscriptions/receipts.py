@@ -61,11 +61,22 @@ class ReceiptParseResult:
     details_match: bool
 
 
-def ocr_image_bytes(image_bytes: bytes) -> str:
+def guess_ocr_mime(file_bytes: bytes, filename: str = "") -> str:
+    """Return Yandex OCR mimeType: JPEG / PNG / PDF."""
+    lower = (filename or "").lower()
+    if file_bytes[:4] == b"%PDF" or lower.endswith(".pdf"):
+        return "PDF"
+    if file_bytes[:8] == b"\x89PNG\r\n\x1a\n" or lower.endswith(".png"):
+        return "PNG"
+    return "JPEG"
+
+
+def ocr_image_bytes(image_bytes: bytes, filename: str = "") -> str:
     cfg = get_runtime_settings()
     if not cfg.yandex_api_key:
         raise RuntimeError("Yandex API Key не настроен")
 
+    mime = guess_ocr_mime(image_bytes, filename)
     b64 = base64.b64encode(image_bytes).decode("ascii")
     headers = {
         "Authorization": f"Api-Key {cfg.yandex_api_key}",
@@ -73,18 +84,18 @@ def ocr_image_bytes(image_bytes: bytes) -> str:
         "x-folder-id": cfg.yandex_folder_id,
     }
 
-    # Prefer modern OCR endpoint, fallback to Vision batchAnalyze
+    # Prefer modern OCR endpoint, fallback to Vision batchAnalyze (images only)
     try:
         resp = requests.post(
             OCR_URL,
             headers=headers,
             json={
-                "mimeType": "JPEG",
+                "mimeType": mime,
                 "languageCodes": ["ru", "en"],
                 "model": "page",
                 "content": b64,
             },
-            timeout=60,
+            timeout=90,
         )
         if resp.status_code < 400:
             data = resp.json()
@@ -95,6 +106,9 @@ def ocr_image_bytes(image_bytes: bytes) -> str:
             logger.warning("OCR v1 failed %s: %s", resp.status_code, resp.text[:300])
     except Exception:
         logger.exception("OCR v1 request failed")
+
+    if mime == "PDF":
+        raise RuntimeError("Не удалось распознать PDF-чек. Пришлите ещё раз или скрин перевода.")
 
     payload = {
         "folderId": cfg.yandex_folder_id,

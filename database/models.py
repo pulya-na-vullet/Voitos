@@ -324,7 +324,7 @@ class BotUser(models.Model):
 
 class PaymentReceipt(models.Model):
     user = models.ForeignKey(BotUser, on_delete=models.CASCADE, related_name="receipts")
-    image = models.ImageField("Файл чека", upload_to="receipts/%Y/%m/", blank=True)
+    image = models.FileField("Файл чека", upload_to="receipts/%Y/%m/", blank=True)
     image_url = models.URLField(blank=True, default="")
     ocr_text = models.TextField("Распознанный текст", blank=True, default="")
     amount = models.DecimalField("Сумма", max_digits=12, decimal_places=2, null=True, blank=True)
@@ -560,7 +560,7 @@ class ServiceReceipt(models.Model):
         ServiceCampaign, on_delete=models.CASCADE, related_name="receipts"
     )
     user = models.ForeignKey(BotUser, on_delete=models.CASCADE, related_name="service_receipts")
-    image = models.ImageField("Файл чека", upload_to="service_receipts/%Y/%m/", blank=True)
+    image = models.FileField("Файл чека", upload_to="service_receipts/%Y/%m/", blank=True)
     ocr_text = models.TextField(blank=True, default="")
     amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     transfer_date = models.DateField(null=True, blank=True)

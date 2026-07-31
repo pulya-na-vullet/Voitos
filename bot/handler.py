@@ -25,6 +25,10 @@ from subscriptions.service import (
 
 logger = logging.getLogger(__name__)
 
+_RECEIPT_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic")
+_RECEIPT_DOC_EXTS = (".pdf",)
+_AUDIO_EXTS = (".ogg", ".opus", ".oga", ".mp3", ".m4a", ".wav", ".aac", ".flac")
+
 
 def _extract_text(message: dict[str, Any]) -> str:
     body = message.get("body") or {}
@@ -42,33 +46,62 @@ def _iter_attachments(message: dict[str, Any]) -> list[dict[str, Any]]:
     return [a for a in attachments if isinstance(a, dict)]
 
 
+def _attachment_filename(att: dict[str, Any], payload: dict[str, Any]) -> str:
+    return str(
+        payload.get("filename")
+        or payload.get("name")
+        or att.get("filename")
+        or att.get("name")
+        or ""
+    )
+
+
+def _attachment_url(att: dict[str, Any], payload: dict[str, Any]) -> str:
+    return str(payload.get("url") or att.get("url") or "").strip()
+
+
 def _find_audio_url(message: dict[str, Any]) -> str | None:
+    """Return voice/audio URL only — never PDF/image files."""
     for att in _iter_attachments(message):
         att_type = (att.get("type") or "").lower()
         payload = att.get("payload") or {}
-        if att_type in {"audio", "voice", "file", "unsupported"}:
-            url = payload.get("url") or att.get("url")
-            if url:
-                return url
-        if payload.get("url") and att_type in {"audio", "voice"}:
-            return payload["url"]
+        url = _attachment_url(att, payload)
+        if not url:
+            continue
+        name = _attachment_filename(att, payload).lower()
+        if att_type in {"audio", "voice"}:
+            return url
+        if att_type in {"file", "unsupported"} and any(name.endswith(ext) for ext in _AUDIO_EXTS):
+            return url
     return None
 
 
-def _find_image(message: dict[str, Any]) -> tuple[str | None, str]:
+def _find_receipt_file(message: dict[str, Any]) -> tuple[str | None, str]:
+    """Find image or PDF receipt attachment. Returns (url, filename)."""
     for att in _iter_attachments(message):
         att_type = (att.get("type") or "").lower()
         payload = att.get("payload") or {}
+        url = _attachment_url(att, payload)
+        if not url:
+            continue
+        name = _attachment_filename(att, payload)
+        lower = name.lower()
         if att_type in {"image", "photo"}:
-            url = payload.get("url") or att.get("url")
-            if url:
-                return url, "receipt.jpg"
-        # some clients send screenshot as file
-        if att_type == "file":
-            url = payload.get("url") or att.get("url")
-            name = (payload.get("filename") or "").lower()
-            if url and any(name.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")):
-                return url, payload.get("filename") or "receipt.jpg"
+            return url, name or "receipt.jpg"
+        mime = str(
+            payload.get("mimeType")
+            or payload.get("mime_type")
+            or payload.get("content_type")
+            or att.get("mimeType")
+            or ""
+        ).lower()
+        if att_type in {"file", "document", "unsupported"}:
+            if any(lower.endswith(ext) for ext in _RECEIPT_DOC_EXTS) or "pdf" in mime:
+                return url, name or "receipt.pdf"
+            if any(lower.endswith(ext) for ext in _RECEIPT_IMAGE_EXTS) or mime.startswith(
+                "image/"
+            ):
+                return url, name or "receipt.jpg"
     return None, "receipt.jpg"
 
 
@@ -109,10 +142,10 @@ class UpdateHandler:
                     logger.exception("Failed to notify denied user")
             return
 
-        # Receipt image first — allowed even when blocked
-        image_url, filename = _find_image(message)
-        if image_url:
-            self._handle_receipt(user, image_url, filename)
+        # Receipt image/PDF first — allowed even when blocked
+        receipt_url, filename = _find_receipt_file(message)
+        if receipt_url:
+            self._handle_receipt(user, receipt_url, filename)
             return
 
         text = _extract_text(message)
@@ -237,7 +270,8 @@ class UpdateHandler:
                 logger.exception("Service receipt processing failed")
                 self._reply(
                     user,
-                    "Не удалось разобрать чек сервисного сбора. Пришлите более чёткий скрин.",
+                    "Не удалось разобрать чек сервисного сбора. "
+                    "Пришлите PDF или более чёткий скрин перевода.",
                 )
                 return
             msg = (
@@ -260,7 +294,7 @@ class UpdateHandler:
             logger.exception("Receipt processing failed")
             self._reply(
                 user,
-                "Не удалось разобрать чек. Пришлите более чёткий скрин перевода.\n\n"
+                "Не удалось разобрать чек. Пришлите PDF или более чёткий скрин перевода.\n\n"
                 + payment_help_text(),
             )
             return

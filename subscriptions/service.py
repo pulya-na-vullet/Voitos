@@ -66,7 +66,7 @@ PAYMENT_HELP = (
     "Чтобы продлить доступ, переведите оплату на номер {phone}\n"
     "Получатель: {name}\n"
     "Стоимость: {price} ₽ / месяц.\n"
-    "Пришлите сюда фото или скрин чека о переводе."
+    "Пришлите сюда фото, скрин или PDF чека о переводе."
 )
 
 
@@ -106,7 +106,7 @@ def can_use_features(user: BotUser) -> bool:
 
 
 def submit_receipt(user: BotUser, image_bytes: bytes, filename: str = "receipt.jpg") -> PaymentReceipt:
-    ocr_text = ocr_image_bytes(image_bytes)
+    ocr_text = ocr_image_bytes(image_bytes, filename=filename)
     parsed = analyze_receipt_text(ocr_text)
     cfg = AppSettings.load()
     months, days = (0, 0)

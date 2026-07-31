@@ -815,7 +815,7 @@ def submit_service_receipt(
         else:
             raise ValueError("SEVERAL_INVITES")
 
-    ocr_text = ocr_image_bytes(image_bytes)
+    ocr_text = ocr_image_bytes(image_bytes, filename=filename)
     cfg = AppSettings.load()
     parsed = analyze_receipt_text(
         ocr_text,
