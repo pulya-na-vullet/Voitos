@@ -24,8 +24,9 @@
       <a href="{% url 'panel:admin_tasks_today' %}" class="{% if request.resolver_match.url_name == 'admin_tasks_today' or request.resolver_match.url_name == 'admin_task_done' or request.resolver_match.url_name == 'admin_address_scan' %}active{% endif %}">Задачи на сегодня</a>
       <a href="{% url 'panel:users' %}" class="{% if request.resolver_match.url_name == 'users' %}active{% endif %}">Пользователи</a>
       <a href="{% url 'panel:receipts' %}" class="{% if request.resolver_match.url_name == 'receipts' or request.resolver_match.url_name == 'user_receipts' or request.resolver_match.url_name == 'receipt_approve' or request.resolver_match.url_name == 'receipt_reject' or request.resolver_match.url_name == 'receipt_delete' %}active{% endif %}">Оплата подписок</a>
-      <a href="{% url 'panel:services' %}" class="{% if 'service' in request.resolver_match.url_name %}active{% endif %}">Сервисные мероприятия</a>
+      <a href="{% url 'panel:services' %}" class="{% if 'service' in request.resolver_match.url_name and request.resolver_match.url_name != 'services_ranking' %}active{% endif %}">Сервисные мероприятия</a>
       <a href="{% url 'panel:services_ranking' %}" class="{% if request.resolver_match.url_name == 'services_ranking' %}active{% endif %}">Рейтинг граждан</a>
+      <a href="{% url 'panel:clients_map' %}" class="{% if request.resolver_match.url_name == 'clients_map' %}active{% endif %}">Карта клиентов</a>
       <a href="{% url 'panel:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">Настройки</a>
       {% if bot_user %}
       <div class="brand-sub" style="margin-top:18px;">Пользователь</div>

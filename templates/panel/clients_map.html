@@ -1,0 +1,71 @@
+{% extends "panel/base.html" %}
+{% block title %}Карта клиентов — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Карта клиентов</h1>
+</div>
+<p class="muted" style="margin-top:-6px; margin-bottom:16px;">
+  Каждая группа — отдельный граф. Родственники (семейная подписка) объединены в одной вершине.
+  {% if graph_count %}
+    Графов: {{ graph_count }} · домохозяйств: {{ household_total }}.
+  {% endif %}
+</p>
+
+{% if graphs %}
+<div class="clients-map-grid">
+  {% for graph in graphs %}
+  <section class="clients-map-graph card">
+    <div class="clients-map-graph-head">
+      <h2>{{ graph.group_name }}</h2>
+      <span class="muted">
+        {{ graph.household_count }} домохоз. · {{ graph.user_count }} чел.
+      </span>
+    </div>
+    <div class="clients-map-svg-wrap">
+      <svg
+        class="clients-map-svg"
+        viewBox="0 0 {{ graph.width }} {{ graph.height }}"
+        role="img"
+        aria-label="Граф группы {{ graph.group_name }}"
+      >
+        {% for edge in graph.edges %}
+        <line
+          x1="{{ edge.x1 }}" y1="{{ edge.y1 }}"
+          x2="{{ edge.x2 }}" y2="{{ edge.y2 }}"
+          class="cmap-edge cmap-edge-{{ edge.kind }}"
+        />
+        {% endfor %}
+
+        {% for node in graph.nodes %}
+          {% if node.kind == "group" %}
+          <g class="cmap-node cmap-node-group" transform="translate({{ node.x }}, {{ node.y }})">
+            <circle r="{{ node.r }}" />
+            <text class="cmap-label cmap-label-hub">
+              <tspan x="0" dy="0.35em">{{ node.label|truncatechars:28 }}</tspan>
+            </text>
+          </g>
+          {% else %}
+          <g class="cmap-node cmap-node-household {% if node.has_family %}cmap-family{% endif %} {% if node.active_subscription %}cmap-active{% endif %}"
+             transform="translate({{ node.x }}, {{ node.y }})">
+            <a href="{% url 'panel:user_dashboard' node.root_id %}" class="cmap-node-link">
+              <circle r="{{ node.r }}" />
+              <text class="cmap-label">
+                {% for name in node.labels %}
+                <tspan x="0" dy="{% if forloop.first %}{{ node.label_start_dy }}{% else %}1.15em{% endif %}">{{ name|truncatechars:16 }}</tspan>
+                {% endfor %}
+              </text>
+            </a>
+          </g>
+          {% endif %}
+        {% endfor %}
+      </svg>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  <p class="muted" style="margin:0;">Пока нет групп с участниками — карта пуста.</p>
+</div>
+{% endif %}
+{% endblock %}

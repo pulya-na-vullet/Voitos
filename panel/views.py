@@ -1270,6 +1270,22 @@ def services_ranking(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def clients_map(request: HttpRequest) -> HttpResponse:
+    from services.clients_map import build_clients_map
+
+    graphs = build_clients_map()
+    return render(
+        request,
+        "panel/clients_map.html",
+        {
+            "graphs": graphs,
+            "graph_count": len(graphs),
+            "household_total": sum(g["household_count"] for g in graphs),
+        },
+    )
+
+
+@login_required
 def admin_tasks_today(request: HttpRequest) -> HttpResponse:
     from database.models import AdminTaskKind
     from panel.admin_tasks import build_task_sections, sync_admin_tasks
