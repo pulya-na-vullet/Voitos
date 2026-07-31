@@ -156,6 +156,15 @@ th, td {
 }
 th { color: var(--muted); font-weight: 600; }
 
+/* Pixel-identical receipt rows (find_dupes=1) */
+tr.dupe-row > td {
+  background: rgba(230, 192, 123, 0.22) !important;
+  box-shadow: inset 4px 0 0 #e6c07b;
+}
+tr.dupe-row:hover > td {
+  background: rgba(230, 192, 123, 0.32) !important;
+}
+
 .btn {
   display: inline-block;
   border: 0;

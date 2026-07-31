@@ -62,6 +62,8 @@ from subscriptions.finance import build_finance_snapshot
 from subscriptions.service import (
     approve_receipt,
     approved_user_message,
+    delete_receipt,
+    deleted_user_message,
     reject_receipt,
     rejected_user_message,
 )
@@ -533,10 +535,12 @@ def receipts_list(request: HttpRequest) -> HttpResponse:
     if find_dupes:
         from subscriptions.duplicates import duplicate_labels_for_items
 
-        dupe_labels, dupe_groups = duplicate_labels_for_items(items)
+        # Global scan backfills SHA-256 for old receipts and finds all twins
+        dupe_labels, dupe_groups = duplicate_labels_for_items(items, global_scan=True)
     # Attach label for template convenience
     for item in items:
         item.dupe_label = dupe_labels.get(item.id, "")
+        item.is_dupe = bool(item.dupe_label)
     finance = build_finance_snapshot()
     return render(
         request,
@@ -623,6 +627,38 @@ def receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
     if next_url.startswith("/"):
         return redirect(next_url)
     return redirect(next_url)
+
+
+@login_required
+@require_POST
+def receipt_delete(request: HttpRequest, pk: int) -> HttpResponse:
+    receipt = get_object_or_404(PaymentReceipt, pk=pk)
+    reason = request.POST.get("reason", "").strip()
+    next_url = request.POST.get("next") or "panel:receipts"
+    try:
+        user = delete_receipt(receipt, reason=reason)
+        user.refresh_from_db()
+        _notify_user(
+            user,
+            deleted_user_message(
+                reason=reason,
+                subscription_until=user.subscription_until,
+            ),
+        )
+        until = (
+            timezone.localtime(user.subscription_until).strftime("%d.%m.%Y")
+            if user.subscription_until
+            else "нет"
+        )
+        messages.success(
+            request,
+            f"Чек #{pk} удалён. Подписка {user} пересчитана до: {until}. Пользователь уведомлён.",
+        )
+    except ValueError as exc:
+        messages.error(request, str(exc))
+    if isinstance(next_url, str) and next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect("panel:receipts")
 
 
 @login_required

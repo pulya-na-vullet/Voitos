@@ -431,3 +431,120 @@ def rejected_user_message(receipt: PaymentReceipt) -> str:
         f"{extra}\n\n"
         f"{payment_help_text()}"
     )
+
+
+def rebuild_subscription_until(user: BotUser):
+    """
+    Recalculate subscription_until from remaining approved receipts.
+
+    Receipts are applied in review order; each adds its granted period
+    starting from max(receipt time, running cursor).
+    """
+    from datetime import timedelta
+
+    receipts = list(
+        PaymentReceipt.objects.filter(user=user, status=ReceiptStatus.APPROVED)
+        .order_by("reviewed_at", "created_at", "id")
+    )
+    if not receipts:
+        user.subscription_until = None
+        user.save(update_fields=["subscription_until", "last_seen_at"])
+        return None
+
+    cfg = AppSettings.load()
+    price = Decimal(cfg.subscription_price_rub or 100)
+    cursor = None
+    for receipt in receipts:
+        start = receipt.reviewed_at or receipt.created_at or timezone.now()
+        if cursor is None or cursor < start:
+            cursor = start
+        months = int(receipt.months_granted or 0)
+        days = int(receipt.days_granted or 0)
+        if months < 1 and days < 1 and receipt.amount:
+            months, days = period_from_amount(Decimal(receipt.amount), price)
+        total_days = 30 * max(0, months) + max(0, days)
+        if total_days < 1:
+            continue
+        cursor = cursor + timedelta(days=total_days)
+    user.subscription_until = cursor
+    user.grace_until = None
+    user.save(update_fields=["subscription_until", "grace_until", "last_seen_at"])
+    return cursor
+
+
+def delete_receipt(receipt: PaymentReceipt, *, reason: str) -> BotUser:
+    """
+    Delete a payment receipt after an admin resolution.
+
+    Rebuilds the user's subscription from remaining approved receipts.
+    Returns the affected user (for notification).
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("Укажите причину удаления чека.")
+
+    user = receipt.user
+    receipt_id = receipt.id
+    was_approved = receipt.status == ReceiptStatus.APPROVED
+    amount = receipt.amount
+    period = receipt.period_label()
+    status_label = receipt.get_status_display()
+
+    # Remove file from storage if present
+    if receipt.image:
+        try:
+            receipt.image.delete(save=False)
+        except Exception:
+            logger.exception("Failed to delete receipt file #%s", receipt_id)
+
+    receipt.delete()
+
+    until = rebuild_subscription_until(user)
+    user.refresh_from_db()
+    until_s = (
+        timezone.localtime(until).strftime("%d.%m.%Y")
+        if until
+        else "не оформлена / истекла"
+    )
+    ActivityLog.objects.create(
+        user=user,
+        kind=ActivityKind.RECEIPT_REJECTED,
+        title="Чек удалён администратором",
+        detail=reason,
+        meta={
+            "receipt_id": receipt_id,
+            "was_approved": was_approved,
+            "amount": str(amount) if amount is not None else "",
+            "period": period,
+            "status": status_label,
+            "subscription_until": until_s,
+        },
+    )
+    try:
+        from services.tax import sync_self_employed_tax_collected
+
+        sync_self_employed_tax_collected()
+    except Exception:
+        logger.exception("Failed to sync tax after receipt delete")
+    try:
+        from panel.admin_tasks import close_task_for_source
+        from database.models import AdminTaskKind
+
+        close_task_for_source(AdminTaskKind.PAYMENT_RECEIPT, "PaymentReceipt", receipt_id)
+    except Exception:
+        logger.exception("Failed to close admin task after receipt delete")
+    return user
+
+
+def deleted_user_message(*, reason: str, subscription_until=None) -> str:
+    until_s = (
+        timezone.localtime(subscription_until).strftime("%d.%m.%Y")
+        if subscription_until
+        else "не оформлена / истекла"
+    )
+    return (
+        "Администратор удалил ваш чек оплаты подписки.\n"
+        f"Причина: {reason}\n"
+        f"Срок доступа пересчитан. Подписка до: {until_s}.\n\n"
+        f"{payment_help_text()}"
+    )

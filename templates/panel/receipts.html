@@ -239,15 +239,19 @@
     </thead>
     <tbody>
     {% for item in items %}
-      <tr {% if item.dupe_label %}style="background: rgba(230,192,123,0.12); outline: 1px solid rgba(230,192,123,0.35);"{% endif %}>
-        <td class="mono">{{ item.created_at|date:"d.m.Y H:i" }}</td>
+      <tr class="{% if item.dupe_label %}dupe-row{% endif %}" {% if item.dupe_label %}data-dupe="{{ item.dupe_label }}"{% endif %}>
+        <td class="mono">
+          {{ item.created_at|date:"d.m.Y H:i" }}
+          {% if item.dupe_label %}
+            <div style="margin-top:4px;"><span class="badge bad">{{ item.dupe_label }}</span></div>
+          {% endif %}
+        </td>
         {% if not bot_user %}
           <td><a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></td>
         {% endif %}
         <td>{{ item.amount|default:"—" }} ₽</td>
         <td class="mono">{{ item.transfer_date|date:"d.m.Y"|default:"—" }}</td>
         <td>
-          {% if item.dupe_label %}<div><span class="badge bad">{{ item.dupe_label }}</span></div>{% endif %}
           {% if item.status == "approved" %}
             <span class="badge ok">распознано администратором</span>
           {% elif item.status == "rejected" %}
@@ -278,7 +282,7 @@
               Принять несмотря на дубль
             </label>
           </form>
-          <form method="post" action="{% url 'panel:receipt_reject' item.id %}" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+          <form method="post" action="{% url 'panel:receipt_reject' item.id %}" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:6px;">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
             <input type="text" name="comment" placeholder="Причина" style="width:120px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
@@ -288,6 +292,16 @@
             <div class="mono">{{ item.amount|default:"—" }} ₽ · {{ item.period_label }}</div>
             <span class="muted">{{ item.reviewed_at|date:"d.m H:i"|default:"" }}</span>
           {% endif %}
+          <form method="post" action="{% url 'panel:receipt_delete' item.id %}" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px;"
+                onsubmit="return confirm('Удалить чек #{{ item.id }}? Срок подписки будет пересчитан, пользователю уйдёт сообщение.');">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <input type="text" name="reason" required
+                   placeholder="Резолюция: почему удаляете"
+                   title="Обязательная причина — уйдёт пользователю"
+                   style="width:180px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+            <button class="btn danger small" type="submit">Удалить чек</button>
+          </form>
         </td>
       </tr>
     {% empty %}

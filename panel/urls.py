@@ -26,6 +26,7 @@ urlpatterns = [
     path("receipts/", views.receipts_list, name="receipts"),
     path("receipts/<int:pk>/approve/", views.receipt_approve, name="receipt_approve"),
     path("receipts/<int:pk>/reject/", views.receipt_reject, name="receipt_reject"),
+    path("receipts/<int:pk>/delete/", views.receipt_delete, name="receipt_delete"),
     path("services/", views.services_home, name="services"),
     path("services/ranking/", views.services_ranking, name="services_ranking"),
     path("services/groups/<int:pk>/", views.service_group_edit, name="service_group_edit"),

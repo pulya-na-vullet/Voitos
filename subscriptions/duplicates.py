@@ -107,19 +107,26 @@ def group_identical_receipts(
 
 
 def duplicate_labels_for_items(
-    items: Iterable[PaymentReceipt],
+    items: Iterable[PaymentReceipt] | None = None,
+    *,
+    global_scan: bool = False,
 ) -> tuple[dict[int, str], list[dict]]:
     """
     Build per-receipt highlight labels and summary groups for the panel.
+
+    global_scan=True — backfill hashes and detect duplicates across the whole
+    DB (recommended for the admin «Найти одинаковые чеки» button).
 
     Returns:
       receipt_id -> label like "Дубль A (#12, #15)"
       groups summary for UI cards
     """
-    groups = group_identical_receipts(items)
+    groups = group_identical_receipts(None if global_scan else items)
     labels: dict[int, str] = {}
     summaries: list[dict] = []
-    for idx, (digest, rows) in enumerate(sorted(groups.items(), key=lambda x: x[1][0].created_at), start=1):
+    for idx, (digest, rows) in enumerate(
+        sorted(groups.items(), key=lambda x: x[1][0].created_at), start=1
+    ):
         letter = chr(ord("A") + ((idx - 1) % 26))
         ids = [r.id for r in rows]
         users = sorted({str(r.user) for r in rows})
