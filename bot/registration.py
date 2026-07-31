@@ -180,7 +180,7 @@ def _finish_if_complete(user: BotUser, pending: PendingAction) -> str | None:
         f"Телефон: {user.phone}\n"
         f"Адрес: {user.address}\n"
         f"Населённый пункт: {user.locality}\n\n"
-        "Напишите «помощь», чтобы увидеть возможности бота."
+        "Напишите «описание» или «помощь», чтобы узнать, что умеет бот."
     )
 
 

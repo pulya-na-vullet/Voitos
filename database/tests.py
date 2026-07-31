@@ -203,9 +203,16 @@ class PipelineTests(TestCase):
         self.user.grace_until = None
         self.user.save()
         reply = self.pipeline.handle(self.user, "помощь")
-        self.assertIn("Что умею", reply)
+        self.assertIn("Что умеет бот", reply)
+        self.assertIn("придомовой", reply.lower())
         self.assertIn("подписка", reply.lower())
         self.assertIn("дн", reply)
+
+    def test_description_command_alias(self):
+        reply = self.pipeline.handle(self.user, "описание")
+        self.assertIn("Voitos", reply)
+        self.assertIn("самозанят", reply.lower())
+        self.assertIn("сборы", reply.lower())
 
     def test_subscription_command_details(self):
         from database.models import PaymentReceipt, ReceiptStatus

@@ -131,8 +131,8 @@ COMPLETE_TASK_RE = re.compile(
     re.IGNORECASE,
 )
 HELP_RE = re.compile(
-    r"^\s*(/)?(help|start|помощь|справка|команды|меню|"
-    r"что\s+ты\s+умеешь|что\s+умеешь)\s*[.!]?\s*$",
+    r"^\s*(/)?(help|start|помощь|справка|команды|меню|описание|"
+    r"о\s+боте|визитка|что\s+ты\s+умеешь|что\s+умеешь)\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 SUBSCRIPTION_RE = re.compile(
