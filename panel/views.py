@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta
 
 from django.contrib import messages
@@ -64,6 +65,7 @@ from subscriptions.service import (
 )
 
 YANDEX_MODEL_HINTS = ("yandexgpt-lite", "yandexgpt", "yandexgpt-5-pro", "yandexgpt-32k")
+logger = logging.getLogger(__name__)
 
 
 def _model_warning(model: str) -> str:
@@ -102,18 +104,27 @@ def _notify_user_with_images(
     *,
     _token_cache: dict | None = None,
 ) -> None:
-    """Send text + up to 2 images via MAX. Reuses upload tokens via _token_cache."""
+    """Send text + up to 2 images via MAX. Reuses upload tokens via _token_cache.
+
+    If CDN upload fails, falls back to text-only so campaign broadcasts still reach users.
+    """
     cfg = get_runtime_settings()
     if not cfg.max_bot_token:
         return
     client = MaxClient(cfg.max_bot_token)
     cache = _token_cache if _token_cache is not None else {}
-    if "tokens" not in cache:
+    if "upload_attempted" not in cache:
+        cache["upload_attempted"] = True
         tokens: list[str] = []
-        for raw, filename in images[:2]:
-            tokens.append(client.upload_image(raw, filename or "photo.jpg"))
-        cache["tokens"] = tokens
-        cache["attachments"] = client.image_attachments(tokens)
+        try:
+            for raw, filename in images[:2]:
+                tokens.append(client.upload_image(raw, filename or "photo.jpg"))
+            cache["tokens"] = tokens
+            cache["attachments"] = client.image_attachments(tokens)
+        except Exception:
+            logger.exception("MAX image upload failed; sending text-only notification")
+            cache["tokens"] = []
+            cache["attachments"] = []
     attachments = cache.get("attachments") or []
     try:
         if user.chat_id:
@@ -124,7 +135,11 @@ def _notify_user_with_images(
         try:
             client.send_message(text, user_id=user.max_user_id, attachments=attachments or None)
         except Exception:
-            pass
+            # Last resort: text without attachments
+            try:
+                _notify_user(user, text)
+            except Exception:
+                pass
 
 
 def login_view(request: HttpRequest) -> HttpResponse:
@@ -834,7 +849,11 @@ def services_category(request: HttpRequest, category: str) -> HttpResponse:
         messages.error(request, "Неизвестная категория")
         return redirect("panel:services")
     label = dict(ServiceCategory.choices)[category]
-    campaigns = ServiceCampaign.objects.filter(category=category)
+    campaigns = (
+        ServiceCampaign.objects.filter(category=category)
+        .select_related("group")
+        .prefetch_related("invites")
+    )
     return render(
         request,
         "panel/services_category.html",

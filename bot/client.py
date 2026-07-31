@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import io
 import logging
+import re
 import time
 from typing import Any
 
 import requests
 from django.conf import settings
 
-from bot.ssl_utils import apply_session_ssl
+from bot.ssl_utils import apply_session_ssl, ssl_verify_value
 
 logger = logging.getLogger(__name__)
+
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class MaxApiError(RuntimeError):
@@ -155,8 +159,60 @@ class MaxClient:
         return self._request("POST", "/uploads", params={"type": media_type})
 
     @staticmethod
+    def _safe_upload_filename(filename: str, *, default: str = "photo.jpg") -> str:
+        """CDN multipart rejects non-ASCII Content-Disposition filenames."""
+        base = (filename or "").split("/")[-1].split("\\")[-1].strip() or default
+        if "." in base:
+            stem, ext = base.rsplit(".", 1)
+            ext = _SAFE_FILENAME_RE.sub("", ext).lower() or "jpg"
+        else:
+            stem, ext = base, "jpg"
+        stem = _SAFE_FILENAME_RE.sub("_", stem).strip("._") or "photo"
+        return f"{stem[:60]}.{ext[:10]}"
+
+    @staticmethod
+    def _prepare_image_upload(image_bytes: bytes, filename: str) -> tuple[bytes, str, str]:
+        """
+        Normalize image for MAX CDN upload.
+
+        Returns (bytes, ascii_filename, content_type). Prefer JPEG so the CDN
+        always receives a supported raster payload.
+        """
+        safe_name = MaxClient._safe_upload_filename(filename)
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                elif img.mode == "L":
+                    img = img.convert("RGB")
+                out = io.BytesIO()
+                img.save(out, format="JPEG", quality=90, optimize=True)
+                data = out.getvalue()
+            stem = safe_name.rsplit(".", 1)[0] or "photo"
+            return data, f"{stem}.jpg", "image/jpeg"
+        except Exception:
+            logger.debug("Could not normalize image with Pillow; uploading raw bytes", exc_info=True)
+            lower = safe_name.lower()
+            if lower.endswith(".png"):
+                return image_bytes, safe_name, "image/png"
+            if lower.endswith(".gif"):
+                return image_bytes, safe_name, "image/gif"
+            if lower.endswith(".webp"):
+                return image_bytes, safe_name, "image/webp"
+            if not lower.endswith((".jpg", ".jpeg")):
+                safe_name = f"{safe_name.rsplit('.', 1)[0]}.jpg" if "." in safe_name else "photo.jpg"
+            return image_bytes, safe_name, "image/jpeg"
+
+    @staticmethod
     def _extract_image_token(data: Any) -> str:
         if isinstance(data, dict):
+            if data.get("error_code") is not None or data.get("error_data"):
+                raise MaxApiError(
+                    f"MAX image upload rejected: {str(data)[:300]}",
+                    body=str(data)[:1000],
+                )
             token = data.get("token")
             if isinstance(token, str) and token.strip():
                 return token.strip()
@@ -176,32 +232,28 @@ class MaxClient:
         raise MaxApiError(f"No image token in upload response: {str(data)[:300]}")
 
     def upload_image(self, image_bytes: bytes, filename: str = "photo.jpg") -> str:
-        """Upload image bytes to MAX and return attachment token."""
+        """Upload image bytes to MAX CDN and return attachment token.
+
+        CDN upload must be plain multipart without Authorization / JSON headers.
+        Official MAX docs and the Go client send only Content-Type: multipart/form-data.
+        """
+        if not image_bytes:
+            raise MaxApiError("Empty image payload")
         meta = self.get_upload_url("image")
         upload_url = (meta.get("url") or "").strip()
         if not upload_url:
             raise MaxApiError("MAX /uploads did not return url")
-        headers = {
-            k: v
-            for k, v in self.session.headers.items()
-            if k.lower() != "content-type"
-        }
-        headers["Authorization"] = self.token
-        content_type = "image/jpeg"
-        lower = filename.lower()
-        if lower.endswith(".png"):
-            content_type = "image/png"
-        elif lower.endswith(".gif"):
-            content_type = "image/gif"
-        elif lower.endswith(".webp"):
-            content_type = "image/webp"
-        files = {"data": (filename or "photo.jpg", image_bytes, content_type)}
-        response = self.session.post(
+
+        payload, safe_name, content_type = self._prepare_image_upload(image_bytes, filename)
+        files = {"data": (safe_name, payload, content_type)}
+        # Do NOT reuse self.session here: it carries Authorization + Content-Type: application/json
+        # which iu.oneme.ru rejects with {'error_code': '4', 'error_data': 'BAD_REQUEST'}.
+        response = requests.post(
             upload_url,
             files=files,
-            headers=headers,
             timeout=120,
-            verify=self.session.verify,
+            verify=ssl_verify_value(),
+            headers={"User-Agent": "VoitosBot/0.1"},
         )
         if response.status_code >= 400:
             raise MaxApiError(
@@ -213,10 +265,13 @@ class MaxClient:
             data = response.json() if response.content else {}
         except ValueError:
             data = {"raw": response.text}
-        # Prefer token from upload response; fall back to token from /uploads
+        # Prefer token from upload response; fall back to token from /uploads only
+        # when the CDN body was empty/unrecognized (not an explicit rejection).
         try:
             return self._extract_image_token(data)
-        except MaxApiError:
+        except MaxApiError as exc:
+            if "upload rejected" in str(exc).lower():
+                raise
             fallback = meta.get("token")
             if isinstance(fallback, str) and fallback.strip():
                 return fallback.strip()
