@@ -29,8 +29,10 @@ from services.service import (
     advance_work_stage,
     approve_service_receipt,
     format_collections_for_user,
+    format_receipt_pick_menu,
     invite_new_members_to_group_campaigns,
     launch_campaign_to_group,
+    open_invites_for_user,
     process_unpaid_reminders,
     resend_to_unpaid,
     user_groups_list_message,
@@ -150,6 +152,28 @@ class ServiceCampaignTests(TestCase):
         text = format_collections_for_user(self.user)
         self.assertIn("Чистка снега", text)
         self.assertIn("500", text)
+
+    def test_receipt_pick_menu_starts_with_subscription(self):
+        self._launch(
+            category=ServiceCategory.ROAD,
+            title="Укладка асфальта",
+            amount_per_user=Decimal("12000"),
+        )
+        self._launch(
+            category=ServiceCategory.SNOW,
+            title="Чистка снега",
+            amount_per_user=Decimal("500"),
+        )
+        invites = open_invites_for_user(self.user)
+        self.assertEqual(len(invites), 2)
+        menu = format_receipt_pick_menu(invites)
+        lines = menu.splitlines()
+        self.assertEqual(lines[1], "1. Подписка")
+        self.assertTrue(lines[2].startswith("2. "))
+        self.assertTrue(lines[3].startswith("3. "))
+        self.assertIn("Подписка", menu)
+        # subscription must be first numbered item
+        self.assertLess(menu.index("1. Подписка"), menu.index("2. "))
 
     def test_launch_empty_group_fails(self):
         empty = ServiceGroup.objects.create(name="пусто")

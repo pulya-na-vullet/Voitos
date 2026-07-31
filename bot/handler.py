@@ -14,7 +14,7 @@ from bot.pipeline import MessagePipeline
 from bot.registration import needs_registration, start_registration
 from bot.status import normalize_sender
 from database.models import AccessState, ChatMessage, MessageRole, PendingAction
-from services.service import open_invites_for_user, submit_service_receipt
+from services.service import format_receipt_pick_menu, open_invites_for_user
 from subscriptions.service import (
     access_message,
     approved_user_message,
@@ -187,11 +187,26 @@ class UpdateHandler:
 
         user.ensure_grace_period()
         state = user.access_state()
+        pending, _ = PendingAction.objects.get_or_create(user=user)
+        # Allow answering receipt destination pick even when blocked
+        if pending.pending_kind == "service_invite_pick":
+            try:
+                reply = self.pipeline.handle(
+                    user,
+                    text,
+                    is_voice=is_voice,
+                    voice_transcript=transcript,
+                )
+            except Exception:
+                logger.exception("Pipeline failed on receipt pick")
+                reply = "Произошла ошибка. Попробуй ещё раз."
+            self._reply(user, reply)
+            return
+
         if state == AccessState.BLOCKED:
             from bot.messages import subscription_detail_message
             from services.service import format_collections_for_user
 
-            pending, _ = PendingAction.objects.get_or_create(user=user)
             if needs_registration(user) and not (is_help or is_subscription or is_collections):
                 self._reply(user, start_registration(user, pending))
             elif is_help:
@@ -241,51 +256,18 @@ class UpdateHandler:
             self._reply(user, "Не удалось скачать файл чека. Пришлите ещё раз.")
             return
 
-        # Prefer service campaign if user has open invites
+        # If user has open service invites — always ask destination,
+        # with subscription as option #1 (even for a single invite).
         invites = open_invites_for_user(user)
         if invites:
-            if len(invites) > 1:
-                pending, _ = PendingAction.objects.get_or_create(user=user)
-                pending.pending_kind = "service_invite_pick"
-                pending.pending_payload = {
-                    "image_b64": base64.b64encode(raw).decode("ascii"),
-                    "filename": filename,
-                }
-                pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
-                lines = [
-                    "У вас несколько активных сборов. К какому относится этот чек? Ответьте номером:"
-                ]
-                for i, inv in enumerate(invites, 1):
-                    lines.append(
-                        f"{i}. {inv.campaign.get_category_display()} — {inv.campaign.title} "
-                        f"({inv.amount_due:.0f} ₽)"
-                    )
-                self._reply(user, "\n".join(lines))
-                return
-            try:
-                receipt = submit_service_receipt(
-                    user, raw, invite=invites[0], filename=filename
-                )
-            except Exception:
-                logger.exception("Service receipt processing failed")
-                self._reply(
-                    user,
-                    "Не удалось разобрать чек сервисного сбора. "
-                    "Пришлите PDF или более чёткий скрин перевода.",
-                )
-                return
-            msg = (
-                f"Чек по «{receipt.campaign.title}» отправлен администратору.\n"
-                f"Сумма: {receipt.amount or 'не распознана'} ₽"
-                f"{', дата: ' + receipt.transfer_date.strftime('%d.%m.%Y') if receipt.transfer_date else ''}."
-            )
-            self._reply(user, msg)
-            ChatMessage.objects.create(
-                user=user,
-                role=MessageRole.ASSISTANT,
-                text=msg,
-                intent="service_receipt",
-            )
+            pending, _ = PendingAction.objects.get_or_create(user=user)
+            pending.pending_kind = "service_invite_pick"
+            pending.pending_payload = {
+                "image_b64": base64.b64encode(raw).decode("ascii"),
+                "filename": filename,
+            }
+            pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+            self._reply(user, format_receipt_pick_menu(invites))
             return
 
         try:

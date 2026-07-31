@@ -310,14 +310,21 @@ class MessagePipeline:
         return f"Готово. Напомню {when}."
 
     def _pick_service_invite(self, user: BotUser, text: str, pending: PendingAction) -> str | None:
-        """User chooses which campaign a pending receipt photo belongs to."""
-        from services.service import open_invites_for_user
+        """User chooses subscription (#1) or a campaign for a pending receipt."""
+        import base64
+
+        from services.service import (
+            format_receipt_pick_menu,
+            open_invites_for_user,
+            submit_service_receipt,
+        )
+        from subscriptions.service import payment_help_text, submit_receipt
 
         invites = open_invites_for_user(user)
         payload = pending.pending_payload or {}
-        raw = payload.get("image_b64")
+        raw_b64 = payload.get("image_b64")
         filename = payload.get("filename") or "receipt.jpg"
-        if not raw:
+        if not raw_b64:
             pending.clear_pending()
             return "Не нашёл сохранённый чек. Пришлите фото ещё раз."
 
@@ -326,12 +333,16 @@ class MessagePipeline:
             pending.clear_pending()
             return "Ок, чек не прикрепляю. Пришлите снова, когда будете готовы."
 
+        choose_subscription = lower in {"1", "подписка", "подписку"} or lower.startswith(
+            "подписк"
+        )
         chosen = None
-        if lower.isdigit():
-            idx = int(lower) - 1
+        if not choose_subscription and lower.isdigit():
+            # Menu: 1=subscription, 2..=invites
+            idx = int(lower) - 2
             if 0 <= idx < len(invites):
                 chosen = invites[idx]
-        if chosen is None:
+        if not choose_subscription and chosen is None:
             for inv in invites:
                 title = inv.campaign.title.lower()
                 cat = inv.campaign.get_category_display().lower()
@@ -340,20 +351,39 @@ class MessagePipeline:
                 ):
                     chosen = inv
                     break
-        if chosen is None:
-            lines = ["Не понял, к какому сбору относится чек. Ответьте номером:"]
-            for i, inv in enumerate(invites, 1):
-                lines.append(f"{i}. {inv.campaign.get_category_display()} — {inv.campaign.title}")
-            return "\n".join(lines)
+        if not choose_subscription and chosen is None:
+            return "Не понял выбор.\n\n" + format_receipt_pick_menu(invites)
 
-        import base64
-
-        from services.service import submit_service_receipt
+        file_bytes = base64.b64decode(raw_b64)
+        if choose_subscription:
+            try:
+                receipt = submit_receipt(user, file_bytes, filename=filename)
+            except Exception:
+                logger.exception("Subscription receipt submit after pick failed")
+                pending.clear_pending()
+                return (
+                    "Не удалось обработать чек подписки. Пришлите PDF или скрин ещё раз.\n\n"
+                    + payment_help_text()
+                )
+            pending.clear_pending()
+            if receipt.details_match:
+                return (
+                    f"Чек подписки получен и отправлен администратору на проверку.\n"
+                    f"Сумма: {receipt.amount or 'не распознана'} ₽"
+                    f"{', дата: ' + receipt.transfer_date.strftime('%d.%m.%Y') if receipt.transfer_date else ''}.\n"
+                    f"Предварительно: ~{receipt.period_label()} подписки "
+                    f"(точный срок подтвердит администратор)."
+                )
+            return (
+                "Чек подписки получен, но реквизиты распознаны неуверенно "
+                "(телефон/ФИО/дата). Администратор проверит вручную.\n\n"
+                + payment_help_text()
+            )
 
         try:
             receipt = submit_service_receipt(
                 user,
-                base64.b64decode(raw),
+                file_bytes,
                 invite=chosen,
                 filename=filename,
             )

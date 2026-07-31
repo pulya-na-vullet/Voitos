@@ -799,6 +799,20 @@ def open_invites_for_user(user: BotUser) -> list[ServiceInvite]:
     )
 
 
+def format_receipt_pick_menu(invites: list[ServiceInvite]) -> str:
+    """Numbered menu: 1 = subscription, then open service invites."""
+    lines = [
+        "К чему относится этот чек? Ответьте номером:",
+        "1. Подписка",
+    ]
+    for i, inv in enumerate(invites, 2):
+        lines.append(
+            f"{i}. {inv.campaign.get_category_display()} — {inv.campaign.title} "
+            f"({inv.amount_due:.0f} ₽)"
+        )
+    return "\n".join(lines)
+
+
 def submit_service_receipt(
     user: BotUser,
     image_bytes: bytes,
