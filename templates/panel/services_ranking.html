@@ -7,15 +7,32 @@
 </div>
 <div class="card" style="margin-bottom:16px;">
   <form method="get" style="display:flex; gap:8px; align-items:end; flex-wrap:wrap;">
-    <div class="form-row" style="margin:0; flex:1; min-width:200px;">
+    <div class="form-row" style="margin:0; flex:1; min-width:160px;">
+      <label>Поиск</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="Имя / id…">
+    </div>
+    <div class="form-row" style="margin:0; flex:1; min-width:160px;">
       <label>Населённый пункт</label>
       <input type="text" name="locality" list="locs" value="{{ locality }}" placeholder="Все">
       <datalist id="locs">{% for loc in localities %}<option value="{{ loc }}">{% endfor %}</datalist>
     </div>
+    <div class="form-row" style="margin:0; min-width:160px;">
+      <label>Сортировка</label>
+      <select name="sort">
+        <option value="-rating" {% if sort == "-rating" %}selected{% endif %}>Рейтинг ↓</option>
+        <option value="rating" {% if sort == "rating" %}selected{% endif %}>Рейтинг ↑</option>
+        <option value="-paid" {% if sort == "-paid" %}selected{% endif %}>Оплатил ↓</option>
+        <option value="-offered" {% if sort == "-offered" %}selected{% endif %}>Предложено ↓</option>
+        <option value="locality" {% if sort == "locality" %}selected{% endif %}>Нас. пункт</option>
+        <option value="name" {% if sort == "name" %}selected{% endif %}>Имя</option>
+      </select>
+    </div>
     <button class="btn secondary small" type="submit">Фильтр</button>
   </form>
-  <p class="muted" style="margin:10px 0 0;">80%+ образцовый · 60%+ хороший · 40%+ пассивный · иначе неактивный
-    (оплаченные предложения / все предложения)</p>
+  <p class="muted" style="margin:10px 0 0;">
+    Все пользователи бота. 80%+ образцовый · 60%+ хороший · 40%+ пассивный · иначе неактивный
+    (в т.ч. 0 предложений = 0%).
+  </p>
 </div>
 <div class="card">
   <table>
@@ -40,11 +57,11 @@
         <td class="mono">{{ row.paid }}</td>
         <td class="mono">{{ row.ratio|floatformat:0 }}%</td>
         <td>
-          <span class="badge {% if row.ratio >= 80 %}ok{% elif row.ratio < 40 %}bad{% endif %}">{{ row.label }}</span>
+          <span class="badge {% if row.ratio >= 80 %}ok{% elif row.offered > 0 and row.ratio < 40 %}bad{% endif %}">{{ row.label }}</span>
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="7" class="muted">Пока нет предложений по сборам</td></tr>
+      <tr><td colspan="7" class="muted">Пользователей пока нет</td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -20,8 +20,29 @@
 </div>
 
 <div class="card" style="margin-top:16px;">
-  <form method="get" style="margin-bottom:12px; display:flex; gap:8px;">
-    <input type="text" name="q" value="{{ q }}" placeholder="Поиск по имени / id..." style="flex:1; padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+  <form method="get" style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+    <div class="form-row" style="margin:0; flex:1; min-width:160px;">
+      <label>Поиск</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="Имя / id / телефон...">
+    </div>
+    <div class="form-row" style="margin:0; flex:1; min-width:160px;">
+      <label>Населённый пункт</label>
+      <input type="text" name="locality" list="locs" value="{{ locality }}" placeholder="Куюки, Казань…">
+      <datalist id="locs">{% for loc in localities %}<option value="{{ loc }}">{% endfor %}</datalist>
+    </div>
+    <div class="form-row" style="margin:0; min-width:180px;">
+      <label>Сортировка</label>
+      <select name="sort">
+        <option value="-rating" {% if sort == "-rating" %}selected{% endif %}>Рейтинг ↓</option>
+        <option value="rating" {% if sort == "rating" %}selected{% endif %}>Рейтинг ↑</option>
+        <option value="-paid" {% if sort == "-paid" %}selected{% endif %}>Оплатил ↓</option>
+        <option value="-offered" {% if sort == "-offered" %}selected{% endif %}>Предложено ↓</option>
+        <option value="locality" {% if sort == "locality" %}selected{% endif %}>Нас. пункт А–Я</option>
+        <option value="-locality" {% if sort == "-locality" %}selected{% endif %}>Нас. пункт Я–А</option>
+        <option value="name" {% if sort == "name" %}selected{% endif %}>Имя А–Я</option>
+        <option value="-seen" {% if sort == "-seen" %}selected{% endif %}>Активность ↓</option>
+      </select>
+    </div>
     <button class="btn secondary small" type="submit">Найти</button>
   </form>
   <table>
@@ -29,6 +50,8 @@
       <tr>
         <th>Имя</th>
         <th>Нас. пункт</th>
+        <th>Соц. рейтинг</th>
+        <th>Предл. / оплатил</th>
         <th>Анкета</th>
         <th>Подписка</th>
         <th>Доступ</th>
@@ -37,12 +60,20 @@
       </tr>
     </thead>
     <tbody>
-    {% for u in users %}
+    {% for row in rows %}
+      {% with u=row.user %}
       <tr>
         <td>{{ u.real_name|default:u.display_name|default:u.username|default:"—" }}
           <div class="muted mono">{{ u.max_user_id }}</div>
         </td>
         <td>{{ u.locality|default:"—" }}</td>
+        <td>
+          <span class="badge {% if row.ratio >= 80 %}ok{% elif row.offered == 0 %}{% elif row.ratio < 40 %}bad{% endif %}">
+            {{ row.label }}
+          </span>
+          <div class="muted mono">{{ row.ratio|floatformat:0 }}%</div>
+        </td>
+        <td class="mono">{{ row.offered }} / {{ row.paid }}</td>
         <td>
           <span class="badge {% if u.profile_status == 'verified' %}ok{% elif u.profile_status == 'pending_review' %}{% elif u.profile_status == 'rejected' %}bad{% endif %}">
             {{ u.get_profile_status_display }}
@@ -57,8 +88,9 @@
         <td class="mono">{{ u.last_seen_at|date:"d.m.Y H:i" }}</td>
         <td><a class="btn small" href="{% url 'panel:user_dashboard' u.id %}">Открыть</a></td>
       </tr>
+      {% endwith %}
     {% empty %}
-      <tr><td colspan="7" class="muted">Пользователей пока нет — пусть напишут боту в MAX</td></tr>
+      <tr><td colspan="9" class="muted">Никого не найдено</td></tr>
     {% endfor %}
     </tbody>
   </table>

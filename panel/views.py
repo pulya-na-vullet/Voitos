@@ -40,7 +40,7 @@ from database.models import (
     TaskItem,
 )
 from logs.service import log_activity
-from services.ranking import citizen_stats, ranking_list
+from services.ranking import citizen_stats, ranking_list, sort_ranking_rows
 from services.service import (
     approve_service_receipt,
     approved_service_message,
@@ -114,15 +114,16 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 @login_required
 def users_list(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
-    users = BotUser.objects.all()
-    if q:
-        users = users.filter(
-            Q(display_name__icontains=q)
-            | Q(username__icontains=q)
-            | Q(real_name__icontains=q)
-            | Q(locality__icontains=q)
-            | Q(max_user_id__icontains=q)
-        )
+    locality = request.GET.get("locality", "").strip()
+    sort = request.GET.get("sort", "-rating").strip() or "-rating"
+    rows = ranking_list(locality=locality, q=q)
+    rows = sort_ranking_rows(rows, sort=sort)[:500]
+    localities = (
+        BotUser.objects.exclude(locality="")
+        .values_list("locality", flat=True)
+        .distinct()
+        .order_by("locality")
+    )
     bot_status = BotRuntimeStatus.load()
     pending_receipts = PaymentReceipt.objects.filter(status=ReceiptStatus.PENDING).count()
     pending_profiles = BotUser.objects.filter(profile_status=ProfileStatus.PENDING_REVIEW).count()
@@ -131,8 +132,11 @@ def users_list(request: HttpRequest) -> HttpResponse:
         request,
         "panel/users.html",
         {
-            "users": users[:500],
+            "rows": rows,
             "q": q,
+            "locality": locality,
+            "sort": sort,
+            "localities": localities,
             "bot_status": bot_status,
             "pending_receipts": pending_receipts,
             "pending_profiles": pending_profiles,
@@ -820,7 +824,9 @@ def service_receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 def services_ranking(request: HttpRequest) -> HttpResponse:
     locality = request.GET.get("locality", "").strip()
-    rows = ranking_list(locality=locality)
+    q = request.GET.get("q", "").strip()
+    sort = request.GET.get("sort", "-rating").strip() or "-rating"
+    rows = sort_ranking_rows(ranking_list(locality=locality, q=q), sort=sort)
     localities = (
         BotUser.objects.exclude(locality="")
         .values_list("locality", flat=True)
@@ -830,5 +836,11 @@ def services_ranking(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "panel/services_ranking.html",
-        {"rows": rows, "locality": locality, "localities": localities},
+        {
+            "rows": rows,
+            "locality": locality,
+            "localities": localities,
+            "q": q,
+            "sort": sort,
+        },
     )

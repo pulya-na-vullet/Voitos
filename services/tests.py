@@ -14,7 +14,7 @@ from database.models import (
     ServiceGroup,
 )
 from bot.registration import handle_registration_step, start_registration
-from services.ranking import citizen_stats, rank_label
+from services.ranking import citizen_stats, rank_label, ranking_list
 from services.service import (
     format_collections_for_user,
     invite_new_members_to_group_campaigns,
@@ -148,6 +148,18 @@ class ServiceCampaignTests(TestCase):
         self.assertEqual(rank_label(60), "Хороший гражданин")
         self.assertEqual(rank_label(40), "Пассивный гражданин")
         self.assertEqual(rank_label(10), "Неактивный гражданин")
+
+    def test_ranking_includes_users_without_offers(self):
+        idle = BotUser.objects.create(max_user_id="idle", real_name="Антон", locality="Куюки")
+        rows = ranking_list()
+        ids = {r.user.id for r in rows}
+        self.assertIn(self.user.id, ids)
+        self.assertIn(idle.id, ids)
+        idle_row = next(r for r in rows if r.user.id == idle.id)
+        self.assertEqual(idle_row.offered, 0)
+        self.assertEqual(idle_row.label, "Неактивный гражданин")
+        by_loc = ranking_list(locality="Куюки")
+        self.assertTrue(all("куюки" in (r.user.locality or "").lower() for r in by_loc))
 
     def test_citizen_stats(self):
         campaign, _ = launch_campaign_to_group(
