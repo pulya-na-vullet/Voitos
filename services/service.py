@@ -223,6 +223,74 @@ def launch_campaign_to_group(
     return campaign, sent
 
 
+def invite_new_members_to_group_campaigns(
+    group: ServiceGroup,
+    user_ids: list[int],
+    send_fn=None,
+) -> int:
+    """
+    When users are added to a group, send them all active collections of this group.
+    Does not notify existing members who already received the offers.
+    """
+    if not user_ids:
+        return 0
+    campaigns = ServiceCampaign.objects.filter(
+        group=group,
+        status=CampaignStatus.ACTIVE,
+    )
+    if not campaigns.exists():
+        return 0
+
+    sent = 0
+    users = list(BotUser.objects.filter(id__in=user_ids))
+    for campaign in campaigns:
+        amount = Decimal(campaign.amount_per_user or 0)
+        if amount <= 0:
+            continue
+        for user in users:
+            existing = ServiceInvite.objects.filter(campaign=campaign, user=user).first()
+            if existing and existing.status != InviteStatus.CANCELLED:
+                continue
+            if existing and existing.status == InviteStatus.CANCELLED:
+                existing.amount_due = amount
+                existing.amount_paid = Decimal("0")
+                existing.status = InviteStatus.OFFERED
+                existing.save()
+                invite = existing
+            else:
+                invite = ServiceInvite.objects.create(
+                    campaign=campaign,
+                    user=user,
+                    amount_due=amount,
+                    status=InviteStatus.OFFERED,
+                )
+            text = offer_message(campaign, amount)
+            ActivityLog.objects.create(
+                user=user,
+                kind=ActivityKind.SERVICE_OFFER,
+                title="Сбор отправлен новому участнику группы",
+                detail=campaign.title,
+                meta={
+                    "campaign_id": campaign.id,
+                    "invite_id": invite.id,
+                    "group_id": group.id,
+                },
+            )
+            if send_fn:
+                try:
+                    send_fn(user, text)
+                    sent += 1
+                except Exception:
+                    logger.exception(
+                        "Failed to notify new member %s about campaign %s",
+                        user.max_user_id,
+                        campaign.id,
+                    )
+            else:
+                sent += 1
+    return sent
+
+
 def open_invites_for_user(user: BotUser) -> list[ServiceInvite]:
     return list(
         ServiceInvite.objects.filter(

@@ -44,6 +44,7 @@ from services.ranking import citizen_stats, ranking_list
 from services.service import (
     approve_service_receipt,
     approved_service_message,
+    invite_new_members_to_group_campaigns,
     launch_campaign_to_group,
     offer_to_users,
     reject_service_receipt,
@@ -612,9 +613,22 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         group.name = request.POST.get("name", group.name).strip() or group.name
         group.description = request.POST.get("description", "").strip()
         group.save()
+        old_ids = set(group.members.values_list("id", flat=True))
         ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
         group.members.set(BotUser.objects.filter(id__in=ids))
-        messages.success(request, "Группа сохранена")
+        new_ids = [i for i in ids if i not in old_ids]
+        notified = 0
+        if new_ids:
+            notified = invite_new_members_to_group_campaigns(
+                group, new_ids, send_fn=_notify_user
+            )
+        if notified:
+            messages.success(
+                request,
+                f"Группа сохранена. Новым участникам отправлено сборов: {notified}.",
+            )
+        else:
+            messages.success(request, "Группа сохранена")
         return redirect("panel:service_group_edit", pk=pk)
 
     member_ids = set(group.members.values_list("id", flat=True))

@@ -17,6 +17,7 @@ from bot.registration import handle_registration_step, start_registration
 from services.ranking import citizen_stats, rank_label
 from services.service import (
     format_collections_for_user,
+    invite_new_members_to_group_campaigns,
     launch_campaign_to_group,
 )
 
@@ -86,6 +87,38 @@ class ServiceCampaignTests(TestCase):
                 total_amount=Decimal("1000"),
                 amount_per_user=Decimal("100"),
             )
+
+    def test_new_member_gets_active_campaigns_only(self):
+        campaign, _ = launch_campaign_to_group(
+            category=ServiceCategory.SNOW,
+            title="Чистка снега",
+            description="",
+            group=self.group,
+            total_amount=Decimal("3000"),
+            amount_per_user=Decimal("300"),
+        )
+        newbie = BotUser.objects.create(
+            max_user_id="u3",
+            real_name="Борис",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+        sent = []
+
+        def capture(user, text):
+            sent.append((user.id, text))
+
+        # Existing member must not be notified again
+        n = invite_new_members_to_group_campaigns(
+            self.group, [newbie.id], send_fn=capture
+        )
+        self.assertEqual(n, 1)
+        self.assertEqual(sent[0][0], newbie.id)
+        self.assertIn("Чистка снега", sent[0][1])
+        self.assertTrue(
+            campaign.invites.filter(user=newbie, status=InviteStatus.OFFERED).exists()
+        )
+        # Old member still has exactly one invite
+        self.assertEqual(campaign.invites.filter(user=self.user).count(), 1)
 
     def test_rank_labels(self):
         self.assertEqual(rank_label(85), "Образцовый гражданин")
