@@ -94,6 +94,13 @@ def link_family_members(
         )
 
     _ensure_service_group(ordered, chosen)
+    try:
+        from subscriptions.renewal_reminders import schedule_subscription_renewal_reminders
+
+        # Пересоздать напоминания плательщику и всем прикреплённым (в т.ч. Елене).
+        schedule_subscription_renewal_reminders(chosen)
+    except Exception:
+        logger.exception("Failed to schedule family renewal reminders for %s", chosen.id)
     return chosen
 
 
@@ -150,3 +157,9 @@ def unlink_family_member(user: BotUser) -> None:
         title="Семейная подписка снята",
         detail="Отвязан от оплаты члена семьи",
     )
+    try:
+        from subscriptions.renewal_reminders import cancel_subscription_renewal_reminders
+
+        cancel_subscription_renewal_reminders(user)
+    except Exception:
+        logger.exception("Failed to cancel renewal reminders after unlink for %s", user.id)

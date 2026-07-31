@@ -297,6 +297,12 @@ def approve_receipt(
         task_payment_receipt(receipt)
     except Exception:
         logger.exception("Failed to close admin task for payment receipt")
+    try:
+        from subscriptions.renewal_reminders import schedule_subscription_renewal_reminders
+
+        schedule_subscription_renewal_reminders(user)
+    except Exception:
+        logger.exception("Failed to schedule subscription renewal reminders")
     return receipt
 
 
@@ -449,6 +455,12 @@ def rebuild_subscription_until(user: BotUser):
     if not receipts:
         user.subscription_until = None
         user.save(update_fields=["subscription_until", "last_seen_at"])
+        try:
+            from subscriptions.renewal_reminders import schedule_subscription_renewal_reminders
+
+            schedule_subscription_renewal_reminders(user)
+        except Exception:
+            logger.exception("Failed to clear subscription renewal reminders")
         return None
 
     cfg = AppSettings.load()
@@ -469,6 +481,12 @@ def rebuild_subscription_until(user: BotUser):
     user.subscription_until = cursor
     user.grace_until = None
     user.save(update_fields=["subscription_until", "grace_until", "last_seen_at"])
+    try:
+        from subscriptions.renewal_reminders import schedule_subscription_renewal_reminders
+
+        schedule_subscription_renewal_reminders(user)
+    except Exception:
+        logger.exception("Failed to reschedule subscription renewal reminders")
     return cursor
 
 

@@ -31,7 +31,10 @@ def run_reminder_scheduler(stop_event=None, interval_seconds: int = 20) -> None:
             due = service.list_due()
             for reminder in due:
                 user = reminder.user
-                text = f"Напоминание: {reminder.text}"
+                from subscriptions.renewal_reminders import strip_renewal_marker
+
+                system_text = strip_renewal_marker(reminder.text)
+                text = system_text if system_text is not None else f"Напоминание: {reminder.text}"
                 try:
                     if user.chat_id:
                         client.send_message(text, chat_id=user.chat_id)
