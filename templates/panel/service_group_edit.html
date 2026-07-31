@@ -23,30 +23,45 @@
       <label>Описание</label>
       <input type="text" name="description" value="{{ group.description }}">
     </div>
-    <h3>Участники</h3>
-    <p class="muted">Отметьте жителей группы. Новым участникам автоматически придут все активные сборы этой группы (остальным повторно не шлём).</p>
-    <table>
-      <thead><tr><th></th><th>Имя</th><th>Телефон</th><th>Нас. пункт</th><th>Адрес</th></tr></thead>
-      <tbody>
-      {% for u in users %}
-        <tr>
-          <td><input type="checkbox" name="user_ids" value="{{ u.id }}" {% if u.id in member_ids %}checked{% endif %}></td>
-          <td>{{ u.real_name|default:u.display_name|default:u.max_user_id }}</td>
-          <td class="mono">{{ u.phone|default:"—" }}</td>
-          <td>{{ u.locality|default:"—" }}</td>
-          <td>{{ u.address|truncatechars:50 }}</td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="5" class="muted">Пользователей бота пока нет</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="btn" type="submit">Сохранить состав</button>
-      <button class="btn danger" type="submit" name="action" value="delete" onclick="return confirm('Удалить группу?');">Удалить группу</button>
-    </div>
+    <button class="btn secondary small" type="submit" style="margin-bottom:12px;">Сохранить название</button>
+
+    <details class="members-fold" style="border:1px solid var(--line); border-radius:12px; background:var(--bg-soft); padding:0 12px 12px;">
+      <summary style="cursor:pointer; list-style:none; padding:14px 4px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <span>
+          <strong>Участники</strong>
+          <span class="badge" style="margin-left:6px;">{{ member_ids|length }}</span>
+          <span class="muted" style="margin-left:8px;">нажмите, чтобы раскрыть состав</span>
+        </span>
+        <span class="muted mono">▼</span>
+      </summary>
+      <p class="muted" style="margin-top:0;">Отметьте жителей группы. Новым участникам автоматически придут все активные сборы этой группы (остальным повторно не шлём).</p>
+      <table>
+        <thead><tr><th></th><th>Имя</th><th>Телефон</th><th>Нас. пункт</th><th>Адрес</th></tr></thead>
+        <tbody>
+        {% for u in users %}
+          <tr>
+            <td><input type="checkbox" name="user_ids" value="{{ u.id }}" {% if u.id in member_ids %}checked{% endif %}></td>
+            <td>{{ u.real_name|default:u.display_name|default:u.max_user_id }}</td>
+            <td class="mono">{{ u.phone|default:"—" }}</td>
+            <td>{{ u.locality|default:"—" }}</td>
+            <td>{{ u.address|truncatechars:50 }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="muted">Пользователей бота пока нет</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn" type="submit">Сохранить состав</button>
+        <button class="btn danger" type="submit" name="action" value="delete" onclick="return confirm('Удалить группу?');">Удалить группу</button>
+      </div>
+    </details>
   </form>
 </div>
+<style>
+  details.members-fold > summary::-webkit-details-marker { display: none; }
+  details.members-fold[open] > summary .mono { transform: rotate(180deg); display: inline-block; }
+</style>
 
 <div class="card" style="max-width:900px; margin-top:16px;">
   <h3 style="margin-top:0;">Пожелания группы <span class="badge">{{ wish_total }}</span></h3>

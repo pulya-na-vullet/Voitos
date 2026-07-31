@@ -30,6 +30,7 @@ def upsert_task(
     priority: int = 50,
     meta: dict | None = None,
     due_at=None,
+    reopen_if_closed: bool = True,
 ) -> AdminTask:
     defaults = {
         "title": title,
@@ -43,24 +44,28 @@ def upsert_task(
         "completed_at": None,
     }
     if source_model and source_id is not None:
-        task, created = AdminTask.objects.update_or_create(
+        existing = AdminTask.objects.filter(
             kind=kind,
             source_model=source_model,
             source_id=source_id,
-            defaults=defaults,
+        ).first()
+        if existing is not None:
+            if existing.status != AdminTaskStatus.OPEN and not reopen_if_closed:
+                # Admin already closed this (e.g. address overlap) — keep resolution
+                return existing
+            for key, value in defaults.items():
+                setattr(existing, key, value)
+            if existing.status != AdminTaskStatus.OPEN and reopen_if_closed:
+                existing.status = AdminTaskStatus.OPEN
+                existing.completed_at = None
+            existing.save()
+            return existing
+        return AdminTask.objects.create(
+            kind=kind,
+            source_model=source_model,
+            source_id=source_id,
+            **defaults,
         )
-        if not created and task.status != AdminTaskStatus.OPEN:
-            # Re-open if source became pending again
-            task.status = AdminTaskStatus.OPEN
-            task.completed_at = None
-            task.title = title
-            task.description = description
-            task.action_url = action_url
-            task.priority = priority
-            task.meta = meta or {}
-            task.user = user
-            task.save()
-        return task
     return AdminTask.objects.create(kind=kind, source_model=source_model, **defaults)
 
 
@@ -218,6 +223,8 @@ def task_address_overlap(
         source_id=source_id,
         priority=25,
         meta={"user_ids": user_ids, "addresses": addresses, "reason": reason},
+        # Do not revive tasks the admin already marked Готово/Скрыть
+        reopen_if_closed=False,
     )
 
 
