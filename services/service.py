@@ -494,11 +494,13 @@ def advance_work_stage(
     photo_uploads: list[tuple[bytes, str]] | None = None,
     send_fn=None,
     send_media_fn=None,
+    allow_close_without_payout: bool = False,
 ) -> WorkStage:
     """
     Move campaign to the next work stage.
     On WORK_DONE: optional 1–2 photos and broadcast to all invitees.
-    On WORK_CLOSED: finalize campaign.
+    On WORK_CLOSED: finalize campaign (requires contractor payout receipts
+    when there are accepted assignees, unless allow_close_without_payout).
     """
     current = campaign.work_stage or WorkStage.COLLECTING
     nxt = WORK_STAGE_NEXT.get(current)
@@ -508,6 +510,17 @@ def advance_work_stage(
     photo_uploads = photo_uploads or []
     if len(photo_uploads) > 2:
         raise ValueError("Можно приложить не больше 2 фотографий")
+
+    if nxt == WorkStage.WORK_CLOSED:
+        from services.contractors import accepted_assignments_needing_payout
+
+        needing = accepted_assignments_needing_payout(campaign)
+        if needing and not allow_close_without_payout:
+            names = ", ".join(str(a.contractor) for a in needing)
+            raise ValueError(
+                "Перед закрытием приложите чек перевода денег исполнителям: "
+                + names
+            )
 
     saved_photos: list[ServiceCampaignResultPhoto] = []
     if nxt == WorkStage.WORK_DONE and photo_uploads:

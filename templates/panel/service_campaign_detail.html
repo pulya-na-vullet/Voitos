@@ -68,6 +68,33 @@
       <div class="hint">При переводе в «Работа выполнена» фотографии уйдут всем участникам сбора.</div>
     </div>
     {% endif %}
+    {% if needs_contractor_payouts %}
+    <div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12); margin-bottom:12px;">
+      Перед закрытием обязательно приложите чек перевода денег каждому исполнителю.
+      Чеки уйдут участникам сбора и самим исполнителям.
+    </div>
+    {% for a in payout_needed %}
+    <div class="card" style="margin-bottom:10px; background: rgba(15,20,25,0.35);">
+      <strong>{{ a.contractor.user }}</strong>
+      <span class="muted">· {{ a.get_equipment_type_display }}</span>
+      <div class="muted" style="margin:4px 0 8px;">
+        Банк: {{ a.contractor.bank_name|default:"—" }} ·
+        Тел. для перевода: {{ a.contractor.payout_phone|default:a.contractor.phone|default:"—" }}
+      </div>
+      <div class="grid two">
+        <div class="form-row" style="margin:0;">
+          <label>Сумма перевода, ₽</label>
+          <input type="number" name="payout_amount_{{ a.id }}" min="1" step="1" required
+                 placeholder="сумма">
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label>Чек перевода</label>
+          <input type="file" name="payout_receipt_{{ a.id }}" accept="image/*,application/pdf" required>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
     <button class="btn" type="submit">
       {% if next_work_stage == "work_started" %}Начало работ
       {% elif next_work_stage == "work_done" %}Работа выполнена
@@ -79,6 +106,63 @@
   <p class="muted" style="margin:0;">Работы по мероприятию закрыты.</p>
   {% endif %}
 </div>
+
+{% if can_backfill_payouts %}
+<div class="card" style="margin-bottom:16px; border-color: rgba(230,192,123,0.45);">
+  <h3 style="margin-top:0;">Дозаполнить оплату исполнителям</h3>
+  <p class="muted" style="margin-top:0;">
+    Задача уже закрыта, но чек перевода ещё не приложен. Заполните сейчас —
+    участникам сбора и исполнителям уйдёт уведомление.
+  </p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="backfill_payouts">
+    {% for a in payout_needed %}
+    <div class="card" style="margin-bottom:10px; background: rgba(15,20,25,0.35);">
+      <strong>{{ a.contractor.user }}</strong>
+      <span class="muted">· {{ a.get_equipment_type_display }}</span>
+      <div class="muted" style="margin:4px 0 8px;">
+        Банк: {{ a.contractor.bank_name|default:"—" }} ·
+        Тел. для перевода: {{ a.contractor.payout_phone|default:a.contractor.phone|default:"—" }}
+      </div>
+      <div class="grid two">
+        <div class="form-row" style="margin:0;">
+          <label>Сумма перевода, ₽</label>
+          <input type="number" name="payout_amount_{{ a.id }}" min="1" step="1" required>
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label>Чек перевода</label>
+          <input type="file" name="payout_receipt_{{ a.id }}" accept="image/*,application/pdf" required>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+    <button class="btn" type="submit">Сохранить чеки и разослать</button>
+  </form>
+</div>
+{% endif %}
+
+{% if contractor_payouts %}
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Оплаты исполнителям</h3>
+  <table>
+    <thead>
+      <tr><th>Дата</th><th>Исполнитель</th><th>Сумма</th><th>Банк / тел.</th><th>Чек</th></tr>
+    </thead>
+    <tbody>
+    {% for p in contractor_payouts %}
+      <tr>
+        <td class="mono">{{ p.created_at|date:"d.m.Y H:i" }}</td>
+        <td>{{ p.contractor.user }}</td>
+        <td class="mono">{{ p.amount }} ₽</td>
+        <td class="muted">{{ p.bank_name|default:"—" }} · {{ p.payout_phone|default:"—" }}</td>
+        <td>{% if p.receipt_image %}<a href="{{ p.receipt_image.url }}" target="_blank">файл</a>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <div class="card" style="margin-bottom:16px;">
   <p style="margin:0;">

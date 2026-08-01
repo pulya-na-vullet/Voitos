@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from decimal import Decimal
+from pathlib import Path
 
+from django.core.files.base import ContentFile
 from django.db.models import Max
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -15,9 +18,11 @@ from database.models import (
     AssignmentStatus,
     BotUser,
     CampaignAssignment,
+    ContractorPayout,
     ContractorProfile,
     ContractorStatus,
     EquipmentType,
+    InviteStatus,
     ServiceCampaign,
     ServiceCategory,
 )
@@ -528,3 +533,248 @@ def cancel_assignment(assignment: CampaignAssignment, *, send_fn=None) -> None:
             )
         except Exception:
             logger.exception("Failed to notify cancel")
+
+
+def accepted_assignments_needing_payout(campaign: ServiceCampaign):
+    """Accepted assignments that still have no admin payout receipt."""
+    paid_ids = set(
+        campaign.contractor_payouts.values_list("assignment_id", flat=True)
+    )
+    return list(
+        campaign.assignments.filter(status=AssignmentStatus.ACCEPTED)
+        .exclude(id__in=paid_ids)
+        .select_related("contractor", "contractor__user")
+        .order_by("sort_order", "id")
+    )
+
+
+def campaign_requires_contractor_payouts(campaign: ServiceCampaign) -> bool:
+    return bool(accepted_assignments_needing_payout(campaign))
+
+
+def _payout_resident_message(campaign: ServiceCampaign, payouts: list[ContractorPayout]) -> str:
+    lines = [
+        f"По задаче «{campaign.title}» администратор перевёл оплату исполнителям:",
+    ]
+    for p in payouts:
+        name = str(p.contractor.user)
+        eq = p.contractor.get_equipment_type_display()
+        bank = p.bank_name or "—"
+        phone = p.payout_phone or "—"
+        lines.append(
+            f"• {name} ({eq}): {p.amount:.0f} ₽ → {phone}, банк {bank}"
+        )
+    lines.append("Чек(и) перевода во вложении / у администратора в карточке сбора.")
+    return "\n".join(lines)
+
+
+def _payout_contractor_message(payout: ContractorPayout) -> str:
+    return (
+        f"Деньги за работу по «{payout.campaign.title}» переведены.\n"
+        f"Сумма: {payout.amount:.0f} ₽\n"
+        f"Банк: {payout.bank_name or '—'}\n"
+        f"На номер: {payout.payout_phone or payout.contractor.phone or '—'}\n\n"
+        "Проверьте счёт. Если сумма пришла — всё в порядке. "
+        "Если денег нет или сумма неверная — напишите в этот чат администратору."
+    )
+
+
+def record_contractor_payouts(
+    campaign: ServiceCampaign,
+    items: list[dict],
+    *,
+    send_fn=None,
+    send_media_fn=None,
+) -> list[ContractorPayout]:
+    """
+    Save admin payout receipts for accepted contractors and notify.
+
+    items: [{assignment_id, amount: Decimal, file_bytes, filename, comment?}, ...]
+    """
+    if not items:
+        raise ValueError("Нужно приложить оплату хотя бы одному исполнителю")
+
+    created: list[ContractorPayout] = []
+    for item in items:
+        assignment = (
+            CampaignAssignment.objects.select_related("contractor", "contractor__user")
+            .filter(pk=item["assignment_id"], campaign=campaign)
+            .first()
+        )
+        if assignment is None:
+            raise ValueError(f"Назначение #{item['assignment_id']} не найдено")
+        if assignment.status != AssignmentStatus.ACCEPTED:
+            raise ValueError(
+                f"Исполнитель «{assignment.contractor}» ещё не подтвердил заказ"
+            )
+        if campaign.contractor_payouts.filter(assignment=assignment).exists():
+            raise ValueError(
+                f"Оплата для «{assignment.contractor}» уже приложена"
+            )
+        amount = Decimal(item["amount"])
+        if amount <= 0:
+            raise ValueError("Сумма перевода должна быть больше нуля")
+        raw = item.get("file_bytes") or b""
+        filename = (item.get("filename") or "payout.jpg").strip() or "payout.jpg"
+        if not raw:
+            raise ValueError(
+                f"Приложите чек перевода для «{assignment.contractor}»"
+            )
+
+        contractor = assignment.contractor
+        payout = ContractorPayout(
+            campaign=campaign,
+            assignment=assignment,
+            contractor=contractor,
+            amount=amount,
+            bank_name=(contractor.bank_name or "")[:255],
+            payout_phone=(
+                contractor.payout_phone or contractor.phone or ""
+            )[:32],
+            comment=(item.get("comment") or "")[:2000],
+        )
+        ext = Path(filename).suffix or ".jpg"
+        safe_name = f"payout_{campaign.id}_{assignment.id}{ext}"
+        payout.receipt_image.save(safe_name, ContentFile(raw), save=False)
+        payout.save()
+        created.append(payout)
+        ActivityLog.objects.create(
+            user=contractor.user,
+            kind=ActivityKind.CONTRACTOR_PAYOUT,
+            title="Оплата исполнителю",
+            detail=f"{amount:.0f} ₽ · {campaign.title}",
+            meta={
+                "campaign_id": campaign.id,
+                "assignment_id": assignment.id,
+                "payout_id": payout.id,
+            },
+        )
+
+    notify_contractor_payouts(
+        campaign, created, send_fn=send_fn, send_media_fn=send_media_fn
+    )
+    return created
+
+
+def notify_contractor_payouts(
+    campaign: ServiceCampaign,
+    payouts: list[ContractorPayout],
+    *,
+    send_fn=None,
+    send_media_fn=None,
+) -> tuple[int, int]:
+    """Notify paid residents + each contractor. Returns (residents, contractors)."""
+    if not payouts:
+        return 0, 0
+    send = send_fn or _default_send_fn()
+    media = send_media_fn
+
+    image_payloads: list[tuple[bytes, str]] = []
+    for p in payouts:
+        try:
+            with p.receipt_image.open("rb") as fh:
+                image_payloads.append(
+                    (fh.read(), Path(p.receipt_image.name).name)
+                )
+        except Exception:
+            logger.exception("Could not read payout receipt %s", p.id)
+
+    resident_text = _payout_resident_message(campaign, payouts)
+    # Who collected money: paid invites, else all group members
+    residents = list(
+        BotUser.objects.filter(
+            id__in=campaign.invites.filter(status=InviteStatus.PAID).values_list(
+                "user_id", flat=True
+            )
+        )
+    )
+    if not residents and campaign.group_id:
+        residents = list(campaign.group.members.all())
+
+    r_sent = 0
+    now = timezone.now()
+    for user in residents:
+        if not send and not media:
+            break
+        try:
+            if image_payloads and media:
+                media(user, resident_text, image_payloads)
+            elif send:
+                send(user, resident_text)
+            r_sent += 1
+        except Exception:
+            logger.exception("Failed payout notice to resident %s", user.id)
+
+    c_sent = 0
+    for p in payouts:
+        msg = _payout_contractor_message(p)
+        payloads = []
+        try:
+            with p.receipt_image.open("rb") as fh:
+                payloads = [(fh.read(), Path(p.receipt_image.name).name)]
+        except Exception:
+            logger.exception("Could not re-read payout %s for contractor", p.id)
+        try:
+            if payloads and media:
+                media(p.contractor.user, msg, payloads)
+            elif send:
+                send(p.contractor.user, msg)
+            c_sent += 1
+            p.contractor_notified_at = now
+            p.save(update_fields=["contractor_notified_at"])
+        except Exception:
+            logger.exception(
+                "Failed payout notice to contractor %s", p.contractor_id
+            )
+
+    ContractorPayout.objects.filter(id__in=[p.id for p in payouts]).update(
+        residents_notified_at=now
+    )
+    return r_sent, c_sent
+
+
+def close_campaign_requiring_payouts(
+    campaign: ServiceCampaign,
+    items: list[dict],
+    *,
+    send_fn=None,
+    send_media_fn=None,
+):
+    """
+    Close work (WORK_CLOSED) only after payout receipts for all accepted contractors.
+    If there are no accepted contractors — close without payouts.
+    """
+    from services.service import advance_work_stage
+    from database.models import WorkStage
+
+    current = campaign.work_stage or WorkStage.COLLECTING
+    if current != WorkStage.WORK_DONE:
+        raise ValueError("Закрытие доступно только после этапа «Работа выполнена»")
+
+    needing = accepted_assignments_needing_payout(campaign)
+    if needing:
+        needed_ids = {a.id for a in needing}
+        provided = {int(i["assignment_id"]) for i in items}
+        missing = needed_ids - provided
+        if missing:
+            names = [
+                str(a.contractor)
+                for a in needing
+                if a.id in missing
+            ]
+            raise ValueError(
+                "Перед закрытием приложите чек перевода каждому исполнителю: "
+                + ", ".join(names)
+            )
+        record_contractor_payouts(
+            campaign,
+            items,
+            send_fn=send_fn,
+            send_media_fn=send_media_fn,
+        )
+    return advance_work_stage(
+        campaign,
+        send_fn=send_fn,
+        send_media_fn=send_media_fn,
+        allow_close_without_payout=True,
+    )

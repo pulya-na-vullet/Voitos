@@ -147,6 +147,41 @@ def _notify_user_with_images(
                 pass
 
 
+def _parse_payout_items_from_request(request: HttpRequest, campaign) -> list[dict]:
+    """Parse payout amount + receipt file per accepted assignment from POST."""
+    from decimal import Decimal, InvalidOperation
+
+    from services.contractors import accepted_assignments_needing_payout
+
+    items: list[dict] = []
+    for assignment in accepted_assignments_needing_payout(campaign):
+        aid = assignment.id
+        amount_raw = (request.POST.get(f"payout_amount_{aid}") or "").strip()
+        upload = request.FILES.get(f"payout_receipt_{aid}")
+        if not amount_raw and not upload:
+            continue
+        try:
+            amount = Decimal(amount_raw)
+        except (InvalidOperation, ValueError):
+            raise ValueError(
+                f"Укажите сумму перевода для «{assignment.contractor}»"
+            )
+        if not upload:
+            raise ValueError(
+                f"Приложите чек перевода для «{assignment.contractor}»"
+            )
+        items.append(
+            {
+                "assignment_id": aid,
+                "amount": amount,
+                "file_bytes": upload.read(),
+                "filename": upload.name,
+                "comment": (request.POST.get(f"payout_comment_{aid}") or "").strip(),
+            }
+        )
+    return items
+
+
 def login_view(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         return redirect("panel:users")
@@ -1143,12 +1178,23 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 _notify_user_with_images(user, text, images, _token_cache=_cache)
 
             try:
-                new_stage = advance_work_stage(
-                    campaign,
-                    photo_uploads=photo_uploads,
-                    send_fn=_notify_user,
-                    send_media_fn=send_media,
-                )
+                if next_stage == WorkStage.WORK_CLOSED:
+                    from services.contractors import close_campaign_requiring_payouts
+
+                    payout_items = _parse_payout_items_from_request(request, campaign)
+                    new_stage = close_campaign_requiring_payouts(
+                        campaign,
+                        payout_items,
+                        send_fn=_notify_user,
+                        send_media_fn=send_media,
+                    )
+                else:
+                    new_stage = advance_work_stage(
+                        campaign,
+                        photo_uploads=photo_uploads,
+                        send_fn=_notify_user,
+                        send_media_fn=send_media,
+                    )
                 labels = dict(WorkStage.choices)
                 messages.success(request, f"Этап: {labels.get(new_stage, new_stage)}")
                 if new_stage == WorkStage.WORK_DONE:
@@ -1160,6 +1206,34 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
                         )
                     else:
                         messages.info(request, "Результат разослан участникам без фото.")
+                if new_stage == WorkStage.WORK_CLOSED:
+                    messages.info(
+                        request,
+                        "Работа закрыта. Чеки оплаты исполнителям разосланы участникам сбора.",
+                    )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "backfill_payouts":
+            from services.contractors import record_contractor_payouts
+
+            token_cache: dict = {}
+
+            def send_media(user, text, images, _cache=token_cache):
+                _notify_user_with_images(user, text, images, _token_cache=_cache)
+
+            try:
+                items = _parse_payout_items_from_request(request, campaign)
+                created = record_contractor_payouts(
+                    campaign,
+                    items,
+                    send_fn=_notify_user,
+                    send_media_fn=send_media,
+                )
+                messages.success(
+                    request,
+                    f"Дозаполнено оплат: {len(created)}. Чеки разосланы участникам и исполнителям.",
+                )
             except ValueError as exc:
                 messages.error(request, str(exc))
             return redirect("panel:service_campaign_detail", pk=pk)
@@ -1231,7 +1305,9 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
     from django.db.models import Sum
 
+    from database.models import EquipmentType
     from services.contractors import (
+        accepted_assignments_needing_payout,
         suggested_equipment_for_campaign,
         verified_contractors,
     )
@@ -1243,8 +1319,6 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     stage = campaign.work_stage or WorkStage.COLLECTING
     next_stage = WORK_STAGE_NEXT.get(stage)
     stage_labels = dict(WorkStage.choices)
-    from database.models import EquipmentType
-
     suggested_types = suggested_equipment_for_campaign(campaign)
     eq_labels = dict(EquipmentType.choices)
     suggested_labels = [eq_labels.get(t, t) for t in suggested_types]
@@ -1256,6 +1330,7 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     for c in verified_contractors():
         if c.id not in seen_ids:
             assignable.append(c)
+    payout_needed = accepted_assignments_needing_payout(campaign)
     return render(
         request,
         "panel/service_campaign_detail.html",
@@ -1270,6 +1345,14 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             ).all(),
             "assignable_contractors": assignable,
             "suggested_equipment_types": suggested_labels,
+            "contractor_payouts": campaign.contractor_payouts.select_related(
+                "contractor", "contractor__user", "assignment"
+            ).all(),
+            "payout_needed": payout_needed,
+            "needs_contractor_payouts": bool(payout_needed)
+            and next_stage == WorkStage.WORK_CLOSED,
+            "can_backfill_payouts": bool(payout_needed)
+            and stage == WorkStage.WORK_CLOSED,
             "collected": paid,
             "progress_pct": pct,
             "surplus": surplus,
@@ -1325,6 +1408,18 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             profile.status = ContractorStatus.DISABLED
             profile.save(update_fields=["status", "updated_at"])
             messages.info(request, f"Исполнитель «{profile}» отключён.")
+        elif action == "update_payout_details":
+            from subscriptions.receipts import normalize_phone
+
+            profile.bank_name = (request.POST.get("bank_name") or "").strip()[:255]
+            raw_phone = (request.POST.get("payout_phone") or "").strip()
+            if raw_phone:
+                phone = normalize_phone(raw_phone)
+                profile.payout_phone = phone[:32] if len(phone) >= 10 else raw_phone[:32]
+            else:
+                profile.payout_phone = ""
+            profile.save(update_fields=["bank_name", "payout_phone", "updated_at"])
+            messages.success(request, f"Реквизиты «{profile}» сохранены.")
         return redirect("panel:contractors")
 
     eq_filter = (request.GET.get("type") or "").strip()

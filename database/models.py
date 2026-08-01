@@ -56,6 +56,7 @@ class ActivityKind(models.TextChoices):
     CONTRACTOR_REGISTER = "contractor_register", "Регистрация исполнителя"
     CONTRACTOR_OFFER = "contractor_offer", "Предложение исполнителю"
     CONTRACTOR_REPLY = "contractor_reply", "Ответ исполнителя"
+    CONTRACTOR_PAYOUT = "contractor_payout", "Оплата исполнителю"
     ERROR = "error", "Ошибка"
     SETTINGS = "settings", "Настройки"
     OTHER = "other", "Прочее"
@@ -751,7 +752,21 @@ class ContractorProfile(models.Model):
         default="",
     )
     plate_number = models.CharField("Госномер", max_length=32, blank=True, default="")
-    phone = models.CharField("Телефон", max_length=32, blank=True, default="")
+    phone = models.CharField("Телефон для связи", max_length=32, blank=True, default="")
+    payout_phone = models.CharField(
+        "Телефон для перевода денег",
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="Если отличается от телефона для связи — на него переводят оплату за работу.",
+    )
+    bank_name = models.CharField(
+        "Банк для перевода",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Например: Сбер, Тинькофф, Альфа.",
+    )
     locality = models.CharField("Населённый пункт", max_length=255, blank=True, default="")
     status = models.CharField(
         max_length=32,
@@ -836,6 +851,56 @@ class CampaignAssignment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.contractor} → {self.campaign_id} ({self.status})"
+
+
+class ContractorPayout(models.Model):
+    """Чек перевода денег администратором исполнителю по закрытию работ."""
+
+    campaign = models.ForeignKey(
+        ServiceCampaign,
+        on_delete=models.CASCADE,
+        related_name="contractor_payouts",
+    )
+    assignment = models.ForeignKey(
+        CampaignAssignment,
+        on_delete=models.CASCADE,
+        related_name="payouts",
+    )
+    contractor = models.ForeignKey(
+        ContractorProfile,
+        on_delete=models.CASCADE,
+        related_name="payouts",
+    )
+    amount = models.DecimalField("Сумма перевода, ₽", max_digits=12, decimal_places=2)
+    receipt_image = models.FileField(
+        "Чек перевода",
+        upload_to="contractor_payouts/%Y/%m/",
+    )
+    bank_name = models.CharField("Банк", max_length=255, blank=True, default="")
+    payout_phone = models.CharField(
+        "Телефон получателя",
+        max_length=32,
+        blank=True,
+        default="",
+    )
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    residents_notified_at = models.DateTimeField(null=True, blank=True)
+    contractor_notified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Оплата исполнителю"
+        verbose_name_plural = "Оплаты исполнителям"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campaign", "assignment"],
+                name="uniq_campaign_assignment_payout",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"Выплата {self.amount} ₽ → {self.contractor} ({self.campaign_id})"
 
 
 class ServiceReceipt(models.Model):

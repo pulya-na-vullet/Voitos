@@ -8,6 +8,7 @@ from database.models import (
     BotUser,
     CampaignAssignment,
     ChatMessage,
+    ContractorPayout,
     ContractorProfile,
     MemoryItem,
     NeighborhoodWish,
@@ -99,12 +100,36 @@ class ContractorProfileAdmin(admin.ModelAdmin):
         "equipment_type",
         "equipment_label",
         "plate_number",
+        "bank_name",
+        "payout_phone",
         "status",
         "locality",
         "submitted_at",
     )
     list_filter = ("equipment_type", "status")
-    search_fields = ("user__real_name", "user__display_name", "equipment_label", "plate_number")
+    search_fields = (
+        "user__real_name",
+        "user__display_name",
+        "equipment_label",
+        "plate_number",
+        "bank_name",
+        "payout_phone",
+    )
+
+
+@admin.register(ContractorPayout)
+class ContractorPayoutAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "campaign",
+        "contractor",
+        "amount",
+        "bank_name",
+        "payout_phone",
+        "created_at",
+    )
+    list_filter = ("created_at",)
+    search_fields = ("contractor__user__real_name", "bank_name", "payout_phone")
 
 
 @admin.register(CampaignAssignment)

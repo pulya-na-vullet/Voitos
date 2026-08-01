@@ -19,6 +19,7 @@ from subscriptions.receipts import normalize_phone
 CONTRACTOR_REG_KIND = "contractor_registration"
 
 _YES = {"да", "yes", "y", "+", "ага", "угу"}
+_SKIP = {"нет", "no", "n", "-", "нету", "тот же", "тотже", "как для связи", "как связь"}
 
 _TYPE_PROMPTS = (
     "Выберите тип техники:\n"
@@ -66,6 +67,15 @@ def _parse_type(text: str) -> str | None:
     return None
 
 
+def _ask_locality(user: BotUser, payload: dict, pending: PendingAction) -> str:
+    payload["step"] = "locality"
+    pending.pending_payload = payload
+    pending.save(update_fields=["pending_payload", "updated_at"])
+    hint = (user.locality or "").strip()
+    extra = f"\nСейчас в анкете: {hint}" if hint else ""
+    return "Укажите населённый пункт, где работаете." + extra
+
+
 def handle_contractor_registration_step(
     user: BotUser,
     text: str,
@@ -99,15 +109,9 @@ def handle_contractor_registration_step(
             payload["plate_number"] = ""
         else:
             payload["plate_number"] = raw[:32]
-        # phone
         if (user.phone or "").strip():
             payload["phone"] = user.phone.strip()
-            payload["step"] = "locality"
-            pending.pending_payload = payload
-            pending.save(update_fields=["pending_payload", "updated_at"])
-            hint = (user.locality or "").strip()
-            extra = f"\nСейчас в анкете: {hint}" if hint else ""
-            return "Укажите населённый пункт, где работаете." + extra
+            return _ask_locality(user, payload, pending)
         payload["step"] = "phone"
         pending.pending_payload = payload
         pending.save(update_fields=["pending_payload", "updated_at"])
@@ -121,15 +125,45 @@ def handle_contractor_registration_step(
         if not (user.phone or "").strip():
             user.phone = phone
             user.save(update_fields=["phone", "last_seen_at"])
-        payload["step"] = "locality"
-        pending.pending_payload = payload
-        pending.save(update_fields=["pending_payload", "updated_at"])
-        return "Укажите населённый пункт, где работаете."
+        return _ask_locality(user, payload, pending)
 
     if step == "locality":
         if len(raw) < 2:
             return "Укажите населённый пункт."
         payload["locality"] = raw[:255]
+        payload["step"] = "bank"
+        pending.pending_payload = payload
+        pending.save(update_fields=["pending_payload", "updated_at"])
+        return (
+            "Укажите банк, на который переводить оплату за работу "
+            "(например: Сбер, Тинькофф, Альфа)."
+        )
+
+    if step == "bank":
+        if len(raw) < 2:
+            return "Напишите название банка для перевода."
+        payload["bank_name"] = raw[:255]
+        payload["step"] = "payout_phone"
+        pending.pending_payload = payload
+        pending.save(update_fields=["pending_payload", "updated_at"])
+        contact = payload.get("phone") or user.phone or ""
+        return (
+            "Укажите номер телефона для перевода денег "
+            f"(или «тот же», если совпадает с {contact or 'телефоном для связи'})."
+        )
+
+    if step == "payout_phone":
+        low = raw.lower()
+        if low in _SKIP or low in _YES:
+            payload["payout_phone"] = payload.get("phone") or user.phone or ""
+        else:
+            phone = normalize_phone(raw)
+            if len(phone) < 10:
+                return (
+                    "Нужен телефон для перевода или напишите «тот же», "
+                    "если совпадает с телефоном для связи."
+                )
+            payload["payout_phone"] = phone
         return _finish(user, pending, payload)
 
     return start_contractor_registration(user, pending)
@@ -141,13 +175,17 @@ def _finish(user: BotUser, pending: PendingAction, payload: dict) -> str:
         pending.clear_pending()
         return "Ошибка типа техники — начните снова: «регистрация техники»."
 
+    contact = (payload.get("phone") or user.phone or "")[:32]
+    payout = (payload.get("payout_phone") or contact)[:32]
     profile, _created = ContractorProfile.objects.update_or_create(
         user=user,
         defaults={
             "equipment_type": eq,
             "equipment_label": (payload.get("equipment_label") or "")[:255],
             "plate_number": (payload.get("plate_number") or "")[:32],
-            "phone": (payload.get("phone") or user.phone or "")[:32],
+            "phone": contact,
+            "payout_phone": payout,
+            "bank_name": (payload.get("bank_name") or "")[:255],
             "locality": (payload.get("locality") or user.locality or "")[:255],
             "status": ContractorStatus.PENDING_REVIEW,
             "submitted_at": timezone.now(),
@@ -174,7 +212,8 @@ def _finish(user: BotUser, pending: PendingAction, payload: dict) -> str:
                 f"{profile.get_equipment_type_display()}\n"
                 f"{profile.equipment_label}\n"
                 f"Госномер: {profile.plate_number or '—'}\n"
-                f"Тел: {profile.phone or '—'}\n"
+                f"Связь: {profile.phone or '—'}\n"
+                f"Перевод: {profile.payout_phone or '—'} / {profile.bank_name or '—'}\n"
                 f"НП: {profile.locality or '—'}"
             ),
             user=user,
@@ -189,5 +228,7 @@ def _finish(user: BotUser, pending: PendingAction, payload: dict) -> str:
         "Анкета исполнителя отправлена администратору.\n"
         f"Тип: {profile.get_equipment_type_display()}\n"
         f"Техника: {profile.equipment_label or '—'}\n"
+        f"Банк: {profile.bank_name or '—'}\n"
+        f"Тел. для перевода: {profile.payout_phone or profile.phone or '—'}\n"
         "После проверки вы сможете получать заказы."
     )

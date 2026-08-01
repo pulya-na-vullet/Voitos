@@ -11,23 +11,29 @@ from database.models import (
     AssignmentStatus,
     BotUser,
     CampaignAssignment,
+    ContractorPayout,
     ContractorProfile,
     ContractorStatus,
     EquipmentType,
+    CampaignStatus,
+    InviteStatus,
     PendingAction,
     ServiceCategory,
     ServiceGroup,
+    WorkStage,
 )
 from services.contractors import (
     accept_assignment,
     approve_counter_offer,
     assign_contractor,
+    close_campaign_requiring_payouts,
     expire_stale_counter_offers,
     handle_offer_reply,
+    record_contractor_payouts,
     reject_counter_offer,
     suggested_equipment_for_campaign,
 )
-from services.service import create_campaign
+from services.service import advance_work_stage, create_campaign
 from bot.contractor_registration import (
     handle_contractor_registration_step,
     start_contractor_registration,
@@ -88,11 +94,15 @@ class ContractorFlowTests(TestCase):
         handle_contractor_registration_step(user, "Камаз 55111", pending)
         handle_contractor_registration_step(user, "А123ВС116", pending)
         handle_contractor_registration_step(user, "89005554433", pending)
-        reply = handle_contractor_registration_step(user, "Казань", pending)
+        handle_contractor_registration_step(user, "Казань", pending)
+        handle_contractor_registration_step(user, "Сбер", pending)
+        reply = handle_contractor_registration_step(user, "89006667788", pending)
         self.assertIn("отправлена", reply.lower())
         profile = ContractorProfile.objects.get(user=user)
         self.assertEqual(profile.equipment_type, EquipmentType.TRUCK)
         self.assertEqual(profile.status, ContractorStatus.PENDING_REVIEW)
+        self.assertEqual(profile.bank_name, "Сбер")
+        self.assertTrue(profile.payout_phone.endswith("667788") or "667788" in profile.payout_phone)
 
     def test_assign_accept_notifies_residents(self):
         assignment = assign_contractor(
@@ -183,3 +193,72 @@ class ContractorFlowTests(TestCase):
                 campaign=self.campaign, contractor=self.profile
             ).exists()
         )
+
+    def test_close_requires_payout_receipt(self):
+        self.profile.bank_name = "Тинькофф"
+        self.profile.payout_phone = "89001112233"
+        self.profile.save()
+        assignment = assign_contractor(
+            self.campaign, self.profile, send_fn=self.capture
+        )
+        accept_assignment(assignment, send_fn=self.capture, notify_residents=False)
+        # move stages to work_done
+        self.campaign.work_stage = WorkStage.WORK_DONE
+        self.campaign.save(update_fields=["work_stage"])
+
+        with self.assertRaises(ValueError):
+            advance_work_stage(self.campaign)
+
+        tiny = b"%PDF-1.4 payout"
+        self.sent.clear()
+        close_campaign_requiring_payouts(
+            self.campaign,
+            [
+                {
+                    "assignment_id": assignment.id,
+                    "amount": Decimal("500"),
+                    "file_bytes": tiny,
+                    "filename": "payout.pdf",
+                }
+            ],
+            send_fn=self.capture,
+        )
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.work_stage, WorkStage.WORK_CLOSED)
+        self.assertEqual(ContractorPayout.objects.filter(campaign=self.campaign).count(), 1)
+        self.assertTrue(any(self.driver.id == uid for uid, _ in self.sent))
+        self.assertTrue(any("переведены" in t.lower() for _, t in self.sent))
+
+    def test_backfill_payout_on_closed_campaign(self):
+        assignment = assign_contractor(
+            self.campaign, self.profile, send_fn=self.capture
+        )
+        accept_assignment(assignment, send_fn=self.capture, notify_residents=False)
+        self.campaign.work_stage = WorkStage.WORK_CLOSED
+        self.campaign.status = CampaignStatus.CLOSED
+        self.campaign.save(update_fields=["work_stage", "status"])
+        from database.models import ServiceInvite
+
+        ServiceInvite.objects.create(
+            campaign=self.campaign,
+            user=self.resident,
+            amount_due=Decimal("100"),
+            amount_paid=Decimal("100"),
+            status=InviteStatus.PAID,
+        )
+        self.sent.clear()
+        record_contractor_payouts(
+            self.campaign,
+            [
+                {
+                    "assignment_id": assignment.id,
+                    "amount": Decimal("700"),
+                    "file_bytes": b"receipt-bytes",
+                    "filename": "r.jpg",
+                }
+            ],
+            send_fn=self.capture,
+        )
+        self.assertEqual(ContractorPayout.objects.filter(campaign=self.campaign).count(), 1)
+        self.assertTrue(any(self.resident.id == uid for uid, _ in self.sent))
+        self.assertTrue(any(self.driver.id == uid for uid, _ in self.sent))
