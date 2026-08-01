@@ -88,6 +88,105 @@ def offer_message(assignment: CampaignAssignment) -> str:
     )
 
 
+_PEER_ACTIVE_STATUSES = {
+    AssignmentStatus.OFFERED,
+    AssignmentStatus.COUNTER_OFFER,
+    AssignmentStatus.ACCEPTED,
+}
+
+
+def max_profile_link(user: BotUser) -> str:
+    """Публичная ссылка на профиль в MAX по username, если он есть."""
+    uname = (user.username or "").strip().lstrip("@")
+    if not uname:
+        return ""
+    return f"https://max.ru/{uname}"
+
+
+def contractor_contact_lines(assignment: CampaignAssignment) -> list[str]:
+    contractor = assignment.contractor
+    user = contractor.user
+    phone = (contractor.phone or user.phone or "").strip()
+    uname = (user.username or "").strip().lstrip("@")
+    link = max_profile_link(user)
+    lines = [f"{user} ({assignment.get_equipment_type_display()})"]
+    if phone:
+        lines.append(f"Телефон: {phone}")
+    if uname:
+        lines.append(f"MAX: @{uname}")
+    if link:
+        lines.append(f"Ссылка MAX: {link}")
+    if not phone and not uname:
+        lines.append("Контакты в анкете не указаны — уточните у администратора.")
+    return lines
+
+
+def peers_contacts_message(
+    campaign: ServiceCampaign,
+    peers: list[CampaignAssignment],
+) -> str:
+    lines = [
+        f"На задаче «{campaign.title}» назначено несколько исполнителей.",
+        "Контакты коллег для связи:",
+        "",
+    ]
+    for i, peer in enumerate(peers, start=1):
+        block = contractor_contact_lines(peer)
+        lines.append(f"{i}. {block[0]}")
+        lines.extend(block[1:])
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def active_peer_assignments(campaign: ServiceCampaign) -> list[CampaignAssignment]:
+    return list(
+        campaign.assignments.filter(status__in=_PEER_ACTIVE_STATUSES)
+        .select_related("contractor", "contractor__user")
+        .order_by("sort_order", "id")
+    )
+
+
+def notify_peer_contractors(
+    campaign: ServiceCampaign,
+    *,
+    send_fn=None,
+) -> int:
+    """Если на задаче ≥2 исполнителей — разослать им контакты друг друга."""
+    if send_fn is None:
+        send_fn = _default_send_fn()
+    if not send_fn:
+        return 0
+    active = active_peer_assignments(campaign)
+    if len(active) < 2:
+        return 0
+    sent = 0
+    for assignment in active:
+        peers = [a for a in active if a.id != assignment.id]
+        if not peers:
+            continue
+        text = peers_contacts_message(campaign, peers)
+        try:
+            send_fn(assignment.contractor.user, text)
+            sent += 1
+            ActivityLog.objects.create(
+                user=assignment.contractor.user,
+                kind=ActivityKind.CONTRACTOR_OFFER,
+                title="Контакты коллег-исполнителей",
+                detail=f"{campaign.title}: {len(peers)} чел.",
+                meta={
+                    "campaign_id": campaign.id,
+                    "assignment_id": assignment.id,
+                    "peer_ids": [p.id for p in peers],
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to notify peer contacts for contractor %s",
+                assignment.contractor_id,
+            )
+    return sent
+
+
 def assign_contractor(
     campaign: ServiceCampaign,
     contractor: ContractorProfile,
@@ -154,6 +253,13 @@ def assign_contractor(
     pending.pending_kind = "contractor_offer_reply"
     pending.pending_payload = {"assignment_id": assignment.id}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+
+    # Несколько исполнителей на одной задаче — обмен контактами и ссылками MAX.
+    try:
+        notify_peer_contractors(campaign, send_fn=send_fn)
+    except Exception:
+        logger.exception("Failed to share peer contacts for campaign %s", campaign.id)
+
     return assignment
 
 

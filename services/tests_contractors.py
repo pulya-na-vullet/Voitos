@@ -104,6 +104,49 @@ class ContractorFlowTests(TestCase):
         self.assertEqual(profile.bank_name, "Сбер")
         self.assertTrue(profile.payout_phone.endswith("667788") or "667788" in profile.payout_phone)
 
+    def test_peer_contacts_shared_when_multiple_assigned(self):
+        self.driver.username = "ivan_traktor"
+        self.driver.save(update_fields=["username"])
+        d2 = BotUser.objects.create(
+            max_user_id="ctr-peer-2",
+            real_name="Пётр Камаз",
+            phone="89009998877",
+            username="petr_kamaz",
+            chat_id="c-peer-2",
+        )
+        p2 = ContractorProfile.objects.create(
+            user=d2,
+            equipment_type=EquipmentType.TRUCK,
+            equipment_label="Камаз",
+            status=ContractorStatus.VERIFIED,
+            verified_at=timezone.now(),
+            phone=d2.phone,
+        )
+        assign_contractor(self.campaign, self.profile, send_fn=self.capture)
+        self.sent.clear()
+        assign_contractor(self.campaign, p2, send_fn=self.capture)
+
+        peer_msgs = [
+            (uid, text)
+            for uid, text in self.sent
+            if "Контакты коллег" in text or "несколько исполнителей" in text
+        ]
+        self.assertEqual(len(peer_msgs), 2)
+        by_user = {uid: text for uid, text in peer_msgs}
+        self.assertIn(self.driver.id, by_user)
+        self.assertIn(d2.id, by_user)
+        # Иван получает контакты Петра
+        self.assertIn("89009998877", by_user[self.driver.id])
+        self.assertIn("@petr_kamaz", by_user[self.driver.id])
+        self.assertIn("https://max.ru/petr_kamaz", by_user[self.driver.id])
+        # Пётр получает контакты Ивана
+        self.assertIn("89001112233", by_user[d2.id])
+        self.assertIn("@ivan_traktor", by_user[d2.id])
+        self.assertIn("https://max.ru/ivan_traktor", by_user[d2.id])
+        # Свой контакт себе не шлём
+        self.assertNotIn("@ivan_traktor", by_user[self.driver.id])
+        self.assertNotIn("@petr_kamaz", by_user[d2.id])
+
     def test_assign_accept_notifies_residents(self):
         assignment = assign_contractor(
             self.campaign, self.profile, send_fn=self.capture
