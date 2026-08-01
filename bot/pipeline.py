@@ -69,6 +69,25 @@ class MessagePipeline:
             self._store_out(user, reply, "registration")
             return reply
 
+        from bot.contractor_registration import (
+            CONTRACTOR_REG_KIND,
+            handle_contractor_registration_step,
+            start_contractor_registration,
+        )
+
+        if pending.pending_kind == CONTRACTOR_REG_KIND:
+            reply = handle_contractor_registration_step(user, text, pending)
+            self._store_out(user, reply, "contractor_registration")
+            return reply
+
+        if pending.pending_kind == "contractor_offer_reply":
+            from services.contractors import handle_offer_reply
+
+            reply = handle_offer_reply(user, text, pending)
+            if reply is not None:
+                self._store_out(user, reply, "contractor_offer")
+                return reply
+
         if pending.pending_kind == "reminder_time":
             reply = self._finish_pending_reminder(user, text, pending)
             if reply is not None:
@@ -89,7 +108,18 @@ class MessagePipeline:
 
         if needs_registration(user):
             # Allow help/subscription/collections meta commands before forcing form
-            from ai.intent import HELP_RE, SERVICE_COLLECTIONS_RE, SUBSCRIPTION_RE, WISHES_LIST_RE
+            from ai.intent import (
+                CONTRACTOR_REG_RE,
+                HELP_RE,
+                SERVICE_COLLECTIONS_RE,
+                SUBSCRIPTION_RE,
+                WISHES_LIST_RE,
+            )
+
+            if CONTRACTOR_REG_RE.match(text):
+                reply = start_contractor_registration(user, pending)
+                self._store_out(user, reply, "contractor_registration")
+                return reply
 
             if not (
                 HELP_RE.match(text)
@@ -162,6 +192,18 @@ class MessagePipeline:
             from bot.registration import start_registration
 
             return start_registration(user, pending)
+
+        if intent.intent == "contractor_registration":
+            from bot.contractor_registration import start_contractor_registration
+            from database.models import EquipmentType
+
+            low = text.lower()
+            eq = None
+            if "камаз" in low or "груз" in low:
+                eq = EquipmentType.TRUCK
+            elif "трактор" in low or "погруз" in low:
+                eq = EquipmentType.TRACTOR
+            return start_contractor_registration(user, pending, equipment_type=eq)
 
         if intent.intent == "force_remember":
             source = pending.last_user_text.strip()

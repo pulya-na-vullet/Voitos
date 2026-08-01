@@ -225,6 +225,7 @@ def create_campaign(
     amount_per_user: Decimal | None = None,
     group: ServiceGroup | None = None,
     event_at=None,
+    needs_snow_haul: bool = False,
 ) -> ServiceCampaign:
     if category not in ServiceCategory.values:
         raise ValueError("Неизвестная категория")
@@ -237,6 +238,7 @@ def create_campaign(
         title = f"{title} от {date_s}"
     if group and not locality:
         locality = group.name
+    haul = bool(needs_snow_haul) and category == ServiceCategory.SNOW
     return ServiceCampaign.objects.create(
         category=category,
         title=title,
@@ -246,6 +248,7 @@ def create_campaign(
         total_amount=total_amount,
         amount_per_user=amount_per_user or Decimal("0"),
         event_at=event_at,
+        needs_snow_haul=haul,
         status=CampaignStatus.DRAFT,
     )
 
@@ -729,6 +732,7 @@ def launch_campaign_to_group(
     total_amount: Decimal,
     amount_per_user: Decimal,
     event_at=None,
+    needs_snow_haul: bool = False,
     photo_uploads: list[tuple[bytes, str]] | None = None,
     send_fn=None,
     send_media_fn=None,
@@ -754,6 +758,7 @@ def launch_campaign_to_group(
         total_amount=total_amount,
         amount_per_user=amount_per_user,
         event_at=event_at,
+        needs_snow_haul=needs_snow_haul,
     )
     if photo_uploads:
         save_offer_photos(campaign, photo_uploads)

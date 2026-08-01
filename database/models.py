@@ -53,6 +53,9 @@ class ActivityKind(models.TextChoices):
     SERVICE_PAID = "service_paid", "Сервисный сбор оплачен"
     SERVICE_NOTICE = "service_notice", "Уведомление по сбору"
     SERVICE_WISH = "service_wish", "Пожелание по группе"
+    CONTRACTOR_REGISTER = "contractor_register", "Регистрация исполнителя"
+    CONTRACTOR_OFFER = "contractor_offer", "Предложение исполнителю"
+    CONTRACTOR_REPLY = "contractor_reply", "Ответ исполнителя"
     ERROR = "error", "Ошибка"
     SETTINGS = "settings", "Настройки"
     OTHER = "other", "Прочее"
@@ -142,6 +145,30 @@ class AdminTaskKind(models.TextChoices):
     PROFILE_REVIEW = "profile_review", "Проверка анкеты"
     FAMILY_CLAIM = "family_claim", "Семейная заявка"
     ADDRESS_OVERLAP = "address_overlap", "Совпадение адреса"
+    CONTRACTOR_REVIEW = "contractor_review", "Проверка исполнителя"
+    CONTRACTOR_COUNTER = "contractor_counter", "Другое время исполнителя"
+
+
+class EquipmentType(models.TextChoices):
+    TRACTOR = "tractor", "Трактор-погрузчик"
+    TRUCK = "truck", "Камаз / грузовой"
+
+
+class ContractorStatus(models.TextChoices):
+    PENDING_REVIEW = "pending_review", "На проверке"
+    VERIFIED = "verified", "Проверен"
+    REJECTED = "rejected", "Отклонён"
+    DISABLED = "disabled", "Отключён"
+
+
+class AssignmentStatus(models.TextChoices):
+    OFFERED = "offered", "Предложено"
+    COUNTER_OFFER = "counter_offer", "Другое время"
+    ACCEPTED = "accepted", "Согласен"
+    DECLINED = "declined", "Отказ"
+    REJECTED_TIME = "rejected_time", "Время отклонено"
+    CANCELLED = "cancelled", "Отменено"
+    EXPIRED = "expired", "Истекло"
 
 
 class AppSettings(models.Model):
@@ -568,6 +595,11 @@ class ServiceCampaign(models.Model):
         blank=True,
         help_text="К этой дате должен быть выполнен сбор; напоминания неоплатившим — за 3 дня, 1 день и 2 часа.",
     )
+    needs_snow_haul = models.BooleanField(
+        "Нужен вывоз снега",
+        default=False,
+        help_text="Для чистки снега: подбирать водителей грузовых (камаз) на вывоз.",
+    )
     status = models.CharField(
         max_length=16,
         choices=CampaignStatus.choices,
@@ -697,6 +729,113 @@ class ServiceInvite(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} → {self.campaign_id}: {self.amount_due}₽"
+
+
+class ContractorProfile(models.Model):
+    """Владелец техники: тракторист / водитель камаза."""
+
+    user = models.OneToOneField(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="contractor_profile",
+    )
+    equipment_type = models.CharField(
+        "Тип техники",
+        max_length=32,
+        choices=EquipmentType.choices,
+    )
+    equipment_label = models.CharField(
+        "Модель / описание",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    plate_number = models.CharField("Госномер", max_length=32, blank=True, default="")
+    phone = models.CharField("Телефон", max_length=32, blank=True, default="")
+    locality = models.CharField("Населённый пункт", max_length=255, blank=True, default="")
+    status = models.CharField(
+        max_length=32,
+        choices=ContractorStatus.choices,
+        default=ContractorStatus.PENDING_REVIEW,
+    )
+    admin_note = models.TextField(blank=True, default="")
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Исполнитель"
+        verbose_name_plural = "Исполнители"
+        ordering = ["equipment_type", "user_id"]
+
+    def __str__(self) -> str:
+        return f"{self.get_equipment_type_display()}: {self.user}"
+
+    @property
+    def display_name(self) -> str:
+        return str(self.user)
+
+
+class CampaignAssignment(models.Model):
+    """Назначение исполнителя на сервисную задачу."""
+
+    campaign = models.ForeignKey(
+        ServiceCampaign,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    contractor = models.ForeignKey(
+        ContractorProfile,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    equipment_type = models.CharField(
+        max_length=32,
+        choices=EquipmentType.choices,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=AssignmentStatus.choices,
+        default=AssignmentStatus.OFFERED,
+    )
+    scheduled_at = models.DateTimeField(
+        "Назначенное время",
+        null=True,
+        blank=True,
+        help_text="Время выезда / работ для этого исполнителя.",
+    )
+    proposed_at = models.DateTimeField(
+        "Предложенное исполнителем время",
+        null=True,
+        blank=True,
+    )
+    counter_deadline = models.DateTimeField(
+        "Дедлайн ответа на другое время",
+        null=True,
+        blank=True,
+        help_text="20 минут с момента предложения другого времени.",
+    )
+    sort_order = models.PositiveIntegerField(default=0)
+    admin_comment = models.TextField(blank=True, default="")
+    offered_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    residents_notified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Назначение исполнителя"
+        verbose_name_plural = "Назначения исполнителей"
+        ordering = ["sort_order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campaign", "contractor"],
+                name="uniq_campaign_contractor_assignment",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.contractor} → {self.campaign_id} ({self.status})"
 
 
 class ServiceReceipt(models.Model):

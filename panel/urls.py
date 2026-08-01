@@ -31,6 +31,7 @@ urlpatterns = [
     path("services/ranking/", views.services_ranking, name="services_ranking"),
     path("clients-map/", views.clients_map, name="clients_map"),
     path("earnings-forecast/", views.earnings_forecast, name="earnings_forecast"),
+    path("contractors/", views.contractors_list, name="contractors"),
     path("services/groups/<int:pk>/", views.service_group_edit, name="service_group_edit"),
     path(
         "services/campaigns/<int:pk>/",

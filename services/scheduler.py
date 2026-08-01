@@ -9,6 +9,7 @@ django.setup()
 
 from ai.factory import get_runtime_settings
 from bot.client import MaxClient
+from services.contractors import expire_stale_counter_offers
 from services.service import process_unpaid_reminders
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,11 @@ def run_service_campaign_scheduler(stop_event=None, interval_seconds: int = 60) 
                 n = process_unpaid_reminders(send_fn=send_fn)
                 if n:
                     logger.info("Sent %s unpaid campaign reminder(s)", n)
+                expired = expire_stale_counter_offers(send_fn=send_fn)
+                if expired:
+                    logger.info("Expired %s contractor counter-offer(s)", expired)
+            else:
+                expire_stale_counter_offers()
         except Exception:
             logger.exception("Service campaign scheduler loop error")
         time.sleep(interval_seconds)

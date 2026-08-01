@@ -38,6 +38,7 @@ INTENT_SYSTEM_PROMPT = """Ты классификатор намерений п�
 - neighborhood_wish — идея/голос за улучшение двора, улицы, придомовой территории для группы жителей
 - list_wishes — «пожелания» — показать статистику тем по группе
 - registration — начать или продолжить анкету
+- contractor_registration — регистрация тракториста / водителя камаза
 - chat — обычный вопрос или разговор
 
 Категории памяти: purchases, home, car, finance, health, preferences, people, ideas, other
@@ -164,6 +165,15 @@ SERVICE_COLLECTIONS_RE = re.compile(
 )
 REGISTRATION_RE = re.compile(
     r"^\s*(/)?(регистрация|анкета|заполнить\s+анкету)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+CONTRACTOR_REG_RE = re.compile(
+    r"^\s*(/)?("
+    r"регистрация\s+техники|я\s+тракторист|я\s+водитель|"
+    r"я\s+владелец\s+техники|зарегистрировать\s+технику|"
+    r"стать\s+исполнителем|исполнитель|трактор-погрузчик|"
+    r"я\s+на\s+камазе|регистрация\s+камаза|регистрация\s+трактора"
+    r")\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 
@@ -562,6 +572,8 @@ class IntentAnalyzer:
             )
         if REGISTRATION_RE.match(text):
             return IntentResult(intent="registration", confidence=1.0)
+        if CONTRACTOR_REG_RE.match(text):
+            return IntentResult(intent="contractor_registration", confidence=1.0)
         if FORCE_REMEMBER_RE.match(text) or text.lower().startswith("запомни это"):
             return IntentResult(intent="force_remember", confidence=1.0)
         if FORCE_FORGET_RE.match(text):

@@ -191,7 +191,12 @@ class UpdateHandler:
         state = user.access_state()
         pending, _ = PendingAction.objects.get_or_create(user=user)
         # Allow answering receipt destination / wish group pick even when blocked
-        if pending.pending_kind in {"service_invite_pick", "wish_group_pick"}:
+        if pending.pending_kind in {
+            "service_invite_pick",
+            "wish_group_pick",
+            "contractor_offer_reply",
+            "contractor_registration",
+        }:
             try:
                 reply = self.pipeline.handle(
                     user,

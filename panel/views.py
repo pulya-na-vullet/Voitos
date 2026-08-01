@@ -910,6 +910,7 @@ def services_home(request: HttpRequest) -> HttpResponse:
                     total_amount=total,
                     amount_per_user=per_user,
                     event_at=event_at,
+                    needs_snow_haul=bool(request.POST.get("needs_snow_haul")),
                     photo_uploads=photo_uploads,
                     send_fn=_notify_user,
                     send_media_fn=send_media,
@@ -1170,8 +1171,70 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             label = delete_service_campaign(campaign, reason=reason)
             messages.success(request, f"Сбор удалён: {label}. Причина: {reason}")
             return redirect("panel:services")
+        if action == "assign_contractor":
+            from database.models import ContractorProfile
+            from services.contractors import assign_contractor
+
+            cid = request.POST.get("contractor_id")
+            contractor = get_object_or_404(ContractorProfile, pk=cid)
+            try:
+                assign_contractor(campaign, contractor, send_fn=_notify_user)
+                messages.success(
+                    request,
+                    f"Исполнителю «{contractor}» отправлено предложение.",
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "approve_counter":
+            from database.models import CampaignAssignment
+            from services.contractors import approve_counter_offer
+
+            assignment = get_object_or_404(
+                CampaignAssignment, pk=request.POST.get("assignment_id"), campaign=campaign
+            )
+            try:
+                approve_counter_offer(assignment, send_fn=_notify_user)
+                messages.success(request, "Время исполнителя подтверждено, жители уведомлены.")
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "reject_counter":
+            from database.models import CampaignAssignment
+            from services.contractors import reject_counter_offer
+
+            assignment = get_object_or_404(
+                CampaignAssignment, pk=request.POST.get("assignment_id"), campaign=campaign
+            )
+            reject_counter_offer(assignment, send_fn=_notify_user)
+            messages.info(
+                request,
+                "Время отклонено — назначьте другого исполнителя с такой же техникой.",
+            )
+            return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "cancel_assignment":
+            from database.models import CampaignAssignment
+            from services.contractors import cancel_assignment
+
+            assignment = get_object_or_404(
+                CampaignAssignment, pk=request.POST.get("assignment_id"), campaign=campaign
+            )
+            cancel_assignment(assignment, send_fn=_notify_user)
+            messages.success(request, "Назначение отменено.")
+            return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "notify_residents_contractors":
+            from services.contractors import notify_residents_about_assignments
+
+            n = notify_residents_about_assignments(campaign, send_fn=_notify_user)
+            messages.success(request, f"Статус исполнителя разослан: {n} сообщ.")
+            return redirect("panel:service_campaign_detail", pk=pk)
 
     from django.db.models import Sum
+
+    from services.contractors import (
+        suggested_equipment_for_campaign,
+        verified_contractors,
+    )
 
     paid = campaign.invites.aggregate(s=Sum("amount_paid"))["s"] or Decimal("0")
     total = Decimal(campaign.total_amount or 0)
@@ -1180,6 +1243,19 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     stage = campaign.work_stage or WorkStage.COLLECTING
     next_stage = WORK_STAGE_NEXT.get(stage)
     stage_labels = dict(WorkStage.choices)
+    from database.models import EquipmentType
+
+    suggested_types = suggested_equipment_for_campaign(campaign)
+    eq_labels = dict(EquipmentType.choices)
+    suggested_labels = [eq_labels.get(t, t) for t in suggested_types]
+    assignable = []
+    for eq in suggested_types:
+        assignable.extend(list(verified_contractors(equipment_type=eq)))
+    # Also allow any verified if not in suggested
+    seen_ids = {c.id for c in assignable}
+    for c in verified_contractors():
+        if c.id not in seen_ids:
+            assignable.append(c)
     return render(
         request,
         "panel/service_campaign_detail.html",
@@ -1189,6 +1265,11 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "receipts": campaign.receipts.select_related("user", "invite").all()[:200],
             "offer_photos": campaign.offer_photos.all(),
             "result_photos": campaign.result_photos.all(),
+            "assignments": campaign.assignments.select_related(
+                "contractor", "contractor__user"
+            ).all(),
+            "assignable_contractors": assignable,
+            "suggested_equipment_types": suggested_labels,
             "collected": paid,
             "progress_pct": pct,
             "surplus": surplus,
@@ -1200,6 +1281,67 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "next_work_stage": next_stage,
             "next_work_stage_label": stage_labels.get(next_stage or "", ""),
             "needs_result_photos": next_stage == WorkStage.WORK_DONE,
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def contractors_list(request: HttpRequest) -> HttpResponse:
+    from database.models import ContractorProfile, ContractorStatus, EquipmentType
+    from panel.admin_tasks import close_task_for_source
+    from database.models import AdminTaskKind
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        profile = get_object_or_404(ContractorProfile, pk=request.POST.get("contractor_id"))
+        if action == "verify":
+            profile.status = ContractorStatus.VERIFIED
+            profile.verified_at = timezone.now()
+            profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.save()
+            close_task_for_source(
+                AdminTaskKind.CONTRACTOR_REVIEW, "ContractorProfile", profile.id
+            )
+            _notify_user(
+                profile.user,
+                "Анкета исполнителя проверена. Теперь вы можете получать заказы.",
+            )
+            messages.success(request, f"Исполнитель «{profile}» подтверждён.")
+        elif action == "reject":
+            profile.status = ContractorStatus.REJECTED
+            profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.save()
+            close_task_for_source(
+                AdminTaskKind.CONTRACTOR_REVIEW, "ContractorProfile", profile.id
+            )
+            _notify_user(
+                profile.user,
+                "Анкета исполнителя отклонена."
+                + (f"\n{profile.admin_note}" if profile.admin_note else ""),
+            )
+            messages.info(request, f"Исполнитель «{profile}» отклонён.")
+        elif action == "disable":
+            profile.status = ContractorStatus.DISABLED
+            profile.save(update_fields=["status", "updated_at"])
+            messages.info(request, f"Исполнитель «{profile}» отключён.")
+        return redirect("panel:contractors")
+
+    eq_filter = (request.GET.get("type") or "").strip()
+    qs = ContractorProfile.objects.select_related("user").order_by(
+        "status", "equipment_type", "-submitted_at"
+    )
+    if eq_filter in EquipmentType.values:
+        qs = qs.filter(equipment_type=eq_filter)
+    return render(
+        request,
+        "panel/contractors.html",
+        {
+            "contractors": qs,
+            "equipment_choices": EquipmentType.choices,
+            "type_filter": eq_filter,
+            "status_verified": ContractorStatus.VERIFIED,
+            "status_pending": ContractorStatus.PENDING_REVIEW,
         },
     )
 

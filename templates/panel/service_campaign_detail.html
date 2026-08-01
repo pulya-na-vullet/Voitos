@@ -100,6 +100,9 @@
   </div>
   <p class="muted" style="margin-top:10px;">Реквизиты: {{ cfg.service_payee_name }} / {{ cfg.service_payee_phone }} / {{ cfg.service_payee_status }}</p>
   <p class="muted">При достижении цели всем уходит «Сбор закрыт.» Неоплатившим — напоминания за 3 дня / 1 день / 2 часа до мероприятия.</p>
+  {% if campaign.needs_snow_haul %}
+  <p><span class="badge ok">Нужен вывоз снега</span> — подбирайте водителей камаза среди исполнителей ниже.</p>
+  {% endif %}
   <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
     {% if current_work_stage == "collecting" and campaign.status != "closed" %}
     <form method="post">{% csrf_token %}
@@ -108,6 +111,111 @@
     </form>
     {% endif %}
   </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Исполнители</h3>
+  <p class="muted" style="margin-top:0;">
+    Назначьте тракториста / водителя камаза. После согласия жителям группы уйдёт статус с временем.
+    Исполнитель может предложить другое время в течение 20 минут.
+  </p>
+  {% if suggested_equipment_types %}
+  <p class="muted">Рекомендуемые типы:
+    {% for t in suggested_equipment_types %}
+      <span class="badge">{{ t }}</span>
+    {% endfor %}
+  </p>
+  {% endif %}
+  <table style="margin-bottom:14px;">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Исполнитель</th>
+        <th>Техника</th>
+        <th>Время</th>
+        <th>Статус</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for a in assignments %}
+      <tr>
+        <td class="mono">{{ a.sort_order|default:forloop.counter }}</td>
+        <td>
+          <a href="{% url 'panel:user_dashboard' a.contractor.user_id %}">{{ a.contractor.user }}</a>
+          <div class="muted">{{ a.contractor.phone|default:a.contractor.user.phone }}</div>
+        </td>
+        <td>{{ a.get_equipment_type_display }}
+          <div class="muted">{{ a.contractor.equipment_label }}</div>
+        </td>
+        <td class="mono">
+          {% if a.scheduled_at %}{{ a.scheduled_at|date:"d.m.Y H:i" }}{% else %}—{% endif %}
+          {% if a.status == "counter_offer" and a.proposed_at %}
+            <div class="badge">предложил {{ a.proposed_at|date:"d.m H:i" }}</div>
+            <div class="muted">до {{ a.counter_deadline|date:"H:i" }}</div>
+          {% endif %}
+        </td>
+        <td>
+          <span class="badge {% if a.status == 'accepted' %}ok{% elif a.status == 'declined' or a.status == 'rejected_time' or a.status == 'expired' %}bad{% endif %}">
+            {{ a.get_status_display }}
+          </span>
+        </td>
+        <td style="display:flex; gap:6px; flex-wrap:wrap;">
+          {% if a.status == "counter_offer" %}
+          <form method="post">{% csrf_token %}
+            <input type="hidden" name="action" value="approve_counter">
+            <input type="hidden" name="assignment_id" value="{{ a.id }}">
+            <button class="btn small" type="submit">Принять время</button>
+          </form>
+          <form method="post">{% csrf_token %}
+            <input type="hidden" name="action" value="reject_counter">
+            <input type="hidden" name="assignment_id" value="{{ a.id }}">
+            <button class="btn danger small" type="submit">Отклонить время</button>
+          </form>
+          {% endif %}
+          {% if a.status != "cancelled" %}
+          <form method="post">{% csrf_token %}
+            <input type="hidden" name="action" value="cancel_assignment">
+            <input type="hidden" name="assignment_id" value="{{ a.id }}">
+            <button class="btn secondary small" type="submit">Снять</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="muted">Исполнители ещё не назначены</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <form method="post" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="assign_contractor">
+    <div class="form-row" style="margin:0; min-width:260px; flex:1;">
+      <label>Назначить исполнителя</label>
+      <select name="contractor_id" required>
+        <option value="">— выберите —</option>
+        {% for c in assignable_contractors %}
+        <option value="{{ c.id }}">
+          {{ c.get_equipment_type_display }} · {{ c.user }}
+          {% if c.equipment_label %} ({{ c.equipment_label }}){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn small" type="submit">Отправить заказ</button>
+  </form>
+  {% if not assignable_contractors %}
+  <p class="muted" style="margin:10px 0 0;">
+    Нет проверенных исполнителей.
+    <a href="{% url 'panel:contractors' %}">Список исполнителей →</a>
+  </p>
+  {% endif %}
+  <form method="post" style="margin-top:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="notify_residents_contractors">
+    <button class="btn secondary small" type="submit">Повторить статус жителям группы</button>
+  </form>
 </div>
 
 <div class="grid two">

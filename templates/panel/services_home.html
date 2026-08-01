@@ -3,7 +3,10 @@
 {% block content %}
 <div class="topbar">
   <h1>Сервисные мероприятия</h1>
-  <a class="btn secondary small" href="{% url 'panel:services_ranking' %}">Рейтинг</a>
+  <div style="display:flex; gap:8px;">
+    <a class="btn secondary small" href="{% url 'panel:contractors' %}">Исполнители</a>
+    <a class="btn secondary small" href="{% url 'panel:services_ranking' %}">Рейтинг</a>
+  </div>
 </div>
 {% if tax_warning %}
 <div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ tax_warning }}</div>
@@ -107,6 +110,13 @@
       <label>Дата и время мероприятия</label>
       <input type="datetime-local" name="event_at" required>
       <div class="hint">Неоплатившим уйдёт напоминание за 3 дня, за 1 день и за 2 часа. При достижении цели — «Сбор закрыт.»</div>
+    </div>
+    <div class="form-row">
+      <label>
+        <input type="checkbox" name="needs_snow_haul" value="1">
+        Нужен вывоз снега (подобрать водителей камаза / грузовых)
+      </label>
+      <div class="hint">Для категории «Чистка снега»: на карточке сбора появятся исполнители с грузовой техникой.</div>
     </div>
     <div class="form-row">
       <label>Фото того, что нужно сделать (необязательно, до 2 шт.)</label>

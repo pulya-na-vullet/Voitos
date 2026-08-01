@@ -6,7 +6,9 @@ from database.models import (
     AppSettings,
     BotRuntimeStatus,
     BotUser,
+    CampaignAssignment,
     ChatMessage,
+    ContractorProfile,
     MemoryItem,
     NeighborhoodWish,
     PaymentReceipt,
@@ -88,6 +90,35 @@ class ServiceCampaignAdmin(admin.ModelAdmin):
 class ServiceInviteAdmin(admin.ModelAdmin):
     list_display = ("campaign", "user", "amount_due", "amount_paid", "status", "offered_at")
     list_filter = ("status",)
+
+
+@admin.register(ContractorProfile)
+class ContractorProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "equipment_type",
+        "equipment_label",
+        "plate_number",
+        "status",
+        "locality",
+        "submitted_at",
+    )
+    list_filter = ("equipment_type", "status")
+    search_fields = ("user__real_name", "user__display_name", "equipment_label", "plate_number")
+
+
+@admin.register(CampaignAssignment)
+class CampaignAssignmentAdmin(admin.ModelAdmin):
+    list_display = (
+        "campaign",
+        "contractor",
+        "equipment_type",
+        "status",
+        "scheduled_at",
+        "proposed_at",
+        "offered_at",
+    )
+    list_filter = ("status", "equipment_type")
 
 
 @admin.register(ServiceReceipt)
