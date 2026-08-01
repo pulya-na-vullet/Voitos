@@ -3,7 +3,9 @@
 {% block content %}
 <div class="topbar">
   <h1>Сервисные мероприятия</h1>
-  <div style="display:flex; gap:8px;">
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn secondary small" href="{% url 'panel:services_archive' %}">Архив мероприятий</a>
+    <a class="btn secondary small" href="{% url 'panel:services_wishes' %}">Пожелания</a>
     <a class="btn secondary small" href="{% url 'panel:contractors' %}">Исполнители</a>
     <a class="btn secondary small" href="{% url 'panel:services_ranking' %}">Рейтинг</a>
   </div>
@@ -112,9 +114,9 @@
       <div class="hint">Неоплатившим уйдёт напоминание за 3 дня, за 1 день и за 2 часа. При достижении цели — «Сбор закрыт.»</div>
     </div>
     <div class="form-row">
-      <label>
+      <label class="checkbox-inline">
         <input type="checkbox" name="needs_snow_haul" value="1">
-        Нужен вывоз снега (подобрать водителей камаза / грузовых)
+        <span>Нужен вывоз снега (подобрать водителей камаза / грузовых)</span>
       </label>
       <div class="hint">Для категории «Чистка снега»: на карточке сбора появятся исполнители с грузовой техникой.</div>
     </div>
@@ -135,90 +137,5 @@
     </div>
     <button class="btn" type="submit">Запустить и разослать</button>
   </form>
-</div>
-
-<div class="card" style="margin-bottom:16px;">
-  <h3 style="margin-top:0;">Пожелания жителей по темам</h3>
-  <p class="muted" style="margin-top:0;">
-    Соседи пишут в бот, что хотят улучшить у дома — сообщения собираются и группируются по темам
-    (дороги, площадка, собаки…). Так видно, за что «голосуют» люди.
-  </p>
-  {% if wish_topics_all %}
-  <table style="margin-bottom:14px;">
-    <thead><tr><th>Тема (все группы)</th><th>Голосов</th></tr></thead>
-    <tbody>
-    {% for s in wish_topics_all %}
-      <tr>
-        <td>{{ s.label }}</td>
-        <td class="mono"><strong>{{ s.count }}</strong></td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="muted">Пока пусто — жители ещё не писали пожелания в чат.</p>
-  {% endif %}
-  {% if wish_overview %}
-  <table>
-    <thead><tr><th>Группа</th><th>Всего</th><th>Лидер темы</th></tr></thead>
-    <tbody>
-    {% for row in wish_overview %}
-      <tr>
-        <td><a href="{% url 'panel:service_group_edit' row.group.id %}">{{ row.group.name }}</a></td>
-        <td class="mono">{{ row.total }}</td>
-        <td>{% if row.top %}{{ row.top.label }} — {{ row.top.count }}{% else %}—{% endif %}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-</div>
-
-<div class="card" style="margin-bottom:16px;">
-  <h3 style="margin-top:0;">Последние сборы</h3>
-  <table>
-    <thead><tr><th>Мероприятие</th><th>Группа</th><th>Собрано</th><th>Сбор</th><th>Этап</th><th></th></tr></thead>
-    <tbody>
-    {% for item in recent_campaigns %}
-      <tr>
-        <td>{{ item.get_category_display }} — {{ item.title }}</td>
-        <td>{% if item.group %}{{ item.group.name }}{% else %}{{ item.locality|default:"—" }}{% endif %}</td>
-        <td style="min-width:160px;">
-          <div class="mono" style="margin-bottom:4px;">{{ item.collected_amount }} / {{ item.total_amount }} ₽ · {{ item.progress_percent }}%</div>
-          <div style="height:8px; background:var(--bg-soft); border-radius:999px; overflow:hidden;">
-            <div style="height:100%; width:{{ item.progress_percent }}%; background:var(--accent-2);"></div>
-          </div>
-        </td>
-        <td><span class="badge {% if item.status == 'active' %}ok{% elif item.status == 'closed' %}bad{% endif %}">{{ item.get_status_display }}</span></td>
-        <td><span class="badge">{{ item.get_work_stage_display }}</span></td>
-        <td style="white-space:nowrap;">
-          <a class="btn small" href="{% url 'panel:service_campaign_detail' item.id %}">Открыть</a>
-          <form method="post" style="display:inline-flex; gap:6px; align-items:center; margin-top:6px; flex-wrap:wrap;"
-                onsubmit="return confirm('Удалить сбор «{{ item.title|escapejs }}»? Чеки и приглашения этого сбора будут удалены.');">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="delete_campaign">
-            <input type="hidden" name="campaign_id" value="{{ item.id }}">
-            <input type="text" name="reason" required placeholder="Причина удаления"
-                   style="width:140px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
-            <button class="btn danger small" type="submit">Удалить</button>
-          </form>
-        </td>
-      </tr>
-    {% empty %}
-      <tr><td colspan="6" class="muted">Сборов ещё не было</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-
-<div class="grid stats" style="grid-template-columns: repeat(2, minmax(0,1fr));">
-  {% for c in categories %}
-  <div class="card">
-    <div class="stat-label">{{ c.label }}</div>
-    <div class="stat-value">{{ c.count }}</div>
-    <p class="muted">Активных: {{ c.active }}{% if c.pending_receipts %} · чеков: {{ c.pending_receipts }}{% endif %}</p>
-    <a class="btn secondary small" href="{% url 'panel:services_category' c.value %}">Архив категории</a>
-  </div>
-  {% endfor %}
 </div>
 {% endblock %}

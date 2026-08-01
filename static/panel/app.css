@@ -245,6 +245,41 @@ tr.dupe-row:hover > td {
 }
 .hint { color: var(--muted); font-size: 0.82rem; margin-top: 6px; }
 
+.checkbox-inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text);
+  margin-bottom: 0;
+}
+.form-row label.checkbox-inline {
+  display: flex;
+  margin-bottom: 0;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.checkbox-inline input[type="checkbox"],
+.form-row .checkbox-inline input[type="checkbox"] {
+  margin: 3px 0 0;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
+.checkbox-inline span {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav a.nav-sub {
+  padding-left: 22px;
+  font-size: 0.92rem;
+  opacity: 0.92;
+}
+
 .flash {
   padding: 10px 12px;
   border-radius: 10px;

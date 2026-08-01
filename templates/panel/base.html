@@ -24,7 +24,9 @@
       <a href="{% url 'panel:admin_tasks_today' %}" class="{% if request.resolver_match.url_name == 'admin_tasks_today' or request.resolver_match.url_name == 'admin_task_done' or request.resolver_match.url_name == 'admin_address_scan' %}active{% endif %}">Задачи на сегодня</a>
       <a href="{% url 'panel:users' %}" class="{% if request.resolver_match.url_name == 'users' %}active{% endif %}">Пользователи</a>
       <a href="{% url 'panel:receipts' %}" class="{% if request.resolver_match.url_name == 'receipts' or request.resolver_match.url_name == 'user_receipts' or request.resolver_match.url_name == 'receipt_approve' or request.resolver_match.url_name == 'receipt_reject' or request.resolver_match.url_name == 'receipt_delete' %}active{% endif %}">Оплата подписок</a>
-      <a href="{% url 'panel:services' %}" class="{% if 'service' in request.resolver_match.url_name and request.resolver_match.url_name != 'services_ranking' %}active{% endif %}">Сервисные мероприятия</a>
+      <a href="{% url 'panel:services' %}" class="{% if request.resolver_match.url_name == 'services' or request.resolver_match.url_name == 'service_group_edit' or request.resolver_match.url_name == 'service_campaign_detail' or request.resolver_match.url_name == 'service_campaign_create' %}active{% endif %}">Сервисные мероприятия</a>
+      <a href="{% url 'panel:services_archive' %}" class="nav-sub {% if request.resolver_match.url_name == 'services_archive' or request.resolver_match.url_name == 'services_category' %}active{% endif %}">Архив мероприятий</a>
+      <a href="{% url 'panel:services_wishes' %}" class="nav-sub {% if request.resolver_match.url_name == 'services_wishes' %}active{% endif %}">Пожелания жителей</a>
       <a href="{% url 'panel:contractors' %}" class="{% if request.resolver_match.url_name == 'contractors' %}active{% endif %}">Исполнители</a>
       <a href="{% url 'panel:services_ranking' %}" class="{% if request.resolver_match.url_name == 'services_ranking' %}active{% endif %}">Рейтинг граждан</a>
       <a href="{% url 'panel:clients_map' %}" class="{% if request.resolver_match.url_name == 'clients_map' %}active{% endif %}">Карта клиентов</a>

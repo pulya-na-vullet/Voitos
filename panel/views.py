@@ -963,16 +963,73 @@ def services_home(request: HttpRequest) -> HttpResponse:
             except ValueError as exc:
                 messages.error(request, str(exc))
                 return redirect("panel:services")
-        elif action == "delete_campaign":
+        return redirect("panel:services")
+
+    groups = list(
+        ServiceGroup.objects.prefetch_related("members")
+        .annotate(wish_count=Count("wishes"))
+        .all()
+    )
+    from services.service import budgets_by_group_ids
+    from services.tax import sync_self_employed_tax_collected
+
+    budget_map = budgets_by_group_ids([g.id for g in groups])
+    for g in groups:
+        g.budget = budget_map.get(g.id) or Decimal("0")
+
+    tax_stats = sync_self_employed_tax_collected(cfg)
+    cfg.refresh_from_db()
+    return render(
+        request,
+        "panel/services_home.html",
+        {
+            "groups": groups,
+            "category_choices": ServiceCategory.choices,
+            "tax_warning": cfg.tax_limit_warning(),
+            "cfg": cfg,
+            "tax_stats": tax_stats,
+            "pending_service": ServiceReceipt.objects.filter(
+                status=ReceiptStatus.PENDING
+            ).count(),
+        },
+    )
+
+
+@login_required
+def services_wishes(request: HttpRequest) -> HttpResponse:
+    from services.wishes import aggregate_home_stats, topic_stats
+
+    groups = list(
+        ServiceGroup.objects.prefetch_related("members")
+        .annotate(wish_count=Count("wishes"))
+        .all()
+    )
+    return render(
+        request,
+        "panel/services_wishes.html",
+        {
+            "groups": groups,
+            "wish_overview": aggregate_home_stats(),
+            "wish_topics_all": topic_stats(),
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def services_archive(request: HttpRequest) -> HttpResponse:
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "delete_campaign":
             campaign = get_object_or_404(ServiceCampaign, pk=request.POST.get("campaign_id"))
             reason = (request.POST.get("reason") or "").strip()
             if not reason:
                 messages.error(request, "Укажите причину удаления сбора.")
-                return redirect("panel:services")
+                return redirect("panel:services_archive")
             label = delete_service_campaign(campaign, reason=reason)
             messages.success(request, f"Сбор удалён: {label}. Причина: {reason}")
-            return redirect("panel:services")
-        return redirect("panel:services")
+            return redirect("panel:services_archive")
+        return redirect("panel:services_archive")
 
     categories = []
     for value, label in ServiceCategory.choices:
@@ -988,42 +1045,17 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 ).count(),
             }
         )
-    groups = list(
-        ServiceGroup.objects.prefetch_related("members")
-        .annotate(wish_count=Count("wishes"))
-        .all()
-    )
-    from services.service import budgets_by_group_ids
-    from services.tax import sync_self_employed_tax_collected
-    from services.wishes import aggregate_home_stats, topic_stats
-
-    budget_map = budgets_by_group_ids([g.id for g in groups])
-    for g in groups:
-        g.budget = budget_map.get(g.id) or Decimal("0")
     recent = (
         ServiceCampaign.objects.select_related("group")
         .prefetch_related("invites")
         .all()[:20]
     )
-
-    tax_stats = sync_self_employed_tax_collected(cfg)
-    cfg.refresh_from_db()
     return render(
         request,
-        "panel/services_home.html",
+        "panel/services_archive.html",
         {
             "categories": categories,
-            "groups": groups,
             "recent_campaigns": recent,
-            "category_choices": ServiceCategory.choices,
-            "tax_warning": cfg.tax_limit_warning(),
-            "cfg": cfg,
-            "tax_stats": tax_stats,
-            "pending_service": ServiceReceipt.objects.filter(
-                status=ReceiptStatus.PENDING
-            ).count(),
-            "wish_overview": aggregate_home_stats(),
-            "wish_topics_all": topic_stats(),
         },
     )
 
@@ -1106,7 +1138,7 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
 def services_category(request: HttpRequest, category: str) -> HttpResponse:
     if category not in ServiceCategory.values:
         messages.error(request, "Неизвестная категория")
-        return redirect("panel:services")
+        return redirect("panel:services_archive")
     label = dict(ServiceCategory.choices)[category]
     campaigns = (
         ServiceCampaign.objects.filter(category=category)
