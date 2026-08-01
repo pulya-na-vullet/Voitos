@@ -377,7 +377,7 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
                 "receipts": PaymentReceipt.objects.filter(user=bot_user).count(),
             },
             "recent_messages": ChatMessage.objects.filter(user=bot_user)[:15],
-            "recent_logs": ActivityLog.objects.filter(user=bot_user)[:15],
+            "recent_logs": ActivityLog.objects.filter(user=bot_user)[:80],
             "receipts": PaymentReceipt.objects.filter(user=bot_user)[:10],
             "chart_labels_json": json.dumps(
                 [row["day"].strftime("%d.%m") for row in activity_qs], ensure_ascii=False

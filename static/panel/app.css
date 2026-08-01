@@ -117,6 +117,47 @@ a:hover { text-decoration: underline; }
 .grid.stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .grid.two { grid-template-columns: 1.2fr 1fr; }
 
+/* Карточка пользователя: активность и события — одинаковые фреймы */
+.grid.user-dash-panels {
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+}
+.user-dash-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* ~заголовок + 10 строк событий */
+  height: 420px;
+}
+.user-dash-panel h3 {
+  flex: 0 0 auto;
+  margin-bottom: 10px;
+}
+.user-dash-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.user-dash-panel-body canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+.user-dash-events {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(15, 20, 25, 0.35);
+}
+.user-dash-events table {
+  margin: 0;
+}
+.user-dash-events thead th {
+  position: sticky;
+  top: 0;
+  background: #1c2430;
+  z-index: 1;
+}
+
 .card {
   background: rgba(28, 36, 48, 0.86);
   border: 1px solid var(--line);
@@ -283,6 +324,7 @@ tr.dupe-row:hover > td {
 @media (max-width: 1100px) {
   .grid.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid.two { grid-template-columns: 1fr; }
+  .grid.user-dash-panels { grid-template-columns: 1fr; }
 }
 @media (max-width: 800px) {
   .layout { grid-template-columns: 1fr; }
