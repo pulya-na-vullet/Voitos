@@ -117,6 +117,11 @@ class VolunteerReplyStatus(models.TextChoices):
     NO = "no", "Не поможет"
 
 
+class ResidentHelperStatus(models.TextChoices):
+    ASSIGNED = "assigned", "Назначен"
+    CANCELLED = "cancelled", "Снят"
+
+
 class CampaignNoticeKind(models.TextChoices):
     CLOSED = "closed", "Сбор закрыт"
     SURPLUS = "surplus", "Остаток в бюджет"
@@ -776,6 +781,39 @@ class VolunteerHelpAsk(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} → {self.campaign_id}: {self.status}"
+
+
+class CampaignResidentHelper(models.Model):
+    """Житель группы, назначенный исполнителем на площадку / волонтёрскую задачу."""
+
+    campaign = models.ForeignKey(
+        ServiceCampaign, on_delete=models.CASCADE, related_name="resident_helpers"
+    )
+    user = models.ForeignKey(
+        BotUser, on_delete=models.CASCADE, related_name="resident_helper_roles"
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=ResidentHelperStatus.choices,
+        default=ResidentHelperStatus.ASSIGNED,
+    )
+    sort_order = models.PositiveIntegerField(default=0)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Исполнитель из группы"
+        verbose_name_plural = "Исполнители из группы"
+        ordering = ["sort_order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campaign", "user"],
+                name="uniq_campaign_resident_helper",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user} → {self.campaign_id} ({self.status})"
 
 
 class ContractorProfile(models.Model):

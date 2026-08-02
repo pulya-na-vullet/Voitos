@@ -1320,6 +1320,32 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             except ValueError as exc:
                 messages.error(request, str(exc))
             return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "assign_resident_helper":
+            from services.resident_helpers import assign_resident_helper
+
+            uid = request.POST.get("user_id")
+            helper_user = get_object_or_404(BotUser, pk=uid)
+            try:
+                assign_resident_helper(campaign, helper_user, send_fn=_notify_user)
+                messages.success(
+                    request,
+                    f"Житель «{helper_user}» назначен исполнителем.",
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "cancel_resident_helper":
+            from database.models import CampaignResidentHelper
+            from services.resident_helpers import cancel_resident_helper
+
+            helper = get_object_or_404(
+                CampaignResidentHelper,
+                pk=request.POST.get("helper_id"),
+                campaign=campaign,
+            )
+            cancel_resident_helper(helper, send_fn=_notify_user)
+            messages.success(request, "Исполнитель из группы снят.")
+            return redirect("panel:service_campaign_detail", pk=pk)
         if action == "approve_counter":
             from database.models import CampaignAssignment
             from services.contractors import approve_counter_offer
@@ -1365,11 +1391,15 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
     from django.db.models import Sum
 
-    from database.models import EquipmentType
+    from database.models import EquipmentType, ResidentHelperStatus, VolunteerReplyStatus
     from services.contractors import (
         accepted_assignments_needing_payout,
         suggested_equipment_for_campaign,
         verified_contractors,
+    )
+    from services.resident_helpers import (
+        group_members_for_helper_pick,
+        uses_resident_helpers,
     )
 
     paid = campaign.invites.aggregate(s=Sum("amount_paid"))["s"] or Decimal("0")
@@ -1385,12 +1415,19 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     assignable = []
     for eq in suggested_types:
         assignable.extend(list(verified_contractors(equipment_type=eq)))
-    # Also allow any verified if not in suggested
-    seen_ids = {c.id for c in assignable}
-    for c in verified_contractors():
-        if c.id not in seen_ids:
-            assignable.append(c)
+    # Also allow any verified if not in suggested (for snow/road).
+    if suggested_types:
+        seen_ids = {c.id for c in assignable}
+        for c in verified_contractors():
+            if c.id not in seen_ids:
+                assignable.append(c)
     payout_needed = accepted_assignments_needing_payout(campaign)
+    use_residents = uses_resident_helpers(campaign)
+    yes_helper_ids = set(
+        campaign.volunteer_asks.filter(status=VolunteerReplyStatus.YES).values_list(
+            "user_id", flat=True
+        )
+    )
     return render(
         request,
         "panel/service_campaign_detail.html",
@@ -1405,6 +1442,12 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             ).all(),
             "assignable_contractors": assignable,
             "suggested_equipment_types": suggested_labels,
+            "uses_resident_helpers": use_residents,
+            "resident_helpers": campaign.resident_helpers.filter(
+                status=ResidentHelperStatus.ASSIGNED
+            ).select_related("user"),
+            "assignable_residents": group_members_for_helper_pick(campaign),
+            "volunteer_yes_ids": yes_helper_ids,
             "contractor_payouts": campaign.contractor_payouts.select_related(
                 "contractor", "contractor__user", "assignment"
             ).all(),
@@ -1482,9 +1525,20 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             messages.success(request, f"Реквизиты «{profile}» сохранены.")
         return redirect("panel:contractors")
 
+    from django.db.models import DecimalField, Sum, Value
+    from django.db.models.functions import Coalesce
+
     eq_filter = (request.GET.get("type") or "").strip()
-    qs = ContractorProfile.objects.select_related("user").order_by(
-        "status", "equipment_type", "-submitted_at"
+    qs = (
+        ContractorProfile.objects.select_related("user")
+        .annotate(
+            total_earned=Coalesce(
+                Sum("payouts__amount"),
+                Value(Decimal("0")),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            )
+        )
+        .order_by("status", "equipment_type", "-submitted_at")
     )
     if eq_filter in EquipmentType.values:
         qs = qs.filter(equipment_type=eq_filter)

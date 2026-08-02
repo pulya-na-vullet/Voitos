@@ -8,6 +8,7 @@
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
   Трактористы и водители камаза, зарегистрированные в MAX-боте («регистрация техники»).
   Проверенных можно назначать на чистку снега и ремонт дороги.
+  Колонка «Заработано» — сумма выплат по закрытым заказам с чеками перевода.
 </p>
 
 <div class="card" style="margin-bottom:16px;">
@@ -35,6 +36,7 @@
         <th>Перевод</th>
         <th>Банк</th>
         <th>НП</th>
+        <th>Заработано</th>
         <th>Статус</th>
         <th></th>
       </tr>
@@ -51,6 +53,7 @@
         <td class="mono">{{ c.payout_phone|default:c.phone|default:"—" }}</td>
         <td>{{ c.bank_name|default:"—" }}</td>
         <td>{{ c.locality|default:"—" }}</td>
+        <td class="mono"><strong>{{ c.total_earned|default:0 }} ₽</strong></td>
         <td>
           <span class="badge {% if c.status == status_verified %}ok{% elif c.status == 'rejected' or c.status == 'disabled' %}bad{% endif %}">
             {{ c.get_status_display }}
@@ -91,7 +94,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="9" class="muted">Пока никто не зарегистрировался как исполнитель</td></tr>
+      <tr><td colspan="10" class="muted">Пока никто не зарегистрировался как исполнитель</td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -60,7 +60,8 @@ def suggested_equipment_for_campaign(campaign: ServiceCampaign) -> list[str]:
         return types
     if campaign.category == ServiceCategory.ROAD:
         return [EquipmentType.TRACTOR, EquipmentType.TRUCK]
-    return [EquipmentType.TRACTOR, EquipmentType.TRUCK]
+    # Площадка / освещение — исполнители из жителей группы, не техника.
+    return []
 
 
 def _fmt_dt(dt) -> str:

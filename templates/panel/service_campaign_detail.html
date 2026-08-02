@@ -199,6 +199,68 @@
 
 <div class="card" style="margin-bottom:16px;">
   <h3 style="margin-top:0;">Исполнители</h3>
+
+  {% if uses_resident_helpers %}
+  <p class="muted" style="margin-top:0;">
+    Для детской площадки исполнители — жители группы этого сбора. Выберите из списка участников.
+  </p>
+  <table style="margin-bottom:14px;">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Житель</th>
+        <th>Телефон</th>
+        <th>Статус</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for h in resident_helpers %}
+      <tr>
+        <td class="mono">{{ h.sort_order|default:forloop.counter }}</td>
+        <td><a href="{% url 'panel:user_dashboard' h.user_id %}">{{ h.user }}</a></td>
+        <td class="mono">{{ h.user.phone|default:"—" }}</td>
+        <td><span class="badge ok">{{ h.get_status_display }}</span></td>
+        <td>
+          <form method="post">{% csrf_token %}
+            <input type="hidden" name="action" value="cancel_resident_helper">
+            <input type="hidden" name="helper_id" value="{{ h.id }}">
+            <button class="btn secondary small" type="submit">Снять</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="muted">Исполнители из группы ещё не назначены</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="assign_resident_helper">
+    <div class="form-row" style="margin:0; min-width:280px; flex:1;">
+      <label>Назначить жителя группы</label>
+      <select name="user_id" required>
+        <option value="">— выберите из группы —</option>
+        {% for u in assignable_residents %}
+        <option value="{{ u.id }}">
+          {{ u.real_name|default:u }}{% if u.phone %} · {{ u.phone }}{% endif %}{% if u.id in volunteer_yes_ids %} · согласился помочь{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn small" type="submit">Назначить</button>
+  </form>
+  {% if not assignable_residents %}
+  <p class="muted" style="margin:10px 0 0;">
+    {% if not campaign.group_id %}
+      У сбора нет группы — добавьте группу или создайте сбор на группу.
+    {% else %}
+      Все участники группы уже назначены или группа пуста.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {% else %}
   <p class="muted" style="margin-top:0;">
     Назначьте тракториста / водителя камаза. После согласия жителям группы уйдёт статус с временем.
     Исполнитель может предложить другое время в течение 20 минут.
@@ -300,6 +362,7 @@
     <input type="hidden" name="action" value="notify_residents_contractors">
     <button class="btn secondary small" type="submit">Повторить статус жителям группы</button>
   </form>
+  {% endif %}
 </div>
 
 <div class="grid two">
