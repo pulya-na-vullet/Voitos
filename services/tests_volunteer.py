@@ -139,3 +139,33 @@ class GroupsPageTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn('value="create_group"', body)
         self.assertIn("Запустить сбор", body)
+        self.assertIn('id="snow-haul-row" hidden', body)
+        self.assertIn("data-members=", body)
+
+    def test_launch_splits_total_by_group_size(self):
+        user1 = BotUser.objects.create(max_user_id="split-1", real_name="А")
+        user2 = BotUser.objects.create(max_user_id="split-2", real_name="Б")
+        user3 = BotUser.objects.create(max_user_id="split-3", real_name="В")
+        group = ServiceGroup.objects.create(name="Трое")
+        group.members.add(user1, user2, user3)
+        event = (timezone.now() + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+        resp = self.client.post(
+            "/panel/services/",
+            {
+                "action": "launch",
+                "category": ServiceCategory.LIGHTING,
+                "group_id": group.id,
+                "title": "Фонарь",
+                "description": "",
+                "event_at": event,
+                "total_amount": "1000",
+                "amount_per_user": "1",
+                "needs_snow_haul": "1",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        from database.models import ServiceCampaign
+
+        campaign = ServiceCampaign.objects.get(group=group)
+        self.assertEqual(campaign.amount_per_user, Decimal("334"))  # ceil(1000/3)
+        self.assertFalse(campaign.needs_snow_haul)

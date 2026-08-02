@@ -39,13 +39,13 @@
     Для «Детская площадка» и «Ремонт дороги» у каждого будет обязательный вопрос: поможет ли он.
     <a href="{% url 'panel:services_groups' %}">Управление группами</a>
   </p>
-  <form method="post" enctype="multipart/form-data">
+  <form method="post" enctype="multipart/form-data" id="launch-campaign-form">
     {% csrf_token %}
     <input type="hidden" name="action" value="launch">
     <div class="grid two">
       <div class="form-row">
         <label>Категория</label>
-        <select name="category" required>
+        <select name="category" id="launch-category" required>
           {% for value, label in category_choices %}
           <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
@@ -53,10 +53,10 @@
       </div>
       <div class="form-row">
         <label>Группа</label>
-        <select name="group_id" required>
-          <option value="">— выберите —</option>
+        <select name="group_id" id="launch-group" required>
+          <option value="" data-members="0">— выберите —</option>
           {% for g in groups %}
-          <option value="{{ g.id }}">{{ g.name }} ({{ g.member_count }} чел.)</option>
+          <option value="{{ g.id }}" data-members="{{ g.member_count }}">{{ g.name }} ({{ g.member_count }} чел.)</option>
           {% endfor %}
         </select>
       </div>
@@ -75,12 +75,12 @@
       <input type="datetime-local" name="event_at" required>
       <div class="hint">Неоплатившим уйдёт напоминание за 3 дня, за 1 день и за 2 часа. При достижении цели — «Сбор закрыт.»</div>
     </div>
-    <div class="form-row">
+    <div class="form-row" id="snow-haul-row" hidden>
       <label class="checkbox-inline">
-        <input type="checkbox" name="needs_snow_haul" value="1">
+        <input type="checkbox" name="needs_snow_haul" id="needs-snow-haul" value="1">
         <span>Нужен вывоз снега (подобрать водителей камаза / грузовых)</span>
       </label>
-      <div class="hint">Для категории «Чистка снега»: на карточке сбора появятся исполнители с грузовой техникой.</div>
+      <div class="hint">Только для «Чистка снега»: на карточке сбора появятся исполнители с грузовой техникой.</div>
     </div>
     <div class="form-row">
       <label>Фото того, что нужно сделать (необязательно, до 2 шт.)</label>
@@ -90,14 +90,50 @@
     <div class="grid two">
       <div class="form-row">
         <label>Общая сумма, ₽</label>
-        <input type="number" name="total_amount" min="1" step="1" required>
+        <input type="number" name="total_amount" id="launch-total" min="1" step="1" required>
       </div>
       <div class="form-row">
         <label>С каждого участника, ₽</label>
-        <input type="number" name="amount_per_user" min="1" step="1" required>
+        <input type="number" name="amount_per_user" id="launch-per-user" min="1" step="1" required readonly>
+        <div class="hint">Считается автоматически: общая сумма ÷ число людей в группе</div>
       </div>
     </div>
     <button class="btn" type="submit">Запустить и разослать</button>
   </form>
 </div>
+<script>
+(function () {
+  var category = document.getElementById("launch-category");
+  var group = document.getElementById("launch-group");
+  var total = document.getElementById("launch-total");
+  var perUser = document.getElementById("launch-per-user");
+  var snowRow = document.getElementById("snow-haul-row");
+  var snowCb = document.getElementById("needs-snow-haul");
+
+  function syncSnowHaul() {
+    var isSnow = category && category.value === "snow";
+    if (!snowRow) return;
+    snowRow.hidden = !isSnow;
+    if (!isSnow && snowCb) snowCb.checked = false;
+  }
+
+  function syncPerUser() {
+    if (!total || !perUser || !group) return;
+    var opt = group.options[group.selectedIndex];
+    var members = parseInt(opt && opt.getAttribute("data-members"), 10) || 0;
+    var sum = parseFloat(total.value);
+    if (!members || !sum || sum <= 0) return;
+    perUser.value = String(Math.ceil(sum / members));
+  }
+
+  if (category) category.addEventListener("change", syncSnowHaul);
+  if (group) group.addEventListener("change", syncPerUser);
+  if (total) {
+    total.addEventListener("input", syncPerUser);
+    total.addEventListener("change", syncPerUser);
+  }
+  syncSnowHaul();
+  syncPerUser();
+})();
+</script>
 {% endblock %}

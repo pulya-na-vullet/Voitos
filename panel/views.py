@@ -899,6 +899,14 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 per_user = Decimal(request.POST.get("amount_per_user") or "0")
             except (InvalidOperation, ValueError):
                 total, per_user = Decimal("0"), Decimal("0")
+            member_count = group.members.count()
+            if total > 0 and member_count > 0:
+                # Общая сумма ÷ число участников группы (вверх до целых ₽).
+                from decimal import ROUND_CEILING
+
+                per_user = (total / Decimal(member_count)).to_integral_value(
+                    rounding=ROUND_CEILING
+                )
             event_raw = (request.POST.get("event_at") or "").strip()
             event_at = None
             if event_raw:
@@ -934,7 +942,10 @@ def services_home(request: HttpRequest) -> HttpResponse:
                     total_amount=total,
                     amount_per_user=per_user,
                     event_at=event_at,
-                    needs_snow_haul=bool(request.POST.get("needs_snow_haul")),
+                    needs_snow_haul=(
+                        category == ServiceCategory.SNOW
+                        and bool(request.POST.get("needs_snow_haul"))
+                    ),
                     photo_uploads=photo_uploads,
                     send_fn=_notify_user,
                     send_media_fn=send_media,
