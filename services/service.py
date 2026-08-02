@@ -620,16 +620,22 @@ def process_unpaid_reminders(send_fn=None, *, now=None) -> int:
     """
     For active campaigns with event_at: remind unpaid users
     3 days, 1 day and 2 hours before the event.
+
+    Windows that already passed before the invite was created are skipped
+    (иначе при старте сбора «через 30 минут» уходят сразу 3 одинаковых
+    напоминания: за 3 дня, за 1 день и за 2 часа).
     """
     from datetime import timedelta
 
     if not send_fn:
         return 0
     now = now or timezone.now()
+    # От более срочного к более раннему — за один проход не больше одного
+    # напоминания на (сбор, пользователь).
     windows = (
-        (CampaignNoticeKind.REMIND_3D, timedelta(days=3)),
-        (CampaignNoticeKind.REMIND_1D, timedelta(days=1)),
         (CampaignNoticeKind.REMIND_2H, timedelta(hours=2)),
+        (CampaignNoticeKind.REMIND_1D, timedelta(days=1)),
+        (CampaignNoticeKind.REMIND_3D, timedelta(days=3)),
     )
     campaigns = ServiceCampaign.objects.filter(
         status=CampaignStatus.ACTIVE,
@@ -639,15 +645,20 @@ def process_unpaid_reminders(send_fn=None, *, now=None) -> int:
     sent_total = 0
     text_cache: dict[int, str] = {}
     for campaign in campaigns:
-        for kind, delta in windows:
-            trigger_at = campaign.event_at - delta
-            if now < trigger_at:
-                continue
-            unpaid = (
-                campaign.invites.filter(status=InviteStatus.OFFERED)
-                .select_related("user")
-            )
-            for inv in unpaid:
+        unpaid = (
+            campaign.invites.filter(status=InviteStatus.OFFERED)
+            .select_related("user")
+        )
+        for inv in unpaid:
+            offered_at = inv.offered_at or campaign.created_at or now
+            sent_for_user = False
+            for kind, delta in windows:
+                trigger_at = campaign.event_at - delta
+                if now < trigger_at:
+                    continue
+                # Окно уже наступило до приглашения — не догоняем задним числом.
+                if offered_at and trigger_at < offered_at:
+                    continue
                 if _notice_already_sent(campaign, inv.user, kind):
                     continue
                 if campaign.id not in text_cache:
@@ -656,6 +667,7 @@ def process_unpaid_reminders(send_fn=None, *, now=None) -> int:
                     send_fn(inv.user, text_cache[campaign.id])
                     _record_notice(campaign, inv.user, kind)
                     sent_total += 1
+                    sent_for_user = True
                     ActivityLog.objects.create(
                         user=inv.user,
                         kind=ActivityKind.SERVICE_NOTICE,
@@ -669,6 +681,8 @@ def process_unpaid_reminders(send_fn=None, *, now=None) -> int:
                         kind,
                         inv.user.max_user_id,
                     )
+                if sent_for_user:
+                    break
     return sent_total
 
 

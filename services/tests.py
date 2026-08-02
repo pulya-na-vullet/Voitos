@@ -384,24 +384,55 @@ class ServiceCampaignTests(TestCase):
         self.assertNotIn("Начат сбор", inbox[0][1])
 
     def test_unpaid_reminders_before_event(self):
-        campaign, _ = self._launch(event_at=timezone.now() + timedelta(hours=3))
+        event_at = timezone.now() + timedelta(days=4)
+        campaign, _ = self._launch(event_at=event_at)
         inbox = []
 
         def capture(user, text):
             inbox.append((user.id, text))
 
-        # 2h window already open (event in 3h); 1d and 3d also open
-        n = process_unpaid_reminders(send_fn=capture, now=timezone.now())
-        self.assertGreaterEqual(n, 1)
+        # Сразу после запуска (за 4 дня) окна ещё не открылись
+        n0 = process_unpaid_reminders(send_fn=capture, now=timezone.now())
+        self.assertEqual(n0, 0)
+
+        # Наступило окно «за 3 дня»
+        n = process_unpaid_reminders(
+            send_fn=capture, now=event_at - timedelta(days=3, minutes=-1)
+        )
+        self.assertEqual(n, 1)
         self.assertTrue(any("не оплатили сбор" in t.lower() for _, t in inbox))
-        # Idempotent
-        n2 = process_unpaid_reminders(send_fn=capture, now=timezone.now())
+        # Idempotent for same window
+        n2 = process_unpaid_reminders(
+            send_fn=capture, now=event_at - timedelta(days=3, minutes=-1)
+        )
         self.assertEqual(n2, 0)
-        # Paid users are skipped for remaining windows if we reset somehow —
-        # after first run all 3 kinds sent; mark paid and ensure no more
+
+        # Позже — одно напоминание за 1 день (не три сразу)
+        inbox.clear()
+        n1d = process_unpaid_reminders(
+            send_fn=capture, now=event_at - timedelta(hours=23)
+        )
+        self.assertEqual(n1d, 1)
+
         campaign.invites.update(status=InviteStatus.PAID)
         n3 = process_unpaid_reminders(send_fn=capture, now=timezone.now())
         self.assertEqual(n3, 0)
+
+    def test_late_launch_does_not_spam_three_reminders(self):
+        """Сбор стартовал за ~30 мин до события — не слать 3d+1d+2h разом."""
+        event_at = timezone.now() + timedelta(minutes=30)
+        campaign, _ = self._launch(event_at=event_at)
+        inbox = []
+
+        def capture(user, text):
+            inbox.append((user.id, text))
+
+        n = process_unpaid_reminders(send_fn=capture, now=timezone.now())
+        self.assertEqual(n, 0)
+        self.assertEqual(len(inbox), 0)
+        self.assertEqual(
+            ServiceCampaignNotice.objects.filter(campaign=campaign).count(), 0
+        )
 
     def test_rank_labels(self):
         self.assertEqual(rank_label(85), "Образцовый гражданин")
