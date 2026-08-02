@@ -50,9 +50,20 @@
     </div>
     <button class="btn secondary small" type="submit">Найти</button>
   </form>
+  <form method="post" id="users-bulk-form">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="delete_users_bulk">
+    <div style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <button class="btn danger small" type="submit"
+              onclick="return confirm('Удалить выбранных пользователей безвозвратно? Чеки, сборы и история тоже удалятся.');">
+        Удалить выбранных
+      </button>
+      <span class="muted">После тестов можно очистить список и начать с чистого листа.</span>
+    </div>
   <table>
     <thead>
       <tr>
+        <th style="width:36px;"><input type="checkbox" id="users-check-all" title="Выбрать всех"></th>
         <th>Имя</th>
         <th>Нас. пункт</th>
         <th>Соц. рейтинг</th>
@@ -68,6 +79,7 @@
     {% for row in rows %}
       {% with u=row.user %}
       <tr>
+        <td><input type="checkbox" name="user_ids" value="{{ u.id }}" class="user-check"></td>
         <td>{{ u.real_name|default:u.display_name|default:u.username|default:"—" }}
           <div class="muted mono">{{ u.max_user_id }}</div>
         </td>
@@ -94,13 +106,36 @@
           {% endwith %}
         </td>
         <td class="mono">{{ u.last_seen_at|date:"d.m.Y H:i" }}</td>
-        <td><a class="btn small" href="{% url 'panel:user_dashboard' u.id %}">Открыть</a></td>
+        <td style="white-space:nowrap; display:flex; gap:6px; flex-wrap:wrap;">
+          <a class="btn small" href="{% url 'panel:user_dashboard' u.id %}">Открыть</a>
+          <button class="btn danger small" type="submit" form="del-user-{{ u.id }}"
+                  onclick="return confirm('Удалить пользователя «{{ u|escapejs }}» безвозвратно?');">Удалить</button>
+        </td>
       </tr>
       {% endwith %}
     {% empty %}
-      <tr><td colspan="9" class="muted">Никого не найдено</td></tr>
+      <tr><td colspan="10" class="muted">Никого не найдено</td></tr>
     {% endfor %}
     </tbody>
   </table>
+  </form>
+  {% for row in rows %}
+  <form method="post" id="del-user-{{ row.user.id }}" style="display:none;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="delete_user">
+    <input type="hidden" name="user_id" value="{{ row.user.id }}">
+  </form>
+  {% endfor %}
 </div>
+<script>
+(function () {
+  var all = document.getElementById("users-check-all");
+  if (!all) return;
+  all.addEventListener("change", function () {
+    document.querySelectorAll(".user-check").forEach(function (cb) {
+      cb.checked = all.checked;
+    });
+  });
+})();
+</script>
 {% endblock %}

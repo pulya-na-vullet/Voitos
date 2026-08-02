@@ -3,9 +3,14 @@
 {% block content %}
 <div class="topbar">
   <h1>{{ bot_user.display_name|default:bot_user.max_user_id }}</h1>
-  <div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
     <span class="badge {% if access_state == 'active' %}ok{% elif access_state == 'blocked' %}bad{% endif %}">{{ access_state }}</span>
     <a class="btn secondary small" href="{% url 'panel:users' %}">← Все пользователи</a>
+    <form method="post" onsubmit="return confirm('Удалить пользователя безвозвратно вместе с чеками и историей?');">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete_user">
+      <button class="btn danger small" type="submit">Удалить пользователя</button>
+    </form>
   </div>
 </div>
 

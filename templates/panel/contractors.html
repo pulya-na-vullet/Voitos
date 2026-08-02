@@ -78,6 +78,13 @@
             <button class="btn secondary small" type="submit">Отключить</button>
           </form>
           {% endif %}
+          <form method="post" style="display:inline;"
+                onsubmit="return confirm('Удалить исполнителя «{{ c|escapejs }}»? Назначения и выплаты этого исполнителя тоже удалятся. Пользователь бота останется.');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="contractor_id" value="{{ c.id }}">
+            <button class="btn danger small" type="submit">Удалить</button>
+          </form>
           <details style="margin-top:6px;">
             <summary class="muted" style="cursor:pointer;">Реквизиты</summary>
             <form method="post" style="margin-top:8px; display:flex; flex-direction:column; gap:6px; min-width:180px;">

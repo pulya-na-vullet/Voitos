@@ -203,8 +203,35 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     return redirect("panel:login")
 
 
+def _delete_bot_user(user: BotUser) -> str:
+    """Полное удаление пользователя бота и связанных данных (CASCADE)."""
+    label = str(user)
+    # Снять семейные связи, где он плательщик.
+    BotUser.objects.filter(family_payer=user).update(family_payer=None)
+    user.delete()
+    return label
+
+
 @login_required
+@require_http_methods(["GET", "POST"])
 def users_list(request: HttpRequest) -> HttpResponse:
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "delete_user":
+            user = get_object_or_404(BotUser, pk=request.POST.get("user_id"))
+            label = _delete_bot_user(user)
+            messages.success(request, f"Пользователь «{label}» удалён.")
+            return redirect("panel:users")
+        if action == "delete_users_bulk":
+            ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
+            deleted = 0
+            for user in BotUser.objects.filter(id__in=ids):
+                _delete_bot_user(user)
+                deleted += 1
+            messages.success(request, f"Удалено пользователей: {deleted}.")
+            return redirect("panel:users")
+        return redirect("panel:users")
+
     q = request.GET.get("q", "").strip()
     locality = request.GET.get("locality", "").strip()
     sort = request.GET.get("sort", "-rating").strip() or "-rating"
@@ -366,6 +393,7 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
 
 
 @login_required
+@require_http_methods(["GET", "POST"])
 def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
     from bot.registration import missing_profile_fields
     from services.address_overlap import heuristic_candidates
@@ -374,6 +402,11 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
         BotUser.objects.select_related("family_payer"),
         pk=user_id,
     )
+    if request.method == "POST" and request.POST.get("action") == "delete_user":
+        label = _delete_bot_user(bot_user)
+        messages.success(request, f"Пользователь «{label}» удалён.")
+        return redirect("panel:users")
+
     since = timezone.now() - timedelta(days=14)
     activity_qs = (
         ActivityLog.objects.filter(user=bot_user, created_at__gte=since)
@@ -1004,6 +1037,12 @@ def services_groups(request: HttpRequest) -> HttpResponse:
                     request, f"Группа «{group.name}» создана. Добавьте участников."
                 )
                 return redirect("panel:service_group_edit", pk=group.id)
+        if action == "delete_group":
+            group = get_object_or_404(ServiceGroup, pk=request.POST.get("group_id"))
+            name = group.name
+            group.delete()
+            messages.success(request, f"Группа «{name}» удалена.")
+            return redirect("panel:services_groups")
         return redirect("panel:services_groups")
 
     groups = list(
@@ -1480,6 +1519,17 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         action = request.POST.get("action")
+        if action == "delete":
+            profile = get_object_or_404(
+                ContractorProfile, pk=request.POST.get("contractor_id")
+            )
+            label = str(profile)
+            close_task_for_source(
+                AdminTaskKind.CONTRACTOR_REVIEW, "ContractorProfile", profile.id
+            )
+            profile.delete()
+            messages.success(request, f"Исполнитель «{label}» удалён.")
+            return redirect("panel:contractors")
         profile = get_object_or_404(ContractorProfile, pk=request.POST.get("contractor_id"))
         if action == "verify":
             profile.status = ContractorStatus.VERIFIED
