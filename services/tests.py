@@ -417,7 +417,8 @@ class ServiceCampaignTests(TestCase):
         self.assertIn(idle.id, ids)
         idle_row = next(r for r in rows if r.user.id == idle.id)
         self.assertEqual(idle_row.offered, 0)
-        self.assertEqual(idle_row.label, "Неактивный гражданин")
+        self.assertEqual(idle_row.score, 100)
+        self.assertEqual(idle_row.label, "Образцовый гражданин")
         by_loc = ranking_list(locality="Куюки")
         self.assertTrue(all("куюки" in (r.user.locality or "").lower() for r in by_loc))
 
@@ -436,7 +437,9 @@ class ServiceCampaignTests(TestCase):
         stats = citizen_stats(self.user)
         self.assertEqual(stats.offered, 1)
         self.assertEqual(stats.paid, 1)
+        self.assertEqual(stats.score, 100)
         self.assertEqual(stats.label, "Образцовый гражданин")
+        self.assertEqual(stats.help_asked, 1)
 
 
 class ServiceIntentTests(TestCase):

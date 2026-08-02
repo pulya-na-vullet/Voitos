@@ -890,18 +890,7 @@ def services_home(request: HttpRequest) -> HttpResponse:
     cfg = AppSettings.load()
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "create_group":
-            name = request.POST.get("name", "").strip()
-            if not name:
-                messages.error(request, "Укажите название группы")
-            else:
-                group = ServiceGroup.objects.create(
-                    name=name,
-                    description=request.POST.get("description", "").strip(),
-                )
-                messages.success(request, f"Группа «{group.name}» создана. Добавьте участников.")
-                return redirect("panel:service_group_edit", pk=group.id)
-        elif action == "launch":
+        if action == "launch":
             group_id = request.POST.get("group_id")
             group = get_object_or_404(ServiceGroup, pk=group_id)
             category = request.POST.get("category", "").strip()
@@ -965,17 +954,8 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 return redirect("panel:services")
         return redirect("panel:services")
 
-    groups = list(
-        ServiceGroup.objects.prefetch_related("members")
-        .annotate(wish_count=Count("wishes"))
-        .all()
-    )
-    from services.service import budgets_by_group_ids
+    groups = list(ServiceGroup.objects.prefetch_related("members").all())
     from services.tax import sync_self_employed_tax_collected
-
-    budget_map = budgets_by_group_ids([g.id for g in groups])
-    for g in groups:
-        g.budget = budget_map.get(g.id) or Decimal("0")
 
     tax_stats = sync_self_employed_tax_collected(cfg)
     cfg.refresh_from_db()
@@ -992,6 +972,43 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 status=ReceiptStatus.PENDING
             ).count(),
         },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def services_groups(request: HttpRequest) -> HttpResponse:
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "create_group":
+            name = request.POST.get("name", "").strip()
+            if not name:
+                messages.error(request, "Укажите название группы")
+            else:
+                group = ServiceGroup.objects.create(
+                    name=name,
+                    description=request.POST.get("description", "").strip(),
+                )
+                messages.success(
+                    request, f"Группа «{group.name}» создана. Добавьте участников."
+                )
+                return redirect("panel:service_group_edit", pk=group.id)
+        return redirect("panel:services_groups")
+
+    groups = list(
+        ServiceGroup.objects.prefetch_related("members")
+        .annotate(wish_count=Count("wishes"))
+        .all()
+    )
+    from services.service import budgets_by_group_ids
+
+    budget_map = budgets_by_group_ids([g.id for g in groups])
+    for g in groups:
+        g.budget = budget_map.get(g.id) or Decimal("0")
+    return render(
+        request,
+        "panel/services_groups.html",
+        {"groups": groups},
     )
 
 
@@ -1070,7 +1087,7 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             name = group.name
             group.delete()
             messages.success(request, f"Группа «{name}» удалена")
-            return redirect("panel:services")
+            return redirect("panel:services_groups")
         group.name = request.POST.get("name", group.name).strip() or group.name
         group.description = request.POST.get("description", "").strip()
         group.save()

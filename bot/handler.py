@@ -270,6 +270,17 @@ class UpdateHandler:
         return True
 
     def _handle_receipt(self, user, image_url: str, filename: str) -> None:
+        pending, _ = PendingAction.objects.get_or_create(user=user)
+        if pending.pending_kind == "volunteer_help_reply":
+            self._reply(
+                user,
+                "Сначала ответьте, поможете ли вы на мероприятии:\n"
+                "1 / да — помогу\n"
+                "2 / нет — не смогу\n\n"
+                "После ответа можно прислать чек снова.",
+            )
+            return
+
         try:
             raw = self.client.download(image_url)
         except Exception:
@@ -281,7 +292,6 @@ class UpdateHandler:
         # with subscription as option #1 (even for a single invite).
         invites = open_invites_for_user(user)
         if invites:
-            pending, _ = PendingAction.objects.get_or_create(user=user)
             pending.pending_kind = "service_invite_pick"
             pending.pending_payload = {
                 "image_b64": base64.b64encode(raw).decode("ascii"),

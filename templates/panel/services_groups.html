@@ -1,0 +1,54 @@
+{% extends "panel/base.html" %}
+{% block title %}Группы жителей — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Группы жителей</h1>
+  <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
+</div>
+<p class="muted" style="margin-top:-6px; margin-bottom:16px;">
+  Создавайте группы и управляйте составом. Запуск сбора — на странице сервисных мероприятий.
+</p>
+
+<div class="grid two" style="margin-bottom:16px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Список групп</h3>
+    <p class="muted">Бюджет — остатки сверх цели после закрытых сборов.</p>
+    <table>
+      <thead><tr><th>Группа</th><th>Участников</th><th>Бюджет</th><th>Пожелания</th><th></th></tr></thead>
+      <tbody>
+      {% for g in groups %}
+        <tr>
+          <td>
+            <strong>{{ g.name }}</strong>
+            {% if g.description %}<div class="muted">{{ g.description|truncatechars:60 }}</div>{% endif %}
+          </td>
+          <td class="mono">{{ g.member_count }}</td>
+          <td class="mono">{% if g.budget %}<strong>{{ g.budget }} ₽</strong>{% else %}0 ₽{% endif %}</td>
+          <td class="mono">{% if g.wish_count %}<span class="badge">{{ g.wish_count }}</span>{% else %}0{% endif %}</td>
+          <td><a class="btn small" href="{% url 'panel:service_group_edit' g.id %}">Состав</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted">Групп пока нет — создайте первую справа</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Новая группа</h3>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="create_group">
+      <div class="form-row">
+        <label>Название</label>
+        <input type="text" name="name" required placeholder="ул. Баумана, дом 1–5">
+      </div>
+      <div class="form-row">
+        <label>Описание</label>
+        <input type="text" name="description" placeholder="необязательно">
+      </div>
+      <button class="btn" type="submit">Создать группу</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

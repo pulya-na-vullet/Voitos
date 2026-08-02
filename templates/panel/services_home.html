@@ -4,6 +4,7 @@
 <div class="topbar">
   <h1>Сервисные мероприятия</h1>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn secondary small" href="{% url 'panel:services_groups' %}">Группы жителей</a>
     <a class="btn secondary small" href="{% url 'panel:services_archive' %}">Архив мероприятий</a>
     <a class="btn secondary small" href="{% url 'panel:services_wishes' %}">Пожелания</a>
     <a class="btn secondary small" href="{% url 'panel:contractors' %}">Исполнители</a>
@@ -31,52 +32,13 @@
   </p>
 </div>
 
-<div class="grid two" style="margin-bottom:16px;">
-  <div class="card">
-    <h3 style="margin-top:0;">Группы жителей</h3>
-    <p class="muted">Объедините людей вручную — потом запустите сбор сразу на всю группу. Бюджет — остатки сверх цели после закрытых сборов.</p>
-    <table>
-      <thead><tr><th>Группа</th><th>Участников</th><th>Бюджет</th><th>Пожелания</th><th></th></tr></thead>
-      <tbody>
-      {% for g in groups %}
-        <tr>
-          <td>
-            <strong>{{ g.name }}</strong>
-            {% if g.description %}<div class="muted">{{ g.description|truncatechars:60 }}</div>{% endif %}
-          </td>
-          <td class="mono">{{ g.member_count }}</td>
-          <td class="mono">{% if g.budget %}<strong>{{ g.budget }} ₽</strong>{% else %}0 ₽{% endif %}</td>
-          <td class="mono">{% if g.wish_count %}<span class="badge">{{ g.wish_count }}</span>{% else %}0{% endif %}</td>
-          <td><a class="btn small" href="{% url 'panel:service_group_edit' g.id %}">Состав</a></td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="5" class="muted">Групп пока нет — создайте первую справа</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h3 style="margin-top:0;">Новая группа</h3>
-    <form method="post">
-      {% csrf_token %}
-      <input type="hidden" name="action" value="create_group">
-      <div class="form-row">
-        <label>Название</label>
-        <input type="text" name="name" required placeholder="ул. Баумана, дом 1–5">
-      </div>
-      <div class="form-row">
-        <label>Описание</label>
-        <input type="text" name="description" placeholder="необязательно">
-      </div>
-      <button class="btn" type="submit">Создать группу</button>
-    </form>
-  </div>
-</div>
-
 <div class="card" style="margin-bottom:16px;">
   <h3 style="margin-top:0;">Запустить сбор на группу</h3>
-  <p class="muted">Сообщение уйдёт всем участникам группы автоматически.</p>
+  <p class="muted">
+    Сообщение уйдёт всем участникам группы автоматически.
+    Для «Детская площадка» и «Ремонт дороги» у каждого будет обязательный вопрос: поможет ли он.
+    <a href="{% url 'panel:services_groups' %}">Управление группами</a>
+  </p>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="action" value="launch">

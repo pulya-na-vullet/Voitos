@@ -53,6 +53,8 @@ class ActivityKind(models.TextChoices):
     SERVICE_PAID = "service_paid", "Сервисный сбор оплачен"
     SERVICE_NOTICE = "service_notice", "Уведомление по сбору"
     SERVICE_WISH = "service_wish", "Пожелание по группе"
+    VOLUNTEER_ASK = "volunteer_ask", "Вопрос о помощи на мероприятии"
+    VOLUNTEER_REPLY = "volunteer_reply", "Ответ о помощи на мероприятии"
     CONTRACTOR_REGISTER = "contractor_register", "Регистрация исполнителя"
     CONTRACTOR_OFFER = "contractor_offer", "Предложение исполнителю"
     CONTRACTOR_REPLY = "contractor_reply", "Ответ исполнителя"
@@ -107,6 +109,12 @@ class InviteStatus(models.TextChoices):
     PAID = "paid", "Оплачено"
     DECLINED = "declined", "Отказ"
     CANCELLED = "cancelled", "Отменено"
+
+
+class VolunteerReplyStatus(models.TextChoices):
+    PENDING = "pending", "Ожидает ответа"
+    YES = "yes", "Поможет"
+    NO = "no", "Не поможет"
 
 
 class CampaignNoticeKind(models.TextChoices):
@@ -352,6 +360,11 @@ class BotUser(models.Model):
         related_name="family_dependents",
         verbose_name="Подписку оплатил (семья)",
         help_text="Если указан — доступ дублируется с подписки этого члена семьи.",
+    )
+    citizen_score = models.PositiveSmallIntegerField(
+        "Внутренний рейтинг гражданина",
+        default=100,
+        help_text="0–100. Пользователю не показывается. По умолчанию 100.",
     )
     first_seen_at = models.DateTimeField(auto_now_add=True)
     last_seen_at = models.DateTimeField(auto_now=True)
@@ -730,6 +743,39 @@ class ServiceInvite(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} → {self.campaign_id}: {self.amount_due}₽"
+
+
+class VolunteerHelpAsk(models.Model):
+    """Обязательный вопрос жителю: поможет ли на площадке / ремонте дороги."""
+
+    campaign = models.ForeignKey(
+        ServiceCampaign, on_delete=models.CASCADE, related_name="volunteer_asks"
+    )
+    user = models.ForeignKey(
+        BotUser, on_delete=models.CASCADE, related_name="volunteer_asks"
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=VolunteerReplyStatus.choices,
+        default=VolunteerReplyStatus.PENDING,
+    )
+    score_delta = models.IntegerField("Изменение рейтинга", default=0)
+    asked_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Вопрос о помощи"
+        verbose_name_plural = "Вопросы о помощи"
+        ordering = ["-asked_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campaign", "user"],
+                name="uniq_volunteer_ask_campaign_user",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user} → {self.campaign_id}: {self.status}"
 
 
 class ContractorProfile(models.Model):

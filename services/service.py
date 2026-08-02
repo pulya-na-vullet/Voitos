@@ -728,6 +728,10 @@ def offer_to_users(
         except Exception:
             logger.exception("Failed to notify user %s about campaign", user.max_user_id)
 
+        from services.volunteer import ask_volunteer_help
+
+        ask_volunteer_help(campaign, user, send_fn=send_fn)
+
     campaign.status = CampaignStatus.ACTIVE
     campaign.save(update_fields=["status"])
     warn = cfg.tax_limit_warning()
@@ -893,6 +897,9 @@ def invite_new_members_to_group_campaigns(
                     user.max_user_id,
                     campaign.id,
                 )
+            from services.volunteer import ask_volunteer_help
+
+            ask_volunteer_help(campaign, user, send_fn=send_fn)
     return sent
 
 

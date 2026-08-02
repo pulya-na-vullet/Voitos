@@ -34,7 +34,12 @@
   {% endif %}
   <p style="margin:8px 0 0;">Рейтинг гражданина:
     <strong>{{ citizen.label }}</strong>
-    <span class="muted">({{ citizen.paid }}/{{ citizen.offered }} оплат, {{ citizen.ratio|floatformat:0 }}%)</span>
+    <span class="muted">
+      баллы {{ citizen.score }} · помощь {{ citizen.help_ratio|floatformat:0 }}%
+      ({{ citizen.help_yes }}/{{ citizen.help_asked }}) ·
+      площадка {{ citizen.playground_helps }} · дорога {{ citizen.road_helps }} ·
+      оплаты {{ citizen.paid }}/{{ citizen.offered }}
+    </span>
   </p>
 </div>
 

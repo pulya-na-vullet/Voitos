@@ -56,7 +56,7 @@
         <th>Имя</th>
         <th>Нас. пункт</th>
         <th>Соц. рейтинг</th>
-        <th>Предл. / оплатил</th>
+        <th>Помощь / оплаты</th>
         <th>Анкета</th>
         <th>Подписка</th>
         <th>Доступ</th>
@@ -73,12 +73,15 @@
         </td>
         <td>{{ u.locality|default:"—" }}</td>
         <td>
-          <span class="badge {% if row.ratio >= 80 %}ok{% elif row.offered == 0 %}{% elif row.ratio < 40 %}bad{% endif %}">
+          <span class="badge {% if row.score >= 80 %}ok{% elif row.score < 40 %}bad{% endif %}">
             {{ row.label }}
           </span>
-          <div class="muted mono">{{ row.ratio|floatformat:0 }}%</div>
+          <div class="muted mono">{{ row.score }} б.</div>
         </td>
-        <td class="mono">{{ row.offered }} / {{ row.paid }}</td>
+        <td class="mono">
+          {{ row.help_ratio|floatformat:0 }}% · пл.{{ row.playground_helps }} · дор.{{ row.road_helps }}
+          <div class="muted">опл. {{ row.paid }}/{{ row.offered }}</div>
+        </td>
         <td>
           <span class="badge {% if u.profile_status == 'verified' %}ok{% elif u.profile_status == 'pending_review' %}{% elif u.profile_status == 'rejected' %}bad{% endif %}">
             {{ u.get_profile_status_display }}

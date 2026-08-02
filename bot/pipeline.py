@@ -88,6 +88,14 @@ class MessagePipeline:
                 self._store_out(user, reply, "contractor_offer")
                 return reply
 
+        if pending.pending_kind == "volunteer_help_reply":
+            from services.volunteer import handle_volunteer_help_reply
+
+            reply = handle_volunteer_help_reply(user, text, pending)
+            if reply is not None:
+                self._store_out(user, reply, "volunteer_help")
+                return reply
+
         if pending.pending_kind == "reminder_time":
             reply = self._finish_pending_reminder(user, text, pending)
             if reply is not None:
