@@ -1,0 +1,137 @@
+{% extends "panel/base.html" %}
+{% block title %}Группа {{ group.name }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Группа: {{ group.name }}</h1>
+  <a class="btn secondary small" href="{% url 'panel:services_groups' %}">← К группам</a>
+</div>
+<div class="card" style="max-width:900px; margin-bottom:16px;">
+  <p style="margin:0;">Накопленный бюджет группы:
+    <strong class="mono">{{ group_budget }} ₽</strong>
+    <span class="muted">— остатки сверх цели после закрытых сборов</span>
+  </p>
+</div>
+
+<div class="card" style="max-width:900px;">
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-row">
+      <label>Название</label>
+      <input type="text" name="name" value="{{ group.name }}" required>
+    </div>
+    <div class="form-row">
+      <label>Описание</label>
+      <input type="text" name="description" value="{{ group.description }}">
+    </div>
+    <button class="btn secondary small" type="submit" style="margin-bottom:12px;">Сохранить название</button>
+
+    <details class="members-fold" style="border:1px solid var(--line); border-radius:12px; background:var(--bg-soft); padding:0 12px 12px;">
+      <summary style="cursor:pointer; list-style:none; padding:14px 4px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <span>
+          <strong>Участники</strong>
+          <span class="badge" style="margin-left:6px;">{{ member_ids|length }}</span>
+          <span class="muted" style="margin-left:8px;">нажмите, чтобы раскрыть состав</span>
+        </span>
+        <span class="muted mono">▼</span>
+      </summary>
+      <p class="muted" style="margin-top:0;">Отметьте жителей группы. Новым участникам автоматически придут все активные сборы этой группы (остальным повторно не шлём).</p>
+      <table>
+        <thead><tr><th></th><th>Имя</th><th>Телефон</th><th>Нас. пункт</th><th>Адрес</th></tr></thead>
+        <tbody>
+        {% for u in users %}
+          <tr>
+            <td><input type="checkbox" name="user_ids" value="{{ u.id }}" {% if u.id in member_ids %}checked{% endif %}></td>
+            <td>{{ u.real_name|default:u.display_name|default:u.max_user_id }}</td>
+            <td class="mono">{{ u.phone|default:"—" }}</td>
+            <td>{{ u.locality|default:"—" }}</td>
+            <td>{{ u.address|truncatechars:50 }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="muted">Пользователей бота пока нет</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn" type="submit">Сохранить состав</button>
+        <button class="btn danger" type="submit" name="action" value="delete" onclick="return confirm('Удалить группу?');">Удалить группу</button>
+      </div>
+    </details>
+  </form>
+</div>
+<style>
+  details.members-fold > summary::-webkit-details-marker { display: none; }
+  details.members-fold[open] > summary .mono { transform: rotate(180deg); display: inline-block; }
+</style>
+
+<div class="card" style="max-width:900px; margin-top:16px;">
+  <h3 style="margin-top:0;">Пожелания группы <span class="badge">{{ wish_total }}</span></h3>
+  <p class="muted">Что пишут участники в бот — сгруппировано по темам (как голосование).</p>
+  {% if wish_stats %}
+  <div class="grid two" style="margin-bottom:14px;">
+    <div>
+      <table>
+        <thead><tr><th>Тема</th><th>Голосов</th></tr></thead>
+        <tbody>
+        {% for s in wish_stats %}
+          <tr>
+            <td>{{ s.label }}</td>
+            <td class="mono"><strong>{{ s.count }}</strong></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <canvas id="wishTopicsChart" height="160"></canvas>
+    </div>
+  </div>
+  <script>
+  (function () {
+    const labels = {{ wish_chart_labels_json|safe }};
+    const values = {{ wish_chart_values_json|safe }};
+    if (!labels.length) return;
+    new Chart(document.getElementById('wishTopicsChart'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Голосов',
+          data: values,
+          backgroundColor: 'rgba(61,156,253,0.45)',
+          borderColor: '#3d9cfd',
+          borderWidth: 1,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { color: '#8b9bb0', precision: 0 } },
+          y: { ticks: { color: '#8b9bb0' } },
+        },
+      },
+    });
+  })();
+  </script>
+  {% else %}
+  <p class="muted">Пока нет пожеланий. Участники могут написать в бот, например: «Хочу чтобы починили дорогу».</p>
+  {% endif %}
+
+  <h3>Последние сообщения</h3>
+  <table>
+    <thead><tr><th>Когда</th><th>Кто</th><th>Тема</th><th>Текст</th></tr></thead>
+    <tbody>
+    {% for w in recent_wishes %}
+      <tr>
+        <td class="mono">{{ w.created_at|date:"d.m H:i" }}</td>
+        <td><a href="{% url 'panel:user_dashboard' w.user_id %}">{{ w.user }}</a></td>
+        <td><span class="badge">{{ w.get_topic_display }}</span></td>
+        <td>{{ w.text }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Пусто</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

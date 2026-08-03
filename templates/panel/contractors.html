@@ -1,0 +1,109 @@
+{% extends "panel/base.html" %}
+{% block title %}Исполнители — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Исполнители</h1>
+  <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
+</div>
+<p class="muted" style="margin-top:-6px; margin-bottom:16px;">
+  Трактористы и водители камаза, зарегистрированные в MAX-боте («регистрация техники»).
+  Проверенных можно назначать на чистку снега и ремонт дороги.
+  Колонка «Заработано» — сумма выплат по закрытым заказам с чеками перевода.
+</p>
+
+<div class="card" style="margin-bottom:16px;">
+  <form method="get" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+    <div class="form-row" style="margin:0; min-width:200px;">
+      <label>Тип техники</label>
+      <select name="type" onchange="this.form.submit()">
+        <option value="">Все</option>
+        {% for value, label in equipment_choices %}
+        <option value="{{ value }}" {% if type_filter == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Исполнитель</th>
+        <th>Тип</th>
+        <th>Техника</th>
+        <th>Связь</th>
+        <th>Перевод</th>
+        <th>Банк</th>
+        <th>НП</th>
+        <th>Заработано</th>
+        <th>Статус</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in contractors %}
+      <tr>
+        <td><a href="{% url 'panel:user_dashboard' c.user_id %}">{{ c.user }}</a></td>
+        <td>{{ c.get_equipment_type_display }}</td>
+        <td>{{ c.equipment_label|default:"—" }}
+          <div class="muted mono">{{ c.plate_number|default:"" }}</div>
+        </td>
+        <td class="mono">{{ c.phone|default:c.user.phone|default:"—" }}</td>
+        <td class="mono">{{ c.payout_phone|default:c.phone|default:"—" }}</td>
+        <td>{{ c.bank_name|default:"—" }}</td>
+        <td>{{ c.locality|default:"—" }}</td>
+        <td class="mono"><strong>{{ c.total_earned|default:0 }} ₽</strong></td>
+        <td>
+          <span class="badge {% if c.status == status_verified %}ok{% elif c.status == 'rejected' or c.status == 'disabled' %}bad{% endif %}">
+            {{ c.get_status_display }}
+          </span>
+        </td>
+        <td>
+          {% if c.status == status_pending %}
+          <form method="post" style="display:inline;">{% csrf_token %}
+            <input type="hidden" name="action" value="verify">
+            <input type="hidden" name="contractor_id" value="{{ c.id }}">
+            <button class="btn small" type="submit">Подтвердить</button>
+          </form>
+          <form method="post" style="display:inline;">{% csrf_token %}
+            <input type="hidden" name="action" value="reject">
+            <input type="hidden" name="contractor_id" value="{{ c.id }}">
+            <button class="btn danger small" type="submit">Отклонить</button>
+          </form>
+          {% elif c.status == status_verified %}
+          <form method="post" style="display:inline;">{% csrf_token %}
+            <input type="hidden" name="action" value="disable">
+            <input type="hidden" name="contractor_id" value="{{ c.id }}">
+            <button class="btn secondary small" type="submit">Отключить</button>
+          </form>
+          {% endif %}
+          <form method="post" style="display:inline;"
+                onsubmit="return confirm('Удалить исполнителя «{{ c|escapejs }}»? Назначения и выплаты этого исполнителя тоже удалятся. Пользователь бота останется.');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="contractor_id" value="{{ c.id }}">
+            <button class="btn danger small" type="submit">Удалить</button>
+          </form>
+          <details style="margin-top:6px;">
+            <summary class="muted" style="cursor:pointer;">Реквизиты</summary>
+            <form method="post" style="margin-top:8px; display:flex; flex-direction:column; gap:6px; min-width:180px;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="update_payout_details">
+              <input type="hidden" name="contractor_id" value="{{ c.id }}">
+              <input type="text" name="bank_name" value="{{ c.bank_name }}" placeholder="Банк"
+                     style="padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+              <input type="text" name="payout_phone" value="{{ c.payout_phone }}" placeholder="Тел. для перевода"
+                     style="padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+              <button class="btn secondary small" type="submit">Сохранить</button>
+            </form>
+          </details>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="10" class="muted">Пока никто не зарегистрировался как исполнитель</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,212 @@
+{% extends "panel/base.html" %}
+{% block title %}{{ bot_user }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>{{ bot_user.display_name|default:bot_user.max_user_id }}</h1>
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+    <span class="badge {% if access_state == 'active' %}ok{% elif access_state == 'blocked' %}bad{% endif %}">{{ access_state }}</span>
+    <a class="btn secondary small" href="{% url 'panel:users' %}">← Все пользователи</a>
+    <form method="post" onsubmit="return confirm('Удалить пользователя безвозвратно вместе с чеками и историей?');">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete_user">
+      <button class="btn danger small" type="submit">Удалить пользователя</button>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <p class="muted" style="margin:0;">MAX id: <span class="mono">{{ bot_user.max_user_id }}</span>
+    · chat: <span class="mono">{{ bot_user.chat_id|default:"—" }}</span></p>
+  <p class="muted" style="margin:6px 0 0;">Подписка:
+    <strong>{{ subscription_label }}</strong>
+    {% if subscription_paid_by %}
+      <span class="badge ok">семья</span>
+      <span class="muted">· собственная дата:
+        {% if bot_user.subscription_until %}{{ bot_user.subscription_until|date:"d.m.Y" }}{% else %}нет{% endif %}
+      </span>
+    {% elif effective_subscription_until %}
+      <span class="muted">(до {{ effective_subscription_until|date:"d.m.Y H:i" }})</span>
+    {% endif %}
+    · льготный период до:
+    <strong>{% if bot_user.grace_until %}{{ bot_user.grace_until|date:"d.m.Y H:i" }}{% else %}—{% endif %}</strong>
+  </p>
+  {% if family_dependents %}
+  <p class="muted" style="margin:6px 0 0;">Через эту оплату пользуются:
+    {% for d in family_dependents %}
+      <a href="{% url 'panel:user_dashboard' d.id %}">{{ d }}</a>{% if not forloop.last %}, {% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
+  <p style="margin:8px 0 0;">Рейтинг гражданина:
+    <strong>{{ citizen.label }}</strong>
+    <span class="muted">
+      баллы {{ citizen.score }} · помощь {{ citizen.help_ratio|floatformat:0 }}%
+      ({{ citizen.help_yes }}/{{ citizen.help_asked }}) ·
+      площадка {{ citizen.playground_helps }} · дорога {{ citizen.road_helps }} ·
+      оплаты {{ citizen.paid }}/{{ citizen.offered }}
+    </span>
+  </p>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Семья / общая подписка</h3>
+  <p class="muted" style="margin-top:0;">
+    Если Елена и Дмитрий — одна семья, привяжите Елену к Дмитрию: у неё отобразится
+    «оплачена Дмитрием до …» и доступ будет как у оплатившего.
+  </p>
+  <form method="post" action="{% url 'panel:user_family_link' bot_user.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="link">
+    <input type="hidden" name="member_ids" value="{{ bot_user.id }}">
+    {% if family_payer_choices %}
+    <div class="form-row">
+      <label>Члены семьи по адресу</label>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label class="muted"><input type="checkbox" checked disabled> {{ bot_user }} (текущий)</label>
+        {% for c in family_payer_choices %}
+          {% if c.id != bot_user.id %}
+          <label>
+            <input type="checkbox" name="member_ids" value="{{ c.id }}" {% if bot_user.family_payer_id == c.id or c.family_payer_id == bot_user.id %}checked{% endif %}>
+            {{ c }}
+            <span class="muted mono">
+              · {% if c.subscription_until %}до {{ c.subscription_until|date:"d.m.Y" }}{% else %}без своей подписки{% endif %}
+            </span>
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <div class="form-row">
+      <label>ID пользователя, который оплатил (если нет в списке)</label>
+      <input type="number" name="extra_member_id" min="1" placeholder="например id Дмитрия из списка пользователей"
+             value="{% if bot_user.family_payer_id %}{{ bot_user.family_payer_id }}{% endif %}"
+             style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+    </div>
+    <div class="form-row">
+      <label>Кто оплатил подписку</label>
+      <select name="payer_id" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+        <option value="">Авто (у кого длиннее срок) / или id выше</option>
+        {% if bot_user.subscription_until %}
+        <option value="{{ bot_user.id }}" {% if not bot_user.family_payer_id %}selected{% endif %}>{{ bot_user }}</option>
+        {% endif %}
+        {% for c in family_payer_choices %}
+          {% if c.id != bot_user.id %}
+          <option value="{{ c.id }}" {% if bot_user.family_payer_id == c.id %}selected{% endif %}>{{ c }}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn small" type="submit">Связать семью и продублировать подписку</button>
+  </form>
+  {% if bot_user.family_payer_id %}
+  <form method="post" action="{% url 'panel:user_family_link' bot_user.id %}" style="margin-top:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="unlink">
+    <button class="btn secondary small" type="submit">Отвязать от {{ bot_user.family_payer }}</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-bottom:16px; {% if bot_user.profile_status == 'pending_review' or missing_fields %}border-color: rgba(230,192,123,0.5);{% endif %}">
+  <h3 style="margin-top:0;">Анкета
+    {% if bot_user.profile_status == 'pending_review' %}<span class="badge">Проверить данные</span>{% endif %}
+    {% if missing_fields %}<span class="badge bad">Не хватает данных</span>{% endif %}
+  </h3>
+  {% if missing_fields %}
+  <div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12); margin-bottom:12px;">
+    Не заполнены поля:
+    <strong>{% for key, label in missing_fields %}{{ label }}{% if not forloop.last %}, {% endif %}{% endfor %}</strong>.
+    Можете дописать их здесь и нажать «Сохранить данные», либо запросить у пользователя кнопкой «Данных не хватает».
+  </div>
+  {% endif %}
+  <form method="post" action="{% url 'panel:user_profile_verify' bot_user.id %}">
+    {% csrf_token %}
+    <div class="form-row"><label>Имя</label><input type="text" name="real_name" value="{{ bot_user.real_name }}"></div>
+    <div class="form-row"><label>Телефон</label><input type="text" name="phone" value="{{ bot_user.phone }}"></div>
+    <div class="form-row"><label>Населённый пункт</label><input type="text" name="locality" value="{{ bot_user.locality }}"></div>
+    <div class="form-row"><label>Адрес</label><textarea name="address" rows="2">{{ bot_user.address }}</textarea></div>
+    <div class="form-row"><label>Комментарий админа</label><input type="text" name="note" value="{{ bot_user.profile_admin_note }}" placeholder="опционально, уйдёт пользователю при запросе дозаполнения"></div>
+    <p class="muted">Статус: {{ bot_user.get_profile_status_display }}</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn small" type="submit" name="action" value="save">Сохранить данные</button>
+      <button class="btn small" type="submit" name="action" value="verify">Подтвердить анкету</button>
+      <button class="btn secondary small" type="submit" name="action" value="incomplete">Данных не хватает</button>
+      <button class="btn danger small" type="submit" name="action" value="reject">Отклонить</button>
+    </div>
+  </form>
+</div>
+
+<div class="grid stats">
+  <div class="card"><div class="stat-label">Сообщения</div><div class="stat-value">{{ stats.messages }}</div></div>
+  <div class="card"><div class="stat-label">Память</div><div class="stat-value">{{ stats.memories }}</div></div>
+  <div class="card"><div class="stat-label">Задачи</div><div class="stat-value">{{ stats.tasks }}</div></div>
+  <div class="card"><div class="stat-label">Напоминания</div><div class="stat-value">{{ stats.reminders }}</div></div>
+  <div class="card"><div class="stat-label">Чеки</div><div class="stat-value">{{ stats.receipts }}</div></div>
+</div>
+
+<div class="grid user-dash-panels" style="margin-top:16px;">
+  <div class="card user-dash-panel">
+    <h3 style="margin-top:0;">Активность за 14 дней</h3>
+    <div class="user-dash-panel-body">
+      <canvas id="activityChart"></canvas>
+    </div>
+  </div>
+  <div class="card user-dash-panel">
+    <h3 style="margin-top:0;">Последние события</h3>
+    <div class="user-dash-panel-body user-dash-events">
+      <table>
+        <thead><tr><th>Время</th><th>Событие</th></tr></thead>
+        <tbody>
+        {% for log in recent_logs %}
+          <tr>
+            <td class="mono">{{ log.created_at|date:"d.m H:i" }}</td>
+            <td>{{ log.title }}<div class="muted">{{ log.detail|truncatechars:80 }}</div></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="2" class="muted">Пока пусто</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h3 style="margin-top:0;">Чеки пользователя</h3>
+  <table>
+    <thead><tr><th>Дата</th><th>Сумма</th><th>Статус</th><th>Срок</th></tr></thead>
+    <tbody>
+    {% for r in receipts %}
+      <tr>
+        <td class="mono">{{ r.created_at|date:"d.m.Y H:i" }}</td>
+        <td>{{ r.amount|default:"—" }}</td>
+        <td>{{ r.get_status_display }}</td>
+        <td>{{ r.period_label }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Чеков нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin-top:10px;"><a href="{% url 'panel:user_receipts' bot_user.id %}">Все чеки пользователя →</a></p>
+</div>
+
+<script>
+const labels = {{ chart_labels_json|safe }};
+const values = {{ chart_values_json|safe }};
+new Chart(document.getElementById('activityChart'), {
+  type: 'line',
+  data: { labels, datasets: [{ label: 'События', data: values, borderColor: '#3d9cfd', backgroundColor: 'rgba(61,156,253,0.18)', fill: true, tension: 0.35 }] },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#8b9bb0' } },
+      y: { beginAtZero: true, ticks: { color: '#8b9bb0', precision: 0 } }
+    }
+  }
+});
+</script>
+{% endblock %}
