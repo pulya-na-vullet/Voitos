@@ -279,11 +279,11 @@ def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
         f"{extra}"
         f"{date_label}: {date_s}\n"
         f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
-        f"Вам нужно перевести: {amount_per_user:.0f} ₽\n"
+        f"Ваш взнос: {amount_per_user:.0f} ₽\n"
         f"{photo_line}\n"
         f"Реквизиты:\n{service_payment_requisites()}\n\n"
         f"{campaign_progress_line(campaign)}\n\n"
-        "Пришлите фото чека о переводе в этот чат.\n"
+        "Пришлите фото или PDF чека о переводе в этот чат — всё прозрачно.\n"
         "Список сборов — команда «сборы»."
     )
 
@@ -334,10 +334,10 @@ def resend_offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) ->
         f"{extra}"
         f"{date_label}: {date_s}\n"
         f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
-        f"Вам нужно перевести: {amount_per_user:.0f} ₽\n\n"
+        f"Ваш взнос: {amount_per_user:.0f} ₽\n\n"
         f"Реквизиты:\n{service_payment_requisites()}\n\n"
         f"{campaign_progress_line(campaign)}\n\n"
-        "Если вы ещё не оплатили — пришлите фото чека в этот чат.\n"
+        "Если ещё не оплатили — пришлите фото или PDF чека в этот чат.\n"
         "Список сборов — команда «сборы»."
     )
 
@@ -612,7 +612,7 @@ def unpaid_reminder_message(campaign: ServiceCampaign) -> str:
         f"{UNPAID_REMINDER_TEXT}\n\n"
         f"Ваш взнос: {campaign.amount_per_user:.0f} ₽\n"
         f"{service_payment_requisites()}\n"
-        "Пришлите фото чека в этот чат."
+        "Пришлите фото или PDF чека в этот чат."
     )
 
 

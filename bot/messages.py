@@ -49,8 +49,14 @@ def subscription_short_line(user: BotUser) -> str:
             if user.grace_until
             else "скоро"
         )
+        # Новый пользователь без оплаты — пробный период; иначе льготный после подписки.
+        if not user.subscription_until and not user.subscription_paid_by():
+            return (
+                f"Пробный период: осталось {days} дн. (до {until}). "
+                f"Подробнее: «подписка»."
+            )
         return (
-            f"Подписка истекла — ждём оплату: осталось {days} дн. льготного периода "
+            f"Подписка истекла — ждём оплату: осталось {days} дн. "
             f"(до {until}). Подробнее: «подписка»."
         )
     return "Доступ закрыт — нужна оплата. Подробнее: напишите «подписка»."
@@ -79,6 +85,7 @@ def subscription_detail_message(user: BotUser) -> str:
     cfg = AppSettings.load()
     state = user.access_state()
     days = subscription_days_remaining(user)
+    grace_days = cfg.grace_days or 14
 
     if state == AccessState.ACTIVE:
         until_dt = user.effective_subscription_until()
@@ -101,18 +108,26 @@ def subscription_detail_message(user: BotUser) -> str:
             if user.grace_until
             else "—"
         )
-        sub_until = (
-            timezone.localtime(user.subscription_until).strftime("%d.%m.%Y %H:%M")
-            if user.subscription_until
-            else "не оформлена / истекла"
-        )
-        status_block = (
-            f"Статус: ожидание оплаты (льготный период)\n"
-            f"Осталось дней на оплату: {days}\n"
-            f"Льготный период до: {grace}\n"
-            f"Подписка была до: {sub_until}\n"
-            f"Базовые функции пока доступны."
-        )
+        if not user.subscription_until and not user.subscription_paid_by():
+            status_block = (
+                f"Статус: пробный период\n"
+                f"Осталось дней: {days}\n"
+                f"Пробный доступ до: {grace}\n"
+                f"Базовые функции доступны. Чтобы продолжить — оформите подписку."
+            )
+        else:
+            sub_until = (
+                timezone.localtime(user.subscription_until).strftime("%d.%m.%Y %H:%M")
+                if user.subscription_until
+                else "не оформлена / истекла"
+            )
+            status_block = (
+                f"Статус: ожидание оплаты (льготный период)\n"
+                f"Осталось дней на оплату: {days}\n"
+                f"Льготный период до: {grace}\n"
+                f"Подписка была до: {sub_until}\n"
+                f"Базовые функции пока доступны."
+            )
     else:
         status_block = (
             f"Статус: доступ закрыт\n"
@@ -136,7 +151,9 @@ def subscription_detail_message(user: BotUser) -> str:
         f"• Получатель: {cfg.payment_name}\n"
         f"• Срок: сумма ÷ {cfg.subscription_price_rub} ₽ = месяцы, "
         f"остаток переводится в дни (месяц = 30 дней)\n"
-        f"• После истечения — {cfg.grace_days} дн. на оплату, затем доступ закрывается\n"
+        f"• Пробный период для новых пользователей: {grace_days} дн.\n"
+        f"• После истечения подписки — ещё {grace_days} дн. на оплату, "
+        f"затем доступ закрывается\n"
         "• Пришлите фото, скрин или PDF чека прямо в этот чат\n"
         "• Администратор принимает или отклоняет чек — вам придёт сообщение\n\n"
         "Комментарии администратора\n"
@@ -148,19 +165,22 @@ def subscription_detail_message(user: BotUser) -> str:
 
 def help_message(user: BotUser) -> str:
     """Friendly bot card: purpose + available features."""
+    cfg = AppSettings.load()
+    grace_days = cfg.grace_days or 14
     return (
         "Привет! Это Voitos.\n\n"
-        "Мы сделали самого простого помощника для общих дел у дома: "
-        "через самозанятого можно собирать деньги и организовывать работы, "
-        "чтобы во дворе и на придомовой территории жить было удобнее и приятнее. "
-        "Без лишней бюрократии — только то, что реально нужно соседям.\n\n"
+        "Личный ассистент и помощник двора: запоминает важное для вас "
+        "(задачи, напоминания, факты) и помогает соседям решать общие дела у дома. "
+        "Через самозанятого можно собирать деньги и организовывать работы — "
+        "прозрачно, без лишней бюрократии.\n\n"
+        f"Новым пользователям доступен пробный период {grace_days} дн.\n"
         f"{subscription_short_line(user)}\n\n"
         "Что умеет бот\n"
         "• Анкета — «регистрация»: имя, телефон и адрес, чтобы знать, "
         "кто из какого двора\n"
         "• Семейная подписка — если живёте вместе, оплату можно оформить "
         "на одного человека, доступ будет и у остальных членов семьи\n"
-        "• Подписка на бота — перевод самозанятому и фото/PDF чека; "
+        "• Подписка на бота — перевод самозанятому и фото/PDF чека в чат; "
         "подробности: «подписка»\n"
         "• Сборы на работы у дома — снег, двор, свет, дорога и другие "
         "мероприятия: смотрите «сборы», оплачивайте чеком по предложению\n"

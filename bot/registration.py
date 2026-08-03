@@ -97,14 +97,18 @@ def start_registration(user: BotUser, pending: PendingAction) -> str:
         return f"Нужно дозаполнить недостающие поля:\n{lines}\n\n{prompt}"
     if missing:
         return (
-            "Добро пожаловать! Для работы сервиса заполните короткую анкету.\n\n"
+            "Добро пожаловать в Voitos!\n"
+            "Я ваш ассистент: помогу с делами двора и запомню важное для вас.\n"
+            "Для начала заполните короткую анкету.\n\n"
             f"{prompt}"
         )
     # Everything filled — restart from name
     pending.pending_payload = {"step": "name"}
     pending.save(update_fields=["pending_payload", "updated_at"])
     return (
-        "Добро пожаловать! Для работы сервиса заполните короткую анкету.\n\n"
+        "Добро пожаловать в Voitos!\n"
+        "Я ваш ассистент: помогу с делами двора и запомню важное для вас.\n"
+        "Для начала заполните короткую анкету.\n\n"
         f"{_STEP_PROMPTS['name']}"
     )
 

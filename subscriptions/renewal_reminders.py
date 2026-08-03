@@ -42,7 +42,7 @@ def payer_renewal_text(until, offset_label: str) -> str:
     return (
         f"{RENEWAL_MARKER}"
         f"Подписка заканчивается {_until_label(until)} ({offset_label}).\n"
-        f"Продлите доступ, чтобы не потерять функции сервиса.\n\n"
+        f"Продлите доступ, чтобы сохранить ассистента и функции сервиса.\n\n"
         f"{payment_help_text()}"
     )
 
@@ -51,7 +51,7 @@ def family_renewal_text(payer: BotUser, until, offset_label: str) -> str:
     payer_name = str(payer).strip() or "члену семьи"
     return (
         f"{RENEWAL_MARKER}"
-        f"Напомните {payer_name}, что подписка в нашем сервисе "
+        f"Напомните {payer_name}, что подписка Voitos "
         f"заканчивается {_until_label(until)} ({offset_label}).\n"
         f"Попросите продлить оплату, чтобы у семьи сохранился доступ."
     )

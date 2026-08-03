@@ -56,7 +56,7 @@ def volunteer_ask_message(campaign: ServiceCampaign) -> str:
     return (
         f"Мероприятие «{campaign.title}» "
         f"({campaign.get_category_display()}).\n\n"
-        "Поможете ли вы в этом мероприятии?\n"
+        "Поможете ли вы на этом мероприятии?\n"
         "Ответ обязателен:\n"
         "1 / да — помогу\n"
         "2 / нет — не смогу"

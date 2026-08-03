@@ -105,7 +105,8 @@ PAYMENT_HELP = (
     "Чтобы продлить доступ, переведите оплату на номер {phone}\n"
     "Получатель: {name}\n"
     "Стоимость: {price} ₽ / месяц.\n"
-    "Пришлите сюда фото, скрин или PDF чека о переводе."
+    "Пришлите в этот чат фото, скрин или PDF чека о переводе — всё прозрачно, "
+    "после проверки администратором доступ продлится."
 )
 
 
@@ -122,15 +123,18 @@ def access_message(user: BotUser) -> str | None:
     """Return a message if user should be notified / blocked; None if full access OK."""
     user.ensure_grace_period()
     state = user.access_state()
+    cfg = AppSettings.load()
+    grace_days = cfg.grace_days or 14
     if state == AccessState.ACTIVE:
         return None
     if state == AccessState.GRACE:
         until = user.grace_until
         until_s = timezone.localtime(until).strftime("%d.%m.%Y") if until else "скоро"
         return (
-            f"Срок подписки истёк. Жду оплату в течение 2 дней (до {until_s}).\n\n"
+            f"Срок подписки истёк. Жду оплату в течение {grace_days} дн. "
+            f"(до {until_s}).\n\n"
             f"{payment_help_text()}\n\n"
-            "Пока льготный период активен, базовые функции ещё доступны."
+            "Пока идёт льготный период, базовые функции ещё доступны."
         )
     return (
         "Доступ к функциям закрыт: оплата не поступила.\n\n"
@@ -395,7 +399,7 @@ def revoke_unpaid_subscriptions() -> int:
     from datetime import timedelta
 
     cfg = AppSettings.load()
-    grace_days = cfg.grace_days or 2
+    grace_days = cfg.grace_days or 14
     now = timezone.now()
     grace_until = now + timedelta(days=grace_days)
     paid_ids = set(

@@ -764,9 +764,9 @@ def settings_view(request: HttpRequest) -> HttpResponse:
         except ValueError:
             cfg.subscription_price_rub = 100
         try:
-            cfg.grace_days = int(request.POST.get("grace_days") or 2)
+            cfg.grace_days = int(request.POST.get("grace_days") or 14)
         except ValueError:
-            cfg.grace_days = 2
+            cfg.grace_days = 14
         cfg.service_payee_name = (
             request.POST.get("service_payee_name", cfg.service_payee_name).strip()
             or cfg.service_payee_name

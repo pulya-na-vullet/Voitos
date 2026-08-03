@@ -66,8 +66,9 @@
       <input type="number" name="subscription_price_rub" value="{{ cfg.subscription_price_rub }}" min="1">
     </div>
     <div class="form-row">
-      <label>Дней ожидания оплаты после истечения</label>
+      <label>Пробный / льготный период, дней</label>
       <input type="number" name="grace_days" value="{{ cfg.grace_days }}" min="1">
+      <div class="hint">Для новых пользователей — пробный доступ с первого входа; после истечения подписки — столько же дней на оплату. Сейчас по умолчанию 14 (2 недели).</div>
     </div>
     <hr style="border:0; border-top:1px solid var(--line); margin:22px 0;">
     <h3 style="margin-top:0;">Сервисные сборы (самозанятый)</h3>

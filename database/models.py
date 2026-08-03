@@ -217,7 +217,12 @@ class AppSettings(models.Model):
         default="Григорьев Дмитрий Вячеславович",
     )
     subscription_price_rub = models.PositiveIntegerField("Цена подписки, ₽/мес", default=100)
-    grace_days = models.PositiveIntegerField("Дней на оплату после истечения", default=2)
+    grace_days = models.PositiveIntegerField(
+        "Пробный / льготный период, дней",
+        default=14,
+        help_text="Для новых пользователей — пробный доступ с первого входа; "
+        "после истечения подписки — столько же дней на оплату.",
+    )
     service_payee_name = models.CharField(
         "Сервис: получатель",
         max_length=255,
@@ -437,7 +442,7 @@ class BotUser(models.Model):
         # New user without subscription: start grace from first_seen
         if not until and not self.grace_until:
             cfg = AppSettings.load()
-            grace_end = self.first_seen_at + timedelta(days=cfg.grace_days or 2)
+            grace_end = self.first_seen_at + timedelta(days=cfg.grace_days or 14)
             if grace_end > now:
                 return AccessState.GRACE
         return AccessState.BLOCKED
@@ -452,10 +457,10 @@ class BotUser(models.Model):
         until = self.effective_subscription_until()
         if until and until <= now:
             if not self.grace_until or self.grace_until < until:
-                self.grace_until = until + timedelta(days=cfg.grace_days or 2)
+                self.grace_until = until + timedelta(days=cfg.grace_days or 14)
                 self.save(update_fields=["grace_until"])
         elif not until and not self.grace_until:
-            self.grace_until = self.first_seen_at + timedelta(days=cfg.grace_days or 2)
+            self.grace_until = self.first_seen_at + timedelta(days=cfg.grace_days or 14)
             self.save(update_fields=["grace_until"])
 
     def extend_subscription(self, months: int = 0, days: int = 0) -> None:
