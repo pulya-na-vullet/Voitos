@@ -17,22 +17,33 @@
       <img src="/static/panel/voitos_logo_04_mono.png" alt="Voitos" class="brand-logo">
       <div>
         <div class="brand-name">Voi<span>tos</span></div>
-        <div class="brand-sub">Панель администратора</div>
+        <div class="brand-sub">{% if panel_is_manager %}Панель менеджера{% else %}Панель администратора{% endif %}</div>
       </div>
     </div>
     <nav class="nav">
       <a href="{% url 'panel:admin_tasks_today' %}" class="{% if request.resolver_match.url_name == 'admin_tasks_today' or request.resolver_match.url_name == 'admin_task_done' or request.resolver_match.url_name == 'admin_address_scan' %}active{% endif %}">Задачи на сегодня</a>
       <a href="{% url 'panel:users' %}" class="{% if request.resolver_match.url_name == 'users' %}active{% endif %}">Пользователи</a>
+      {% if panel_is_admin %}
       <a href="{% url 'panel:receipts' %}" class="{% if request.resolver_match.url_name == 'receipts' or request.resolver_match.url_name == 'user_receipts' or request.resolver_match.url_name == 'receipt_approve' or request.resolver_match.url_name == 'receipt_reject' or request.resolver_match.url_name == 'receipt_delete' %}active{% endif %}">Оплата подписок</a>
+      {% endif %}
       <a href="{% url 'panel:services' %}" class="{% if request.resolver_match.url_name == 'services' or request.resolver_match.url_name == 'service_campaign_detail' or request.resolver_match.url_name == 'service_campaign_create' %}active{% endif %}">Сервисные мероприятия</a>
       <a href="{% url 'panel:services_groups' %}" class="nav-sub {% if request.resolver_match.url_name == 'services_groups' or request.resolver_match.url_name == 'service_group_edit' %}active{% endif %}">Группы жителей</a>
       <a href="{% url 'panel:services_archive' %}" class="nav-sub {% if request.resolver_match.url_name == 'services_archive' or request.resolver_match.url_name == 'services_category' %}active{% endif %}">Архив мероприятий</a>
       <a href="{% url 'panel:services_wishes' %}" class="nav-sub {% if request.resolver_match.url_name == 'services_wishes' %}active{% endif %}">Пожелания жителей</a>
-      <a href="{% url 'panel:contractors' %}" class="{% if request.resolver_match.url_name == 'contractors' %}active{% endif %}">Исполнители</a>
+      {% if panel_is_admin %}
+      <a href="{% url 'panel:contractors' %}" class="{% if request.resolver_match.url_name == 'contractors' or request.resolver_match.url_name == 'executor_roles' or request.resolver_match.url_name == 'work_requests' or request.resolver_match.url_name == 'work_request_detail' %}active{% endif %}">Исполнители</a>
+      <a href="{% url 'panel:executor_roles' %}" class="nav-sub {% if request.resolver_match.url_name == 'executor_roles' %}active{% endif %}">Роли исполнителей</a>
+      <a href="{% url 'panel:work_requests' %}" class="nav-sub {% if request.resolver_match.url_name == 'work_requests' or request.resolver_match.url_name == 'work_request_detail' %}active{% endif %}">Заявки жителей</a>
+      {% elif panel_is_manager %}
+      <a href="{% url 'panel:work_requests' %}" class="{% if request.resolver_match.url_name == 'work_requests' or request.resolver_match.url_name == 'work_request_detail' %}active{% endif %}">Заявки жителей</a>
+      {% endif %}
       <a href="{% url 'panel:services_ranking' %}" class="{% if request.resolver_match.url_name == 'services_ranking' %}active{% endif %}">Рейтинг граждан</a>
       <a href="{% url 'panel:clients_map' %}" class="{% if request.resolver_match.url_name == 'clients_map' %}active{% endif %}">Карта клиентов</a>
+      {% if panel_is_admin %}
       <a href="{% url 'panel:earnings_forecast' %}" class="{% if request.resolver_match.url_name == 'earnings_forecast' %}active{% endif %}">Прогноз заработка</a>
+      <a href="{% url 'panel:manager_logs' %}" class="{% if request.resolver_match.url_name == 'manager_logs' or request.resolver_match.url_name == 'manager_log_detail' %}active{% endif %}">Лог менеджеров</a>
       <a href="{% url 'panel:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">Настройки</a>
+      {% endif %}
       {% if bot_user %}
       <div class="brand-sub" style="margin-top:18px;">Пользователь</div>
       <a href="{% url 'panel:user_dashboard' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_dashboard' %}active{% endif %}">Обзор</a>
@@ -41,7 +52,9 @@
       <a href="{% url 'panel:user_tasks' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_tasks' %}active{% endif %}">Задачи</a>
       <a href="{% url 'panel:user_reminders' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_reminders' %}active{% endif %}">Напоминания</a>
       <a href="{% url 'panel:user_logs' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_logs' %}active{% endif %}">Лог работы</a>
+      {% if panel_is_admin %}
       <a href="{% url 'panel:user_receipts' bot_user.id %}" class="{% if request.resolver_match.url_name == 'user_receipts' %}active{% endif %}">Чеки пользователя</a>
+      {% endif %}
       {% endif %}
       <a href="{% url 'panel:logout' %}">Выйти</a>
     </nav>

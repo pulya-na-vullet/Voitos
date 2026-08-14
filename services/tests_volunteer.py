@@ -118,7 +118,10 @@ class VolunteerHelpTests(TestCase):
 
 class GroupsPageTests(TestCase):
     def setUp(self) -> None:
-        self.admin = User.objects.create_user("grpadm", password="pass")
+        self.admin = User.objects.create_superuser("grpadm", "g@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="grpadm", password="pass")
 

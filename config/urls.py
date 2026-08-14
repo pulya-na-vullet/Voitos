@@ -10,7 +10,17 @@ urlpatterns = [
     path("panel/", include(("panel.urls", "panel"), namespace="panel")),
 ]
 
-if settings.DEBUG:
+# Media/static: DEBUG или явные флаги (Waitress без nginx).
+_serve_media = settings.DEBUG or getattr(settings, "SERVE_MEDIA", False)
+_serve_static = settings.DEBUG or getattr(settings, "SERVE_STATIC", False)
+if _serve_media:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    if settings.STATICFILES_DIRS:
-        urlpatterns += static(settings.STATIC_URL, document_root=settings.STATICFILES_DIRS[0])
+if _serve_static:
+    # В DEBUG — исходники из STATICFILES_DIRS; иначе — collectstatic → STATIC_ROOT
+    static_root = (
+        settings.STATICFILES_DIRS[0]
+        if settings.DEBUG and settings.STATICFILES_DIRS
+        else settings.STATIC_ROOT
+    )
+    if static_root:
+        urlpatterns += static(settings.STATIC_URL, document_root=static_root)

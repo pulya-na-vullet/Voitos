@@ -36,7 +36,9 @@ class ClientsMapTests(TestCase):
         self.alley.members.add(self.elena, self.dmitry, self.ivan)
         self.rockers.members.add(self.rocker)
         link_family_members([self.elena, self.dmitry])
-        self.admin = User.objects.create_user("mapadm", password="pass")
+        self.admin = User.objects.create_superuser("mapadm", "m@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="mapadm", password="pass")
 
