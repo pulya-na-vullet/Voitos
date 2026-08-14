@@ -221,60 +221,73 @@ def format_roles_list(roles=None) -> str:
     return "\n".join(lines)
 
 
+def _parse_role_list_number(text: str) -> int | None:
+    """«1», «1.», «№2», «число 3» → номер пункта списка (1-based)."""
+    raw = (text or "").strip().lower().replace("ё", "е")
+    if not raw:
+        return None
+    if raw.isdigit():
+        return int(raw)
+    m = re.match(r"^(?:№\s*)?(\d{1,3})(?:\s*[.)\-:])?\s*$", raw)
+    if m:
+        return int(m.group(1))
+    m = re.match(r"^(?:номер|пункт|вариант)\s*[№#]?\s*(\d{1,3})\s*$", raw)
+    if m:
+        return int(m.group(1))
+    return None
+
+
 def match_role_from_text(text: str, roles=None) -> ExecutorRole | None:
-    """Сопоставить текст с ролью: номер из списка или подстрока названия/кода."""
+    """Сопоставить текст с ролью: номер из списка админа или название."""
     roles = list(roles if roles is not None else active_roles())
     raw = (text or "").strip().lower().replace("ё", "е")
     if not raw or not roles:
         return None
-    if raw.isdigit():
-        idx = int(raw) - 1
+
+    num = _parse_role_list_number(raw)
+    if num is not None:
+        idx = num - 1
         if 0 <= idx < len(roles):
             return roles[idx]
-    # прямые алиасы для техники / частых ролей (если такие роли есть в каталоге)
+        return None
+
+    # Точное / вхождение названия роли из каталога администратора
+    for role in roles:
+        name = (role.name or "").lower().replace("ё", "е").strip()
+        if not name:
+            continue
+        if raw == name or name in raw or raw in name:
+            return role
+
+    # Слова из названия (длиннее 3 символов): «тракторист» ↔ «Тракторист-погрузчик»
+    for role in roles:
+        name = (role.name or "").lower().replace("ё", "е")
+        for part in re.split(r"[\s/,\-]+", name):
+            part = part.strip()
+            if len(part) >= 4 and (part in raw or raw in part):
+                return role
+
+    # Устаревшие коды (на случай ручных code=tractor и т.п.)
     aliases = {
         "трактор": "tractor",
         "тракторист": "tractor",
         "погрузчик": "tractor",
         "камаз": "truck",
         "грузовик": "truck",
-        "грузовой": "truck",
-        "разнорабочий": "handyman",
-        "каменщик": "mason",
-        "плиточник": "tiler",
         "электрик": "electrician",
         "сварщик": "welder",
         "грузчик": "loader",
-        "компьютерный мастер": "computer_master",
-        "компьютерщик": "computer_master",
-        "маникюр": "manicure",
-        "мастер по маникюру": "manicure",
-        "репетитор математики": "tutor_math",
-        "математика": "tutor_math",
-        "репетитор русского": "tutor_russian",
-        "русский язык": "tutor_russian",
-        "репетитор биологии": "tutor_biology",
-        "биология": "tutor_biology",
-        "репетитор английского": "tutor_english",
-        "английский": "tutor_english",
     }
     for key, code in aliases.items():
         if key in raw:
             for role in roles:
                 if role.code == code:
                     return role
-    for role in roles:
-        name = role.name.lower().replace("ё", "е")
-        if name in raw or role.code in raw:
-            return role
-        if len(name) >= 4 and name in raw:
-            return role
-    # совпадение по ключевому слову из названия роли («электрик» в «Электрик»)
-    for role in roles:
-        name = role.name.lower().replace("ё", "е")
-        for part in re.split(r"[\s/,\-]+", name):
-            if len(part) >= 4 and part in raw:
-                return role
+            # если кода нет — ищем роль, в названии которой есть ключ
+            for role in roles:
+                name = (role.name or "").lower().replace("ё", "е")
+                if key in name:
+                    return role
     return None
 
 

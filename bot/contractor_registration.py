@@ -41,14 +41,23 @@ def start_contractor_registration(
         role = role_by_code(equipment_type)
     if role is not None:
         return _after_role_chosen(user, pending, role)
+
+    roles = list(active_roles())
+    if not roles:
+        pending.clear_pending()
+        return (
+            "Сейчас нет доступных ролей исполнителей.\n"
+            "Администратор ещё не добавил их в каталог — попробуйте позже."
+        )
+
     pending.pending_payload = {"step": "role"}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     return (
         "Регистрация исполнителя.\n"
-        "Выберите роль:\n"
-        + format_roles_list()
-        + "\n\n📄 — для роли нужны подтверждающие документы.\n"
-        "Напишите номер или название."
+        "Кем вы работаете? Выберите номер из списка:\n\n"
+        + format_roles_list(roles)
+        + "\n\nНапишите цифру (например: 1)."
+        + "\n📄 — для этой роли понадобится фото документа о квалификации."
     )
 
 
@@ -59,12 +68,12 @@ def _after_role_chosen(user: BotUser, pending: PendingAction, role: ExecutorRole
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     if role.is_equipment:
         return (
-            f"Регистрация: {role.name}.\n"
+            f"Роль: {role.name}.\n"
             "Укажите модель / описание техники "
             "(например: МТЗ-82 погрузчик или Камаз 55111)."
         )
     return (
-        f"Регистрация: {role.name}.\n"
+        f"Роль: {role.name}.\n"
         "Кратко опишите опыт / специализацию (или «нет»)."
     )
 
@@ -82,9 +91,21 @@ def handle_contractor_registration_step(
         role = ExecutorRole.objects.filter(pk=payload["role_id"]).first()
 
     if step == "role":
-        role = match_role_from_text(raw)
+        roles = list(active_roles())
+        if not roles:
+            pending.clear_pending()
+            return (
+                "Сейчас нет доступных ролей.\n"
+                "Обратитесь к администратору или попробуйте позже."
+            )
+        role = match_role_from_text(raw, roles)
         if not role:
-            return "Не понял роль.\n\n" + format_roles_list()
+            return (
+                "Не понял номер.\n"
+                "Напишите цифру из списка:\n\n"
+                + format_roles_list(roles)
+                + "\n\nНапример: 1"
+            )
         return _after_role_chosen(user, pending, role)
 
     if not role:

@@ -210,13 +210,10 @@ class MessagePipeline:
 
         if intent.intent == "contractor_registration":
             from bot.contractor_registration import start_contractor_registration
-            from services.executor_roles import match_role_from_text
 
-            role = match_role_from_text(text)
-            eq = role.code if role else None
-            return start_contractor_registration(
-                user, pending, equipment_type=eq, role=role
-            )
+            # Команда «стать исполнителем» — всегда показываем полный список ролей.
+            # Роль по номеру/названию человек выбирает следующим сообщением.
+            return start_contractor_registration(user, pending)
 
         if intent.intent == "work_request":
             from bot.work_request import start_work_request

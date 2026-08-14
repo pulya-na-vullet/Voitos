@@ -37,12 +37,19 @@ def start_work_request(
     if role is None and text:
         role = extract_role_from_call_phrase(text) or match_role_from_text(text)
     if role is None:
+        roles = list(active_roles())
+        if not roles:
+            pending.clear_pending()
+            return (
+                "Сейчас нет доступных ролей исполнителей.\n"
+                "Администратор ещё не добавил их в каталог."
+            )
         pending.pending_payload = {"step": "role"}
         pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
         return (
-            "Кого вызвать?\n"
-            + format_roles_list()
-            + "\n\nНапишите номер или название роли."
+            "Кого вызвать? Выберите номер из списка:\n\n"
+            + format_roles_list(roles)
+            + "\n\nНапишите цифру (например: 1)."
         )
     pending.pending_payload = {"step": "description", "role_id": role.id}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
@@ -58,9 +65,15 @@ def handle_work_request_step(user: BotUser, text: str, pending: PendingAction) -
     raw = (text or "").strip()
 
     if step == "role":
-        role = match_role_from_text(raw)
+        roles = list(active_roles())
+        role = match_role_from_text(raw, roles)
         if not role:
-            return "Не понял роль.\n\n" + format_roles_list()
+            return (
+                "Не понял номер.\n"
+                "Напишите цифру из списка:\n\n"
+                + format_roles_list(roles)
+                + "\n\nНапример: 1"
+            )
         payload = {"step": "description", "role_id": role.id}
         pending.pending_payload = payload
         pending.save(update_fields=["pending_payload", "updated_at"])

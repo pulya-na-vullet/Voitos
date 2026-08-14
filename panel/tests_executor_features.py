@@ -16,10 +16,14 @@ from database.models import (
     ServiceGroup,
     WorkRequest,
 )
+from bot.contractor_registration import (
+    handle_contractor_registration_step,
+    start_contractor_registration,
+)
 from bot.work_request import handle_work_request_photo, handle_work_request_step, start_work_request
 from panel.manager_log import log_manager_action
 from panel.roles import assign_group_manager
-from services.executor_roles import apply_flags_to_role
+from services.executor_roles import apply_flags_to_role, format_roles_list, match_role_from_text
 
 User = get_user_model()
 
@@ -90,6 +94,42 @@ class ExecutorRolesPanelTests(TestCase):
         self.assertTrue(role.is_equipment)
         self.assertFalse(role.requires_qualification_docs)
         self.assertTrue(role.for_road)
+
+
+class ContractorRegistrationByNumberTests(TestCase):
+    def setUp(self):
+        self.r1 = ExecutorRole.objects.create(
+            code="r_aaa111bbb222", name="Тракторист", is_equipment=True, is_active=True
+        )
+        self.r2 = ExecutorRole.objects.create(
+            code="r_ccc333ddd444", name="Сантехник", is_active=True
+        )
+        self.r3 = ExecutorRole.objects.create(
+            code="r_eee555fff666", name="Скрытая", is_active=False
+        )
+        self.user = BotUser.objects.create(max_user_id="cr1", real_name="Иван", phone="89625507832")
+        self.pending, _ = PendingAction.objects.get_or_create(user=self.user)
+
+    def test_list_shows_only_active_numbered(self):
+        text = format_roles_list()
+        self.assertIn("1. Тракторист", text)
+        self.assertIn("2. Сантехник", text)
+        self.assertNotIn("Скрытая", text)
+
+    def test_match_by_number(self):
+        self.assertEqual(match_role_from_text("1").id, self.r1.id)
+        self.assertEqual(match_role_from_text("2.").id, self.r2.id)
+        self.assertEqual(match_role_from_text("тракторист").id, self.r1.id)
+        self.assertIsNone(match_role_from_text("9"))
+
+    def test_registration_picks_role_by_digit(self):
+        msg = start_contractor_registration(self.user, self.pending)
+        self.assertIn("Выберите номер", msg)
+        self.assertIn("1. Тракторист", msg)
+        self.assertIn("2. Сантехник", msg)
+        msg = handle_contractor_registration_step(self.user, "2", self.pending)
+        self.assertIn("Сантехник", msg)
+        self.assertEqual(self.pending.pending_payload.get("role_id"), self.r2.id)
 
 
 class WorkRequestBotTests(TestCase):
