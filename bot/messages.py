@@ -12,7 +12,6 @@ def _days_until(dt) -> int:
     now = timezone.now()
     if dt <= now:
         return 0
-    # Round up partial days so "23h left" still shows as 1 day
     seconds = (dt - now).total_seconds()
     return max(1, int((seconds + 86399) // 86400)) if seconds > 0 else 0
 
@@ -29,7 +28,7 @@ def subscription_days_remaining(user: BotUser) -> int:
 
 
 def subscription_short_line(user: BotUser) -> str:
-    """One-line status for the help message footer/header."""
+    """Короткий статус для шапки «помощь»."""
     user.ensure_grace_period()
     state = user.access_state()
     days = subscription_days_remaining(user)
@@ -38,28 +37,18 @@ def subscription_short_line(user: BotUser) -> str:
         until_s = timezone.localtime(until).strftime("%d.%m.%Y")
         payer = user.subscription_paid_by()
         if payer:
-            return (
-                f"Подписка активна (оплачена {payer}): осталось {days} дн. "
-                f"(до {until_s})."
-            )
-        return f"Подписка активна: осталось {days} дн. (до {until_s})."
+            return f"Подписка до {until_s} ({days} дн., оплатил {payer})."
+        return f"Подписка до {until_s} ({days} дн.)."
     if state == AccessState.GRACE:
-        until = (
+        until_s = (
             timezone.localtime(user.grace_until).strftime("%d.%m.%Y")
             if user.grace_until
             else "скоро"
         )
-        # Новый пользователь без оплаты — пробный период; иначе льготный после подписки.
         if not user.subscription_until and not user.subscription_paid_by():
-            return (
-                f"Пробный период: осталось {days} дн. (до {until}). "
-                f"Подробнее: «подписка»."
-            )
-        return (
-            f"Подписка истекла — ждём оплату: осталось {days} дн. "
-            f"(до {until}). Подробнее: «подписка»."
-        )
-    return "Доступ закрыт — нужна оплата. Подробнее: напишите «подписка»."
+            return f"Пробный период до {until_s} ({days} дн.)."
+        return f"Ждём оплату до {until_s} ({days} дн.)."
+    return "Доступ закрыт — нужна оплата. Напишите «подписка»."
 
 
 def _admin_comments_block(user: BotUser, limit: int = 5) -> str:
@@ -69,7 +58,7 @@ def _admin_comments_block(user: BotUser, limit: int = 5) -> str:
         .order_by("-reviewed_at", "-created_at")[:limit]
     )
     if not receipts:
-        return "Комментариев администратора пока нет."
+        return "Комментариев пока нет."
     lines = []
     for r in receipts:
         when = r.reviewed_at or r.created_at
@@ -80,132 +69,94 @@ def _admin_comments_block(user: BotUser, limit: int = 5) -> str:
 
 
 def subscription_detail_message(user: BotUser) -> str:
-    """Detailed subscription / payment conditions for the «подписка» command."""
+    """Команда «подписка»: статус и куда платить."""
     user.ensure_grace_period()
     cfg = AppSettings.load()
     state = user.access_state()
     days = subscription_days_remaining(user)
     grace_days = cfg.grace_days or 14
+    price = cfg.subscription_price_rub
 
     if state == AccessState.ACTIVE:
         until_dt = user.effective_subscription_until()
         until = (
-            timezone.localtime(until_dt).strftime("%d.%m.%Y %H:%M")
+            timezone.localtime(until_dt).strftime("%d.%m.%Y")
             if until_dt
             else "—"
         )
         payer = user.subscription_paid_by()
-        paid_line = f"\nОплачена: {payer}" if payer else ""
-        status_block = (
-            f"Статус: активна\n"
-            f"Осталось дней: {days}\n"
-            f"Действует до: {until}"
-            f"{paid_line}"
-        )
+        paid = f"\nОплатил: {payer}" if payer else ""
+        status_block = f"Статус: активна\nДо: {until} ({days} дн.){paid}"
     elif state == AccessState.GRACE:
         grace = (
-            timezone.localtime(user.grace_until).strftime("%d.%m.%Y %H:%M")
+            timezone.localtime(user.grace_until).strftime("%d.%m.%Y")
             if user.grace_until
             else "—"
         )
         if not user.subscription_until and not user.subscription_paid_by():
             status_block = (
                 f"Статус: пробный период\n"
-                f"Осталось дней: {days}\n"
-                f"Пробный доступ до: {grace}\n"
-                f"Базовые функции доступны. Чтобы продолжить — оформите подписку."
+                f"До: {grace} ({days} дн.)\n"
+                f"Пока можно пользоваться ботом. Потом нужна подписка."
             )
         else:
-            sub_until = (
-                timezone.localtime(user.subscription_until).strftime("%d.%m.%Y %H:%M")
-                if user.subscription_until
-                else "не оформлена / истекла"
-            )
             status_block = (
-                f"Статус: ожидание оплаты (льготный период)\n"
-                f"Осталось дней на оплату: {days}\n"
-                f"Льготный период до: {grace}\n"
-                f"Подписка была до: {sub_until}\n"
-                f"Базовые функции пока доступны."
+                f"Статус: ждём оплату\n"
+                f"Оплатить до: {grace} ({days} дн.)\n"
+                f"Пока бот ещё работает."
             )
     else:
         status_block = (
-            f"Статус: доступ закрыт\n"
-            f"Осталось дней: 0\n"
-            f"Функции бота недоступны до принятия чека администратором."
+            "Статус: доступ закрыт\n"
+            "Пришлите чек об оплате — после проверки доступ откроется."
         )
 
-    pending = PaymentReceipt.objects.filter(user=user, status=ReceiptStatus.PENDING).count()
+    pending = PaymentReceipt.objects.filter(
+        user=user, status=ReceiptStatus.PENDING
+    ).count()
     pending_line = (
         f"Чеков на проверке: {pending}" if pending else "Чеков на проверке: нет"
     )
+
+    phone = (cfg.payment_phone or "—").strip() or "—"
+    name = (cfg.payment_name or "—").strip() or "—"
 
     return (
         "Подписка Voitos\n"
         "────────────\n"
         f"{status_block}\n"
         f"{pending_line}\n\n"
-        "Условия пользования\n"
-        f"• Стоимость: {cfg.subscription_price_rub} ₽ / месяц\n"
-        f"• Перевод на номер: {cfg.payment_phone}\n"
-        f"• Получатель: {cfg.payment_name}\n"
-        f"• Срок: сумма ÷ {cfg.subscription_price_rub} ₽ = месяцы, "
-        f"остаток переводится в дни (месяц = 30 дней)\n"
-        f"• Пробный период для новых пользователей: {grace_days} дн.\n"
-        f"• После истечения подписки — ещё {grace_days} дн. на оплату, "
-        f"затем доступ закрывается\n"
-        "• Пришлите фото, скрин или PDF чека прямо в этот чат\n"
-        "• Администратор принимает или отклоняет чек — вам придёт сообщение\n\n"
-        "Комментарии администратора\n"
+        f"Стоимость: {price} ₽ / месяц\n"
+        f"Куда переводить: {phone}\n"
+        f"Получатель: {name}\n"
+        f"Новым — {grace_days} дн. бесплатно, после подписки ещё {grace_days} дн. на оплату.\n"
+        "Пришлите фото или PDF чека в этот чат.\n\n"
+        "Комментарии по чекам\n"
         f"{_admin_comments_block(user)}\n\n"
-        f"{payment_help_text()}\n\n"
-        "Список возможностей бота — команда «описание» или «помощь»."
+        "Список команд — «помощь»."
     )
 
 
 def help_message(user: BotUser) -> str:
-    """Friendly bot card: purpose + available features."""
+    """Короткая визитка бота."""
     cfg = AppSettings.load()
     grace_days = cfg.grace_days or 14
     return (
         "Привет! Это Voitos.\n\n"
-        "Личный ассистент и помощник двора: запоминает важное для вас "
-        "(задачи, напоминания, факты) и помогает соседям решать общие дела у дома. "
-        "Через самозанятого можно собирать деньги и организовывать работы — "
-        "прозрачно, без лишней бюрократии.\n\n"
-        f"Новым пользователям доступен пробный период {grace_days} дн.\n"
+        "Помощник двора: задачи, напоминания, сборы соседей и вызов мастера.\n\n"
+        f"Новым — {grace_days} дн. бесплатно.\n"
         f"{subscription_short_line(user)}\n\n"
-        "Что умеет бот\n"
-        "• Анкета — «регистрация»: имя, телефон и адрес, чтобы знать, "
-        "кто из какого двора\n"
-        "• Семейная подписка — если живёте вместе, оплату можно оформить "
-        "на одного человека, доступ будет и у остальных членов семьи\n"
-        "• Подписка на бота — перевод самозанятому и фото/PDF чека в чат; "
-        "подробности: «подписка»\n"
-        "• Сборы на работы у дома — снег, двор, свет, дорога и другие "
-        "мероприятия: смотрите «сборы», оплачивайте чеком по предложению\n"
-        "• Исполнители — «стать исполнителем»: бот покажет список ролей "
-        "из каталога администратора, выберите цифру. "
-        "Для части ролей нужно фото документа. "
-        "Вызвать мастера: «вызвать исполнителя» / «нужен …» + фото\n"
-        "• Пожелания двора — просто напишите, что важно соседям "
-        "(«Хочу чтобы починили дорогу», «Собаки без намордников»). "
-        "Итог по темам: «пожелания»\n"
-        "• Память — напишите факт («Купила холодильник Bosch») или "
-        "скажите «Запомни это» / «Не запоминай»\n"
-        "• Поиск по памяти — «Что ты помнишь про холодильник?» / "
-        "«Что ты помнишь обо мне?»\n"
-        "• Задачи — «Нужно купить подарок маме», «Что мне нужно сделать?», "
-        "«Выполнил подарок», «Удали задачу …»\n"
-        "• Напоминания — «Напомни завтра в 10:00 …», "
-        "«Каждое утро напоминай: Доброе утро!», «Мои напоминания»\n"
-        "• Голос — отправьте голосовое, разберу и отвечу\n\n"
-        "Коротко по командам\n"
-        "• описание / помощь — эта визитка\n"
-        "• подписка — статус, срок и куда переводить\n"
-        "• сборы — текущие работы и сколько уже собрали\n"
-        "• пожелания — статистика идей вашей группы по темам\n"
-        "• регистрация — заполнить или обновить анкету\n"
-        "• стать исполнителем — регистрация по номеру роли из списка\n"
-        "• мои задачи / мои напоминания — ваши списки\n"
+        "Что умею\n"
+        "• Анкета — «регистрация»\n"
+        "• Подписка и оплата — «подписка»\n"
+        "• Сборы двора — «сборы»\n"
+        "• Вызвать мастера — «вызвать мастера» или «нужен …» + фото\n"
+        "• Стать мастером — «стать исполнителем»\n"
+        "• Пожелания двора — напишите идею или «пожелания»\n"
+        "• Память — «запомни …» / «что ты помнишь …»\n"
+        "• Задачи — «нужно …», «мои задачи»\n"
+        "• Напоминания — «напомни …», «мои напоминания»\n"
+        "• Голос — пришлите голосовое\n\n"
+        "Команды: помощь · подписка · сборы · регистрация · "
+        "стать исполнителем · мои задачи · мои напоминания"
     )

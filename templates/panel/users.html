@@ -2,7 +2,7 @@
 {% block title %}Пользователи — Voitos{% endblock %}
 {% block content %}
 <div class="topbar">
-  <h1>Пользователи бота</h1>
+  <h1>Жители</h1>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <span class="badge {% if bot_status.state == 'polling' or bot_status.state == 'connected' %}ok{% elif bot_status.state == 'error' %}bad{% endif %}">{{ bot_status.state }}</span>
     {% if panel_is_admin and pending_receipts %}<span class="badge bad">Чеков подписки: {{ pending_receipts }}</span>{% endif %}
@@ -106,7 +106,9 @@
         <td class="mono">{{ u.subscription_label }}</td>
         <td>
           {% with st=u.access_state %}
-            <span class="badge {% if st == 'active' %}ok{% elif st == 'grace' %}{% else %}bad{% endif %}">{{ st }}</span>
+            <span class="badge {% if st == 'active' %}ok{% elif st == 'grace' %}{% else %}bad{% endif %}">
+              {% if st == 'active' %}Активен{% elif st == 'grace' %}Ждём оплату{% else %}Закрыт{% endif %}
+            </span>
           {% endwith %}
         </td>
         <td class="mono">{{ u.last_seen_at|date:"d.m.Y H:i" }}</td>
@@ -120,7 +122,7 @@
       </tr>
       {% endwith %}
     {% empty %}
-      <tr><td colspan="10" class="muted">Никого не найдено</td></tr>
+      <tr><td colspan="10" class="muted">Никого не найдено. Измените поиск или фильтр.</td></tr>
     {% endfor %}
     </tbody>
   </table>

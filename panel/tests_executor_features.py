@@ -124,7 +124,7 @@ class ContractorRegistrationByNumberTests(TestCase):
 
     def test_registration_picks_role_by_digit(self):
         msg = start_contractor_registration(self.user, self.pending)
-        self.assertIn("Выберите номер", msg)
+        self.assertIn("Напишите номер", msg)
         self.assertIn("1. Тракторист", msg)
         self.assertIn("2. Сантехник", msg)
         msg = handle_contractor_registration_step(self.user, "2", self.pending)

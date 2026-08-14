@@ -141,7 +141,7 @@ class GroupsPageTests(TestCase):
         body = resp.content.decode()
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn('value="create_group"', body)
-        self.assertIn("Запустить сбор", body)
+        self.assertIn("Новый сбор", body)
         self.assertIn('id="snow-haul-row" hidden', body)
         self.assertIn("data-members=", body)
 

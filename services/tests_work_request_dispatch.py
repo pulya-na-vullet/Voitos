@@ -127,7 +127,7 @@ class WorkRequestDispatchTests(TestCase):
         self.assertIsNone(offer)
         req.refresh_from_db()
         self.assertIsNotNone(req.no_executor_notified_at)
-        self.assertTrue(any("нет исполнителя" in t.lower() for _, t in self.sent))
+        self.assertTrue(any("нет мастера" in t.lower() for _, t in self.sent))
 
     def test_old_request_when_contractor_verified(self):
         self.contractor.status = ContractorStatus.PENDING_REVIEW

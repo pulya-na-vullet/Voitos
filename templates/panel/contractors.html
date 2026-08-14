@@ -1,17 +1,16 @@
 {% extends "panel/base.html" %}
-{% block title %}Исполнители — Voitos{% endblock %}
+{% block title %}Мастера — Voitos{% endblock %}
 {% block content %}
 <div class="topbar">
-  <h1>Исполнители</h1>
+  <h1>Мастера</h1>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <a class="btn secondary small" href="{% url 'panel:executor_roles' %}">Роли</a>
-    <a class="btn secondary small" href="{% url 'panel:work_requests' %}">Заявки жителей</a>
-    <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
+    <a class="btn secondary small" href="{% url 'panel:work_requests' %}">Заявки</a>
+    <a class="btn secondary small" href="{% url 'panel:services' %}">← Сборы</a>
   </div>
 </div>
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
-  Исполнители, зарегистрированные в MAX («стать исполнителем»). Роли настраиваются администратором.
-  Для части ролей требуется фото документа о квалификации.
+  Регистрация в боте: «стать исполнителем». Для части ролей нужно фото документа.
 </p>
 
 <div class="card" style="margin-bottom:16px;">
@@ -32,14 +31,14 @@
   <table>
     <thead>
       <tr>
-        <th>Исполнитель</th>
+        <th>Мастер</th>
         <th>Роль</th>
         <th>Описание</th>
         <th>Документ</th>
         <th>Связь</th>
         <th>Перевод</th>
         <th>Банк</th>
-        <th>НП</th>
+        <th>Нас. пункт</th>
         <th>Рейтинг</th>
         <th>Заработано</th>
         <th>Статус</th>

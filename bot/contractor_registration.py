@@ -46,8 +46,8 @@ def start_contractor_registration(
     if not roles:
         pending.clear_pending()
         return (
-            "Сейчас нет доступных ролей исполнителей.\n"
-            "Администратор ещё не добавил их в каталог — попробуйте позже."
+            "Пока нет ролей мастеров в каталоге.\n"
+            "Попробуйте позже."
         )
 
     pending.pending_payload = {"step": "role"}
@@ -60,14 +60,12 @@ def start_contractor_registration(
     have = ""
     if existing:
         names = ", ".join(p.role_label for p in existing)
-        have = f"\nУже в анкете: {names}. Можно добавить ещё одну роль.\n"
+        have = f"Уже есть: {names}. Можно добавить ещё.\n"
     return (
-        "Регистрация исполнителя.\n"
+        "Регистрация мастера.\n"
         f"{have}"
-        "Кем вы работаете? Выберите номер из списка:\n\n"
+        "Кем работаете? Напишите номер:\n\n"
         + format_roles_list(roles)
-        + "\n\nНапишите цифру (например: 1)."
-        + "\n📄 — для этой роли понадобится фото документа о квалификации."
     )
 
 
@@ -79,12 +77,14 @@ def _after_role_chosen(user: BotUser, pending: PendingAction, role: ExecutorRole
     if role.is_equipment:
         return (
             f"Роль: {role.name}.\n"
-            "Укажите модель / описание техники "
-            "(например: МТЗ-82 погрузчик или Камаз 55111)."
+            "Модель или описание техники (например: МТЗ-82)."
         )
+    doc = ""
+    if role.requires_qualification_docs:
+        doc = "\nПозже попросим фото документа."
     return (
         f"Роль: {role.name}.\n"
-        "Кратко опишите опыт / специализацию (или «нет»)."
+        f"Кратко опишите опыт (или «нет»).{doc}"
     )
 
 
@@ -337,11 +337,10 @@ def _finish(
     if len(all_roles) > 1:
         roles_line = "\nВсе ваши роли: " + ", ".join(p.role_label for p in all_roles)
     return (
-        "Анкета исполнителя отправлена администратору.\n"
+        "Анкета отправлена на проверку.\n"
         f"Роль: {role.name}\n"
         f"Описание: {profile.equipment_label or '—'}\n"
-        f"Банк: {profile.bank_name or '—'}\n"
-        f"Тел. для перевода: {profile.payout_phone or profile.phone or '—'}"
+        f"Телефон для перевода: {profile.payout_phone or profile.phone or '—'}"
         f"{doc_line}{roles_line}\n"
-        "После проверки вы сможете получать заказы."
+        "После проверки начнёте получать заказы."
     )

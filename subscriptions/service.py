@@ -103,25 +103,23 @@ def format_period(months: int, days: int = 0) -> str:
 
 
 PAYMENT_HELP = (
-    "Чтобы продлить доступ, переведите оплату на номер {phone}\n"
+    "Переведите {price} ₽ / месяц на номер {phone}\n"
     "Получатель: {name}\n"
-    "Стоимость: {price} ₽ / месяц.\n"
-    "Пришлите в этот чат фото, скрин или PDF чека о переводе — всё прозрачно, "
-    "после проверки администратором доступ продлится."
+    "Пришлите фото или PDF чека в этот чат — после проверки доступ продлится."
 )
 
 
 def payment_help_text() -> str:
     cfg = AppSettings.load()
     return PAYMENT_HELP.format(
-        phone=cfg.payment_phone,
-        name=cfg.payment_name,
+        phone=(cfg.payment_phone or "—").strip() or "—",
+        name=(cfg.payment_name or "—").strip() or "—",
         price=cfg.subscription_price_rub,
     )
 
 
 def access_message(user: BotUser) -> str | None:
-    """Return a message if user should be notified / blocked; None if full access OK."""
+    """Сообщение при ограниченном доступе; None если всё ок."""
     user.ensure_grace_period()
     state = user.access_state()
     cfg = AppSettings.load()
@@ -131,24 +129,22 @@ def access_message(user: BotUser) -> str | None:
     if state == AccessState.GRACE:
         until = user.grace_until
         until_s = timezone.localtime(until).strftime("%d.%m.%Y") if until else "скоро"
-        # Пробный период: подписки ещё не было (только grace с first_seen)
         if not user.subscription_until and not user.subscription_paid_by():
             return (
-                f"Идёт пробный период до {until_s} "
-                f"({grace_days} дн. с первого контакта).\n\n"
+                f"Пробный период до {until_s} ({grace_days} дн.).\n\n"
                 f"{payment_help_text()}\n\n"
-                "Оформите подписку заранее, чтобы доступ не прервался."
+                "Оплатите заранее, чтобы доступ не прервался."
             )
         return (
-            f"Срок подписки истёк. Жду оплату в течение {grace_days} дн. "
-            f"(до {until_s}).\n\n"
+            f"Подписка закончилась. Оплатите до {until_s} "
+            f"(ещё {grace_days} дн.).\n\n"
             f"{payment_help_text()}\n\n"
-            "Пока идёт льготный период, базовые функции ещё доступны."
+            "Пока бот ещё работает."
         )
     return (
-        "Доступ к функциям закрыт: оплата не поступила.\n\n"
+        "Доступ закрыт — нужна оплата.\n\n"
         f"{payment_help_text()}\n\n"
-        "После проверки чека администратором доступ откроется автоматически."
+        "После проверки чека доступ откроется."
     )
 
 

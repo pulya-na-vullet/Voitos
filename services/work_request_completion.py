@@ -184,9 +184,9 @@ def start_completion(user: BotUser, pending: PendingAction) -> str:
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     return (
         f"Заявка #{req.id} ({req.role.name}).\n"
-        "Как клиент оплатил работу?\n"
-        "1 / перевод — был перевод денег (нужен чек)\n"
-        "2 / наличные — оплата наличными (укажете сумму)"
+        "Как клиент оплатил?\n"
+        "1 / перевод — был перевод (нужен чек)\n"
+        "2 / наличные — укажете сумму"
     )
 
 
@@ -314,10 +314,10 @@ def _finalize_executor_report(
         meta={"work_request_id": req.id},
     )
     return (
-        f"Отчёт по заявке #{req.id} принят.\n"
-        f"Способ: {req.get_pay_method_display()}, сумма: {amount} ₽.\n"
-        f"Через {CLIENT_CONFIRM_DELAY_MINUTES} мин спросим клиента о сумме.\n"
-        "После его подтверждения нужно будет перевести комиссию 10%."
+        f"Отчёт по заявке #{req.id} принят: {amount} ₽ "
+        f"({req.get_pay_method_display()}).\n"
+        f"Через {CLIENT_CONFIRM_DELAY_MINUTES} мин спросим клиента.\n"
+        "После подтверждения — комиссия 10%."
     )
 
 
@@ -325,20 +325,14 @@ def _client_confirm_message(req: WorkRequest) -> str:
     amount = req.reported_amount or Decimal("0")
     if req.pay_method == WorkRequestPayMethod.TRANSFER:
         return (
-            f"По заявке #{req.id} ({req.role.name}) исполнитель указал, "
-            f"что вы перевели {amount} ₽.\n\n"
-            "Подтвердите:\n"
-            "1 / да — сумма верна, перевод получен\n"
-            "2 / нет — напишите фактическую сумму перевода числом\n"
-            "Или сразу отправьте сумму числом."
+            f"Заявка #{req.id} ({req.role.name}): мастер указал перевод {amount} ₽.\n\n"
+            "1 / да — верно\n"
+            "2 / нет — напишите свою сумму числом"
         )
     return (
-        f"По заявке #{req.id} ({req.role.name}) исполнитель указал оплату "
-        f"наличными {amount} ₽.\n\n"
-        "Подтвердите:\n"
-        "1 / да — сумма верна\n"
-        "2 / нет — укажите, сколько вы реально выплатили исполнителю (числом)\n"
-        "Или сразу отправьте сумму числом."
+        f"Заявка #{req.id} ({req.role.name}): мастер указал наличные {amount} ₽.\n\n"
+        "1 / да — верно\n"
+        "2 / нет — напишите свою сумму числом"
     )
 
 
@@ -419,14 +413,11 @@ def _apply_client_confirmation(
     contractor = req.assigned_contractor
     if contractor:
         ask = (
-            f"Клиент подтвердил оплату по заявке #{req.id}: {amount} ₽.\n"
-            f"Комиссия сервиса 10%: {commission} ₽.\n"
-            f"Ваш заработок по заявке: {earned} ₽.\n\n"
-            "Переведите эту сумму самозанятому, закреплённому в системе:\n"
-            f"{platform_payee_lines()}\n\n"
-            "После перевода пришлите фото/PDF чека в этот чат.\n"
-            "Пока администратор не подтвердит оплату комиссии, "
-            "новые заявки вам предлагаться не будут."
+            f"Клиент подтвердил {amount} ₽ по заявке #{req.id}.\n"
+            f"Комиссия 10%: {commission} ₽. Вам остаётся: {earned} ₽.\n\n"
+            f"Переведите комиссию:\n{platform_payee_lines()}\n\n"
+            "Пришлите фото или PDF чека.\n"
+            "Пока чек не принят — новые заявки не приходят."
         )
         try:
             from services.work_request_dispatch import _default_send_fn

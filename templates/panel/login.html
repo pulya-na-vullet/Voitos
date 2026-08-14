@@ -1,5 +1,5 @@
 {% extends "panel/base.html" %}
-{% block title %}Voitos — Панель администратора{% endblock %}
+{% block title %}Вход — Voitos{% endblock %}
 {% block public %}
 <div class="login-wrap">
   <div class="login-card">
@@ -7,20 +7,20 @@
       <img src="/static/panel/voitos_logo_04_mono.png" alt="Voitos" class="login-logo">
       <div>
         <h1>Voitos</h1>
-        <p class="brand-sub" style="margin:0;">Панель администратора</p>
+        <p class="brand-sub" style="margin:0;">Вход в панель</p>
       </div>
     </div>
-    <p class="muted">Войдите, чтобы управлять помощником</p>
+    <p class="muted">Для администратора и менеджера группы</p>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post">
       {% csrf_token %}
       <div class="form-row">
         <label>Логин</label>
-        <input type="text" name="username" autofocus required>
+        <input type="text" name="username" autofocus required autocomplete="username">
       </div>
       <div class="form-row">
         <label>Пароль</label>
-        <input type="password" name="password" required>
+        <input type="password" name="password" required autocomplete="current-password">
       </div>
       <button class="btn" type="submit">Войти</button>
     </form>

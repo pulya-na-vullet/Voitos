@@ -6,22 +6,23 @@
   <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
     <span id="tasks-total-badge" class="badge {% if total %}bad{% else %}ok{% endif %}">Открыто: {{ total }}</span>
     <span id="tasks-live-status" class="muted" style="font-size:0.85rem;">● live</span>
+    {% if panel_is_admin %}
     <form method="post" action="{% url 'panel:admin_address_scan' %}">
       {% csrf_token %}
       <input type="hidden" name="use_ai" value="1">
-      <button class="btn" type="submit">Прогнать адреса через ИИ</button>
+      <button class="btn" type="submit">Проверить адреса (ИИ)</button>
     </form>
     <form method="post" action="{% url 'panel:admin_address_scan' %}">
       {% csrf_token %}
       <input type="hidden" name="use_ai" value="0">
-      <button class="btn secondary small" type="submit">Быстрый скан без ИИ</button>
+      <button class="btn secondary small" type="submit">Быстрая проверка</button>
     </form>
+    {% endif %}
   </div>
 </div>
 
 <p class="muted" style="margin:0 0 16px;">
-  Единая точка входа: чеки подписки, сервис-чеки, анкеты, семейные заявки и совпадения адресов.
-  Список обновляется автоматически — вручную обновлять страницу не нужно.
+  Чеки, анкеты, семьи и заявки — в одном списке. Обновляется сам.
 </p>
 
 <div id="tasks-live-root" data-fp="{{ fingerprint }}" data-feed="{{ feed_url }}">

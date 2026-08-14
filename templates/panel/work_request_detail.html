@@ -27,7 +27,7 @@
     {% else %}—{% endif %}
   </p>
   <p><strong>Роль:</strong> {{ item.role.name }}</p>
-  <p><strong>НП жителя:</strong> {{ item.client_locality|default:item.user.locality|default:"—" }}</p>
+  <p><strong>Населённый пункт:</strong> {{ item.client_locality|default:item.user.locality|default:"—" }}</p>
   <p><strong>Адрес жителя:</strong> {{ item.user.address|default:"—" }}</p>
   <p><strong>Статус:</strong> {{ item.get_status_display }}</p>
   {% if item.assigned_contractor %}
@@ -147,14 +147,17 @@
   <form method="post" style="margin-top:10px;">
     {% csrf_token %}
     <input type="hidden" name="action" value="dispatch">
-    <button class="btn secondary" type="submit">Подобрать / предложить исполнителя</button>
+    <button class="btn secondary" type="submit">Найти мастера</button>
   </form>
+  {% if panel_is_manager %}
+  <p class="muted" style="margin-top:8px;">Принять комиссию и закрыть как «Выполнена» может только администратор.</p>
+  {% endif %}
 
   <form method="post" style="margin-top:16px;">
     {% csrf_token %}
     <input type="hidden" name="action" value="save">
     <div class="form-row">
-      <label>НП жителя (для подбора)</label>
+      <label>Населённый пункт (для подбора)</label>
       <input name="client_locality" value="{{ item.client_locality }}">
     </div>
     <div class="form-row">

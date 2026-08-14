@@ -183,15 +183,15 @@ def offer_message(offer: WorkRequestOffer) -> str:
         deadline = timezone.localtime(offer.respond_deadline).strftime("%H:%M")
     return (
         f"Новая заявка #{req.id}: {req.role.name}.\n"
-        f"НП: {loc}\n"
+        f"Населённый пункт: {loc}\n"
         f"Адрес: {address}\n"
         f"Описание: {(req.description or '').strip()[:800]}\n\n"
-        f"Ответьте в течение {WORK_OFFER_MINUTES} мин"
+        f"Ответьте за {WORK_OFFER_MINUTES} мин"
         + (f" (до {deadline})" if deadline else "")
         + ":\n"
-        "1 / да — беру заказ\n"
+        "1 / да — беру\n"
         "2 / нет — отказываюсь\n"
-        "Если не ответите, заказ уйдёт другому исполнителю."
+        "Без ответа заказ уйдёт другому мастеру."
     )
 
 
@@ -297,10 +297,10 @@ def notify_client_no_executor(req: WorkRequest, *, send_fn=None) -> bool:
     send_fn = send_fn or _default_send_fn()
     loc = request_locality(req) or "вашему району"
     text = (
-        f"По заявке #{req.id} ({req.role.name}) "
-        f"на текущий момент у нас нет исполнителя по данному району"
-        + (f" ({loc})" if request_locality(req) else "")
-        + ".\nМы сообщим, когда появится подходящий мастер."
+        f"По заявке #{req.id} ({req.role.name}) пока нет мастера "
+        f"по району"
+        + (f" «{loc}»" if request_locality(req) else "")
+        + ".\nНапишем, когда найдём."
     )
     try:
         send_fn(req.user, text)
@@ -548,7 +548,7 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
             f"По заявке #{req.id} найден мастер: {c_user}.\n"
             f"Роль: {req.role.name}\n"
             f"{contacts}\n"
-            "Сейчас мастер укажет, когда сможет вас принять — пришлём варианты времени."
+            "Сейчас мастер пришлёт варианты времени."
         )
         try:
             send_fn(req.user, client_text)
@@ -556,24 +556,23 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
             logger.exception("notify client accept(home) WR %s", req.id)
         start_master_scheduling(req, send_fn=send_fn)
         return (
-            "Спасибо! Заявка за вами. Укажите окна приёма — "
-            "сообщение с инструкцией уже в чате."
+            "Заявка ваша. Укажите окна приёма — инструкция уже в чате."
         )
 
     client_text = (
-        f"По заявке #{req.id} найден исполнитель: {c_user}.\n"
+        f"По заявке #{req.id} найден мастер: {c_user}.\n"
         f"Роль: {req.role.name}\n"
         f"{contacts}\n"
-        "Он свяжется с вами для выполнения работ."
+        "Он свяжется с вами."
     )
     exec_text = (
         f"Вы приняли заявку #{req.id}.\n"
         f"Клиент: {req.user}\n"
-        f"НП: {request_locality(req) or '—'}\n"
+        f"Населённый пункт: {request_locality(req) or '—'}\n"
         f"Адрес: {address}\n"
         f"Телефон клиента: {(req.user.phone or '—')}\n"
         f"Описание: {(req.description or '')[:500]}\n\n"
-        "Когда закончите работу, напишите: заявка выполнена"
+        "Когда закончите — напишите: заявка выполнена"
     )
     try:
         send_fn(req.user, client_text)
@@ -583,7 +582,7 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         send_fn(c_user, exec_text)
     except Exception:
         logger.exception("notify contractor accept WR %s", req.id)
-    return "Спасибо! Заявка закреплена за вами. Контакты клиента отправлены в чат."
+    return "Заявка закреплена. Контакты клиента — в чате."
 
 
 

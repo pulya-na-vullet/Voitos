@@ -197,12 +197,10 @@ def _publish_slots_to_client(req: WorkRequest, slots: list[str], pending: Pendin
     contacts = format_executor_contacts_block(req.assigned_contractor)
     lines = "\n".join(f"{i}. {s}" for i, s in enumerate(slots, 1))
     client_msg = (
-        f"Мастер {master_name} готов принять вас по заявке #{req.id}.\n"
+        f"Мастер {master_name} готов принять вас (заявка #{req.id}).\n"
         f"Адрес: {addr}\n"
         f"{contacts}\n\n"
-        f"Доступные промежутки:\n{lines}\n\n"
-        "Пожалуйста, укажите мастеру, в какой временной промежуток вы придёте — "
-        "напишите номер пункта или текст окна."
+        f"Выберите время — напишите номер:\n{lines}"
     )
     try:
         send_fn(req.user, client_msg)
@@ -215,7 +213,7 @@ def _publish_slots_to_client(req: WorkRequest, slots: list[str], pending: Pendin
     c_pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
 
     return (
-        "Окна отправлены клиенту. Ждём, какой промежуток он выберет."
+        "Окна отправлены клиенту. Ждём его выбор."
     )
 
 

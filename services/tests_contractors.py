@@ -108,7 +108,7 @@ class ContractorFlowTests(TestCase):
         handle_contractor_registration_step(user, "Казань", pending)
         handle_contractor_registration_step(user, "Сбер", pending)
         reply = handle_contractor_registration_step(user, "89006667788", pending)
-        self.assertIn("отправлена", reply.lower())
+        self.assertIn("на проверку", reply.lower())
         profile = ContractorProfile.objects.get(user=user)
         self.assertEqual(profile.equipment_type, EquipmentType.TRUCK)
         self.assertEqual(profile.status, ContractorStatus.PENDING_REVIEW)
@@ -236,7 +236,7 @@ class ContractorFlowTests(TestCase):
     def test_panel_contractors_and_assign(self):
         resp = self.client.get("/panel/contractors/")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("Исполнители", resp.content.decode())
+        self.assertIn("Мастера", resp.content.decode())
         resp = self.client.post(
             f"/panel/services/campaigns/{self.campaign.id}/",
             {"action": "assign_contractor", "contractor_id": self.profile.id},

@@ -38,7 +38,7 @@ class PanelRoleMiddleware:
                 if not manager_url_allowed(url_name):
                     messages.error(
                         request,
-                        "Этот раздел доступен только администратору.",
+                        "Этот раздел только для администратора.",
                     )
                     return redirect(panel_home_url_name(request.user))
         return self.get_response(request)

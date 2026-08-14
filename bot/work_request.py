@@ -41,21 +41,20 @@ def start_work_request(
         if not roles:
             pending.clear_pending()
             return (
-                "Сейчас нет доступных ролей исполнителей.\n"
-                "Администратор ещё не добавил их в каталог."
+                "Пока нет ролей мастеров в каталоге.\n"
+                "Напишите администратору или попробуйте позже."
             )
         pending.pending_payload = {"step": "role"}
         pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
         return (
-            "Кого вызвать? Выберите номер из списка:\n\n"
+            "Кого вызвать? Напишите номер:\n\n"
             + format_roles_list(roles)
-            + "\n\nНапишите цифру (например: 1)."
         )
     pending.pending_payload = {"step": "description", "role_id": role.id}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     return (
         f"Заявка: {role.name}.\n"
-        "Опишите, что нужно сделать (текстом)."
+        "Кратко опишите, что нужно сделать."
     )
 
 
@@ -126,7 +125,7 @@ def handle_work_request_photo(
         role = ExecutorRole.objects.filter(pk=payload.get("role_id")).first()
         if not role:
             pending.clear_pending()
-            return "Ошибка заявки — начните снова: «вызвать исполнителя»."
+            return "Ошибка заявки — начните снова: «вызвать мастера»."
         req = WorkRequest.objects.create(
             user=user,
             role=role,
@@ -190,7 +189,7 @@ def _finish_if_possible(user: BotUser, pending: PendingAction, payload: dict) ->
         )
     except Exception:
         pass
-    # Автоподбор исполнителя по роли и НП
+    # Автоподбор мастера по роли и населённому пункту
     try:
         from services.work_request_dispatch import try_dispatch_request
 
@@ -203,13 +202,13 @@ def _finish_if_possible(user: BotUser, pending: PendingAction, payload: dict) ->
                 f"Заявка отправлена.\n"
                 f"Роль: {req.role.name}\n"
                 f"Фото: {len(photos)}\n"
-                "Ищем исполнителя в вашем районе — сообщим, как подтвердит заказ."
+                "Ищем мастера рядом — напишем, когда подтвердит."
             )
     except Exception:
         pass
     return (
-        f"Заявка отправлена администратору.\n"
+        f"Заявка отправлена.\n"
         f"Роль: {req.role.name}\n"
         f"Фото: {len(photos)}\n"
-        "Мы свяжемся, когда подберём исполнителя."
+        "Напишем, когда найдём мастера."
     )
