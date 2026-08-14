@@ -53,11 +53,67 @@
       </table>
       <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn" type="submit">Сохранить состав</button>
+        {% if can_delete_group %}
         <button class="btn danger" type="submit" name="action" value="delete" onclick="return confirm('Удалить группу?');">Удалить группу</button>
+        {% endif %}
       </div>
     </details>
   </form>
 </div>
+
+{% if can_assign_manager %}
+<div class="card" style="max-width:900px; margin-top:16px;">
+  <h3 style="margin-top:0;">Менеджер группы</h3>
+  <p class="muted">
+    Назначьте роль менеджера любому участнику группы. Правило: один менеджер на группу;
+    один менеджер может быть закреплён за несколькими группами.
+  </p>
+  {% if manager_login %}
+  <p>Сейчас: <strong class="mono">{{ manager_login }}</strong>
+    {% if current_manager_bot_id %}
+      — <a href="{% url 'panel:user_dashboard' current_manager_bot_id %}">карточка жителя</a>
+    {% endif %}
+  </p>
+  {% else %}
+  <p class="muted">Менеджер не назначен.</p>
+  {% endif %}
+  <form method="post" style="margin-top:12px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="assign_manager">
+    <div class="form-row">
+      <label>Участник группы</label>
+      <select name="manager_bot_user_id" required>
+        <option value="">— выберите —</option>
+        {% for u in members %}
+          <option value="{{ u.id }}" {% if u.id == current_manager_bot_id %}selected{% endif %}>
+            {{ u.real_name|default:u.display_name|default:u.max_user_id }} {% if u.phone %}({{ u.phone }}){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Пароль для входа в панель</label>
+      <input type="text" name="manager_password" placeholder="оставьте пустым, чтобы не менять / сгенерировать">
+      <p class="muted" style="margin:6px 0 0;">Если у жителя ещё нет логина — пароль задаётся здесь (или будет сгенерирован).</p>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn" type="submit">Назначить менеджером</button>
+    </div>
+  </form>
+  {% if manager_login %}
+  <form method="post" style="margin-top:10px;" onsubmit="return confirm('Снять менеджера с этой группы?');">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="clear_manager">
+    <button class="btn secondary small" type="submit">Снять менеджера</button>
+  </form>
+  {% endif %}
+</div>
+{% elif manager_login %}
+<div class="card" style="max-width:900px; margin-top:16px;">
+  <h3 style="margin-top:0;">Менеджер группы</h3>
+  <p>Вы вошли как менеджер: <strong class="mono">{{ manager_login }}</strong></p>
+</div>
+{% endif %}
 <style>
   details.members-fold > summary::-webkit-details-marker { display: none; }
   details.members-fold[open] > summary .mono { transform: rotate(180deg); display: inline-block; }

@@ -3,12 +3,13 @@ from __future__ import annotations
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 
-from database.models import BotUser, ProfileStatus
+from database.models import BotUser, PanelProfile, PanelRole, ProfileStatus
 
 
 class RankingLocalityDropdownTests(TestCase):
     def setUp(self) -> None:
-        self.admin = User.objects.create_user("adm", password="pass")
+        self.admin = User.objects.create_superuser("adm", "a@t.com", "pass")
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="adm", password="pass")
         BotUser.objects.create(

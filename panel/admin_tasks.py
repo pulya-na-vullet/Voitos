@@ -281,19 +281,37 @@ def sync_admin_tasks() -> dict[str, int]:
     return counts
 
 
-def list_today_tasks():
+def list_today_tasks(
+    *,
+    user_ids: set[int] | list[int] | None = None,
+    exclude_kinds: set[str] | list[str] | None = None,
+):
     """All open admin inbox tasks (live panel)."""
-    return (
+    qs = (
         AdminTask.objects.filter(status=AdminTaskStatus.OPEN)
         .select_related("user")
         .order_by("priority", "created_at")
     )
+    if user_ids is not None:
+        qs = qs.filter(user_id__in=user_ids)
+    if exclude_kinds:
+        qs = qs.exclude(kind__in=list(exclude_kinds))
+    return qs
 
 
-def tasks_fingerprint() -> str:
+def tasks_fingerprint(
+    *,
+    user_ids: set[int] | list[int] | None = None,
+    exclude_kinds: set[str] | list[str] | None = None,
+) -> str:
     from django.db.models import Count, Max
 
-    agg = AdminTask.objects.filter(status=AdminTaskStatus.OPEN).aggregate(
+    qs = AdminTask.objects.filter(status=AdminTaskStatus.OPEN)
+    if user_ids is not None:
+        qs = qs.filter(user_id__in=user_ids)
+    if exclude_kinds:
+        qs = qs.exclude(kind__in=list(exclude_kinds))
+    agg = qs.aggregate(
         n=Count("id"),
         max_id=Max("id"),
         latest=Max("updated_at"),
@@ -302,10 +320,14 @@ def tasks_fingerprint() -> str:
     return f"{agg['n'] or 0}:{agg['max_id'] or 0}:{latest}"
 
 
-def build_task_sections() -> tuple[list[dict], int, str]:
+def build_task_sections(
+    *,
+    user_ids: set[int] | list[int] | None = None,
+    exclude_kinds: set[str] | list[str] | None = None,
+) -> tuple[list[dict], int, str]:
     from collections import defaultdict
 
-    tasks = list(list_today_tasks())
+    tasks = list(list_today_tasks(user_ids=user_ids, exclude_kinds=exclude_kinds))
     grouped: dict[str, list] = defaultdict(list)
     for t in tasks:
         grouped[t.kind].append(t)
@@ -313,4 +335,6 @@ def build_task_sections() -> tuple[list[dict], int, str]:
     for kind, label in AdminTaskKind.choices:
         if kind in grouped:
             sections.append({"kind": kind, "label": label, "tasks": grouped[kind]})
-    return sections, len(tasks), tasks_fingerprint()
+    return sections, len(tasks), tasks_fingerprint(
+        user_ids=user_ids, exclude_kinds=exclude_kinds
+    )

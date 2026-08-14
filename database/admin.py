@@ -12,6 +12,7 @@ from database.models import (
     ContractorProfile,
     MemoryItem,
     NeighborhoodWish,
+    PanelProfile,
     PaymentReceipt,
     PendingAction,
     Reminder,
@@ -70,8 +71,17 @@ class PaymentReceiptAdmin(admin.ModelAdmin):
 
 @admin.register(ServiceGroup)
 class ServiceGroupAdmin(admin.ModelAdmin):
-    list_display = ("name", "created_at", "updated_at")
+    list_display = ("name", "manager", "created_at", "updated_at")
     filter_horizontal = ("members",)
+    raw_id_fields = ("manager",)
+
+
+@admin.register(PanelProfile)
+class PanelProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "role", "bot_user", "updated_at")
+    list_filter = ("role",)
+    search_fields = ("user__username", "bot_user__real_name", "bot_user__phone")
+    raw_id_fields = ("user", "bot_user")
 
 
 @admin.register(NeighborhoodWish)

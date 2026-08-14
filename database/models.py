@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -534,6 +535,55 @@ class PaymentReceipt(models.Model):
         return " ".join(parts) if parts else "0"
 
 
+class PanelRole(models.TextChoices):
+    ADMIN = "admin", "Администратор"
+    MANAGER = "manager", "Менеджер"
+
+
+class PanelProfile(models.Model):
+    """Роль пользователя панели (администратор / менеджер)."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="panel_profile",
+        verbose_name="Учётная запись",
+    )
+    role = models.CharField(
+        "Роль",
+        max_length=16,
+        choices=PanelRole.choices,
+        default=PanelRole.ADMIN,
+        db_index=True,
+    )
+    bot_user = models.OneToOneField(
+        "BotUser",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="panel_account",
+        verbose_name="Пользователь бота",
+        help_text="Для менеджера — житель, из которого назначена роль.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Профиль панели"
+        verbose_name_plural = "Профили панели"
+
+    def __str__(self) -> str:
+        return f"{self.user.username} ({self.get_role_display()})"
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == PanelRole.ADMIN
+
+    @property
+    def is_manager(self) -> bool:
+        return self.role == PanelRole.MANAGER
+
+
 class ServiceGroup(models.Model):
     """Admin-defined group of residents for service campaign broadcasts."""
 
@@ -541,6 +591,16 @@ class ServiceGroup(models.Model):
     description = models.TextField(blank=True, default="")
     members = models.ManyToManyField(
         BotUser, blank=True, related_name="service_groups"
+    )
+    # Один менеджер (администратор группы) на группу; один менеджер — на несколько групп.
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="managed_service_groups",
+        verbose_name="Менеджер группы",
+        help_text="Роль менеджера: один на группу, может вести несколько групп.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

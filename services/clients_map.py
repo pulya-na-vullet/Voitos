@@ -176,16 +176,17 @@ def _expand_with_family(users: list[BotUser]) -> list[BotUser]:
     return list(by_id.values())
 
 
-def build_clients_map() -> list[dict[str, Any]]:
+def build_clients_map(*, group_ids: list[int] | set[int] | None = None) -> list[dict[str, Any]]:
     """Все группы сервисов как отдельные графы + блок без группы."""
-    groups = list(
-        ServiceGroup.objects.prefetch_related(
-            Prefetch(
-                "members",
-                queryset=BotUser.objects.select_related("family_payer").order_by("id"),
-            )
-        ).order_by("name", "id")
-    )
+    groups_qs = ServiceGroup.objects.prefetch_related(
+        Prefetch(
+            "members",
+            queryset=BotUser.objects.select_related("family_payer").order_by("id"),
+        )
+    ).order_by("name", "id")
+    if group_ids is not None:
+        groups_qs = groups_qs.filter(id__in=group_ids)
+    groups = list(groups_qs)
 
     graphs: list[dict[str, Any]] = []
     seen_user_ids: set[int] = set()
@@ -204,21 +205,23 @@ def build_clients_map() -> list[dict[str, Any]]:
         if graph:
             graphs.append(graph)
 
-    orphan_users = list(
-        BotUser.objects.filter(is_active=True)
-        .exclude(id__in=seen_user_ids)
-        .select_related("family_payer")
-        .order_by("id")[:200]
-    )
-    if orphan_users:
-        users = _expand_with_family(orphan_users)
-        users = [u for u in users if int(u.id) not in seen_user_ids]
-        if users:
-            graph = build_group_graph(
-                MapGroup(id=None, name="Без группы"),
-                users,
-            )
-            if graph:
-                graphs.append(graph)
+    # Блок «Без группы» только для администратора (полный обзор).
+    if group_ids is None:
+        orphan_users = list(
+            BotUser.objects.filter(is_active=True)
+            .exclude(id__in=seen_user_ids)
+            .select_related("family_payer")
+            .order_by("id")[:200]
+        )
+        if orphan_users:
+            users = _expand_with_family(orphan_users)
+            users = [u for u in users if int(u.id) not in seen_user_ids]
+            if users:
+                graph = build_group_graph(
+                    MapGroup(id=None, name="Без группы"),
+                    users,
+                )
+                if graph:
+                    graphs.append(graph)
 
     return graphs

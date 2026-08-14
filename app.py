@@ -94,9 +94,13 @@ def ensure_admin_user() -> None:
             user.save()
         logger.info("Admin user '%s' ready", username)
 
-    from database.models import AppSettings
+    from database.models import AppSettings, PanelProfile, PanelRole
 
     AppSettings.load()
+    PanelProfile.objects.update_or_create(
+        user=user,
+        defaults={"role": PanelRole.ADMIN},
+    )
 
 
 def _ensure_env_file() -> None:
