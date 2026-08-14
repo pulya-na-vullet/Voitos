@@ -34,6 +34,8 @@
       <a href="{% url 'panel:contractors' %}" class="{% if request.resolver_match.url_name == 'contractors' or request.resolver_match.url_name == 'executor_roles' or request.resolver_match.url_name == 'work_requests' or request.resolver_match.url_name == 'work_request_detail' %}active{% endif %}">Исполнители</a>
       <a href="{% url 'panel:executor_roles' %}" class="nav-sub {% if request.resolver_match.url_name == 'executor_roles' %}active{% endif %}">Роли исполнителей</a>
       <a href="{% url 'panel:work_requests' %}" class="nav-sub {% if request.resolver_match.url_name == 'work_requests' or request.resolver_match.url_name == 'work_request_detail' %}active{% endif %}">Заявки жителей</a>
+      {% elif panel_is_manager %}
+      <a href="{% url 'panel:work_requests' %}" class="{% if request.resolver_match.url_name == 'work_requests' or request.resolver_match.url_name == 'work_request_detail' %}active{% endif %}">Заявки жителей</a>
       {% endif %}
       <a href="{% url 'panel:services_ranking' %}" class="{% if request.resolver_match.url_name == 'services_ranking' %}active{% endif %}">Рейтинг граждан</a>
       <a href="{% url 'panel:clients_map' %}" class="{% if request.resolver_match.url_name == 'clients_map' %}active{% endif %}">Карта клиентов</a>

@@ -3,7 +3,16 @@
 {% block content %}
 <div class="topbar">
   <h1>Заявка #{{ item.id }}: {{ item.role.name }}</h1>
-  <a class="btn secondary small" href="{% url 'panel:work_requests' %}">← К заявкам</a>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn secondary small" href="{% url 'panel:work_requests' %}">← К заявкам</a>
+    {% if can_delete %}
+    <form method="post" onsubmit="return confirm('Удалить заявку #{{ item.id }} безвозвратно?');">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete">
+      <button class="btn danger small" type="submit">Удалить заявку</button>
+    </form>
+    {% endif %}
+  </div>
 </div>
 <div class="card" style="max-width:900px;">
   <p><strong>Житель:</strong>

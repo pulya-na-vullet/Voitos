@@ -21,7 +21,15 @@ from database.models import (
     WorkRequestStatus,
 )
 from panel.admin_tasks import close_task_for_source
-from panel.roles import admin_required, is_panel_admin
+from panel.manager_log import log_manager_action
+from panel.roles import (
+    admin_or_manager_required,
+    admin_required,
+    can_access_bot_user,
+    is_panel_admin,
+    is_panel_manager,
+    scoped_bot_user_ids,
+)
 from services.executor_roles import (
     apply_role_form_fields,
     custom_flags_from_role,
@@ -89,12 +97,34 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-@admin_required
+@admin_or_manager_required
 @require_http_methods(["GET", "POST"])
 def work_requests_list(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         action = request.POST.get("action")
-        req = get_object_or_404(WorkRequest, pk=request.POST.get("request_id"))
+        req = get_object_or_404(
+            WorkRequest.objects.select_related("user", "role"),
+            pk=request.POST.get("request_id"),
+        )
+        if not can_access_bot_user(request.user, req.user):
+            messages.error(request, "Нет доступа к этой заявке.")
+            return redirect("panel:work_requests")
+        if action == "delete":
+            rid = req.id
+            user_id = req.user_id
+            label = f"#{rid} {req.role.name}"
+            close_task_for_source(AdminTaskKind.WORK_REQUEST, "WorkRequest", rid)
+            close_task_for_source(AdminTaskKind.WORK_COMMISSION, "WorkRequest", rid)
+            req.delete()
+            log_manager_action(
+                request.user,
+                action="work_request_delete",
+                title=f"Удалена заявка {label}",
+                detail=f"user_id={user_id}",
+                meta={"work_request_id": rid, "user_id": user_id},
+            )
+            messages.success(request, f"Заявка {label} удалена.")
+            return redirect("panel:work_requests")
         if action == "set_status":
             status = (request.POST.get("status") or "").strip()
             if status in WorkRequestStatus.values:
@@ -108,13 +138,18 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
                 messages.success(request, f"Заявка #{req.id}: {req.get_status_display()}.")
         return redirect("panel:work_requests")
 
-    # По умолчанию — все статусы кроме «выполнена».
-    # ?status=all — включая выполненные; ?status=<code> — один статус.
+    # По умолчанию — активные: без выполненных и отменённых.
+    # ?status=all — все; ?status=<code> — один статус.
     raw = request.GET.get("status")
     qs = WorkRequest.objects.select_related("user", "role").prefetch_related("photos")
+    scope = scoped_bot_user_ids(request.user)
+    if scope is not None:
+        qs = qs.filter(user_id__in=scope)
     if raw is None or raw == "":
         status_filter = "active"
-        qs = qs.exclude(status=WorkRequestStatus.DONE)
+        qs = qs.exclude(
+            status__in=[WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED]
+        )
         status = ""
     elif raw == "all":
         status_filter = "all"
@@ -126,7 +161,9 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
     else:
         status_filter = "active"
         status = ""
-        qs = qs.exclude(status=WorkRequestStatus.DONE)
+        qs = qs.exclude(
+            status__in=[WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED]
+        )
     return render(
         request,
         "panel/work_requests.html",
@@ -135,13 +172,14 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
             "status": status,
             "status_filter": status_filter,
             "statuses": WorkRequestStatus.choices,
+            "can_delete": is_panel_admin(request.user) or is_panel_manager(request.user),
         },
     )
 
 
 
 @login_required
-@admin_required
+@admin_or_manager_required
 def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(
         WorkRequest.objects.select_related(
@@ -154,8 +192,27 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
         ).prefetch_related("photos", "offers__contractor__user"),
         pk=pk,
     )
+    if not can_access_bot_user(request.user, req.user):
+        messages.error(request, "Нет доступа к этой заявке.")
+        return redirect("panel:work_requests")
     if request.method == "POST":
         action = (request.POST.get("action") or "save").strip()
+        if action == "delete":
+            rid = req.id
+            user_id = req.user_id
+            label = f"#{rid} {req.role.name}"
+            close_task_for_source(AdminTaskKind.WORK_REQUEST, "WorkRequest", rid)
+            close_task_for_source(AdminTaskKind.WORK_COMMISSION, "WorkRequest", rid)
+            req.delete()
+            log_manager_action(
+                request.user,
+                action="work_request_delete",
+                title=f"Удалена заявка {label}",
+                detail=f"user_id={user_id}",
+                meta={"work_request_id": rid, "user_id": user_id},
+            )
+            messages.success(request, f"Заявка {label} удалена.")
+            return redirect("panel:work_requests")
         if action == "dispatch":
             from services.work_request_dispatch import try_dispatch_request
 
@@ -235,6 +292,7 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "client_max_link": client_max_link,
             "assigned_phone": assigned_phone,
             "assigned_max_link": assigned_max_link,
+            "can_delete": is_panel_admin(request.user) or is_panel_manager(request.user),
         },
     )
 

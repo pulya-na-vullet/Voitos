@@ -95,13 +95,35 @@ class WorkRequestRatingTests(TestCase):
             description="открытая",
             status=WorkRequestStatus.PENDING,
         )
+        cancelled = WorkRequest.objects.create(
+            user=self.client_user,
+            role=self.role,
+            description="отменённая-заявка-xyz",
+            status=WorkRequestStatus.CANCELLED,
+        )
         c = Client()
         c.login(username="rtadm", password="pass")
         resp = c.get("/panel/work-requests/")
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
-        self.assertIn(f"#{open_req.id}" if False else str(open_req.id), body)
-        # done request should not appear by default
+        self.assertIn(str(open_req.id), body)
+        # done + cancelled should not appear by default
         self.assertNotIn(self.req.description, body)
+        self.assertNotIn(cancelled.description, body)
         resp_all = c.get("/panel/work-requests/?status=all")
-        self.assertIn(self.req.description, resp_all.content.decode())
+        all_body = resp_all.content.decode()
+        self.assertIn(self.req.description, all_body)
+        self.assertIn(cancelled.description, all_body)
+
+    def test_admin_can_delete_work_request(self):
+        admin = User.objects.create_user("rtdel", password="pass")
+        PanelProfile.objects.create(user=admin, role=PanelRole.ADMIN)
+        c = Client()
+        c.login(username="rtdel", password="pass")
+        rid = self.req.id
+        resp = c.post(
+            "/panel/work-requests/",
+            {"action": "delete", "request_id": str(rid)},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(WorkRequest.objects.filter(pk=rid).exists())

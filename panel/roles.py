@@ -54,6 +54,8 @@ MANAGER_ALLOWED_URL_NAMES = frozenset(
         "service_receipt_reject",
         "services_ranking",
         "clients_map",
+        "work_requests",
+        "work_request_detail",
     }
 )
 
@@ -288,6 +290,21 @@ def admin_required(view_func):
         ensure_panel_profile(request.user)
         if not is_panel_admin(request.user):
             messages.error(request, "Раздел доступен только администратору.")
+            return redirect(panel_home_url_name(request.user))
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
+
+
+def admin_or_manager_required(view_func):
+    """Администратор или менеджер панели."""
+
+    @login_required
+    @wraps(view_func)
+    def _wrapped(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+        ensure_panel_profile(request.user)
+        if not (is_panel_admin(request.user) or is_panel_manager(request.user)):
+            messages.error(request, "Недостаточно прав.")
             return redirect(panel_home_url_name(request.user))
         return view_func(request, *args, **kwargs)
 
