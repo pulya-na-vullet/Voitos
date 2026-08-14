@@ -6,6 +6,7 @@ from pathlib import Path
 
 from django.core.files.base import ContentFile
 from django.db.models import Sum
+from django.db import transaction
 from django.utils import timezone
 
 from database.models import (
@@ -40,7 +41,7 @@ WORK_STAGE_NEXT = {
     WorkStage.WORK_STARTED: WorkStage.WORK_DONE,
     WorkStage.WORK_DONE: WorkStage.WORK_CLOSED,
 }
-from subscriptions.receipts import normalize_phone
+from subscriptions.receipts import names_match, normalize_phone
 
 logger = logging.getLogger(__name__)
 
@@ -965,12 +966,23 @@ def submit_service_receipt(
     parsed = _parse_receipt_or_empty(image_bytes, filename)
     ocr_text = parsed.ocr_text or ""
     cfg = AppSettings.load()
-    # Also accept short form «Григорьев Д.В.»
-    phone_ok = normalize_phone(parsed.recipient_phone) == normalize_phone(
-        cfg.service_payee_phone
-    ) or normalize_phone(cfg.service_payee_phone) in normalize_phone(ocr_text)
-    name_blob = (parsed.recipient_name + " " + ocr_text).lower()
-    name_ok = "григорьев" in name_blob or parsed.details_match
+    expected_phone = normalize_phone(cfg.service_payee_phone or "")
+    expected_name = (cfg.service_payee_name or "").strip()
+    phone_ok = False
+    if expected_phone:
+        phone_ok = normalize_phone(parsed.recipient_phone) == expected_phone or (
+            expected_phone in normalize_phone(ocr_text)
+        )
+    name_ok = False
+    if expected_name:
+        name_blob = (parsed.recipient_name + " " + ocr_text)
+        name_ok = names_match(expected_name, name_blob) or names_match(
+            expected_name, parsed.recipient_name
+        )
+    if not expected_phone and not expected_name:
+        # Реквизиты не заданы — не блокируем по ФИО/телефону, только сумма
+        phone_ok = True
+        name_ok = True
     details_match = bool(phone_ok and name_ok and parsed.amount)
 
     receipt = ServiceReceipt(
@@ -1010,36 +1022,47 @@ def approve_service_receipt(
     comment: str = "",
     send_fn=None,
 ) -> ServiceReceipt:
-    if receipt.status == ReceiptStatus.APPROVED:
-        return receipt
-    amount = Decimal(receipt.amount or 0)
-    if amount <= 0:
-        raise ValueError("Нельзя принять чек без суммы.")
+    with transaction.atomic():
+        receipt = (
+            ServiceReceipt.objects.select_for_update()
+            .select_related("invite", "invite__campaign", "user")
+            .get(pk=receipt.pk)
+        )
+        if receipt.status == ReceiptStatus.APPROVED:
+            return receipt
+        amount = Decimal(receipt.amount or 0)
+        if amount <= 0:
+            raise ValueError("Нельзя принять чек без суммы.")
 
-    invite = receipt.invite
-    campaign = invite.campaign
-    invite.amount_paid = Decimal(invite.amount_paid or 0) + amount
-    if invite.amount_paid >= invite.amount_due:
-        invite.status = InviteStatus.PAID
-        invite.paid_at = timezone.now()
-    invite.save()
+        invite = (
+            type(receipt.invite)
+            .objects.select_for_update()
+            .select_related("campaign")
+            .get(pk=receipt.invite_id)
+        )
+        campaign = invite.campaign
+        invite.amount_paid = Decimal(invite.amount_paid or 0) + amount
+        if invite.amount_paid >= invite.amount_due:
+            invite.status = InviteStatus.PAID
+            invite.paid_at = timezone.now()
+        invite.save()
 
-    receipt.status = ReceiptStatus.APPROVED
-    receipt.admin_comment = comment
-    receipt.reviewed_at = timezone.now()
-    receipt.save()
+        receipt.status = ReceiptStatus.APPROVED
+        receipt.admin_comment = comment
+        receipt.reviewed_at = timezone.now()
+        receipt.save()
+
+        ActivityLog.objects.create(
+            user=receipt.user,
+            kind=ActivityKind.SERVICE_PAID,
+            title="Сервисный чек принят",
+            detail=f"+{amount} ₽ → {campaign.title}",
+            meta={"receipt_id": receipt.id},
+        )
 
     from services.tax import sync_self_employed_tax_collected
 
     sync_self_employed_tax_collected()
-
-    ActivityLog.objects.create(
-        user=receipt.user,
-        kind=ActivityKind.SERVICE_PAID,
-        title="Сервисный чек принят",
-        detail=f"+{amount} ₽ → {campaign.title}",
-        meta={"receipt_id": receipt.id},
-    )
 
     # Goal reached → close + «Сбор закрыт.» to everyone
     close_campaign_goal_reached(campaign, send_fn=send_fn)

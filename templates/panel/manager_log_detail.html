@@ -1,0 +1,28 @@
+{% extends "panel/base.html" %}
+{% block title %}Лог {{ manager.username }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Лог: {{ manager.username }}</h1>
+  <a class="btn secondary small" href="{% url 'panel:manager_logs' %}">← К менеджерам</a>
+</div>
+{% if profile and profile.bot_user %}
+<p class="muted">Житель: <a href="{% url 'panel:user_dashboard' profile.bot_user_id %}">{{ profile.bot_user }}</a></p>
+{% endif %}
+<div class="card">
+  <table>
+    <thead><tr><th>Когда</th><th>Действие</th><th>Заголовок</th><th>Детали</th></tr></thead>
+    <tbody>
+    {% for log in logs %}
+      <tr>
+        <td class="mono">{{ log.created_at|date:"d.m.Y H:i:s" }}</td>
+        <td class="mono">{{ log.action }}</td>
+        <td>{{ log.title }}</td>
+        <td>{{ log.detail|truncatechars:120 }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Действий ещё нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

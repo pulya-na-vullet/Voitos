@@ -7,10 +7,16 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch, Sum
 from django.utils import timezone
 
-from database.models import AppSettings, BotUser, ServiceGroup
+from database.models import (
+    AppSettings,
+    BotUser,
+    ServiceGroup,
+    WorkRequest,
+    WorkRequestCommissionStatus,
+)
 from services.clients_map import _expand_with_family, build_households, is_paying_user
 
 
@@ -130,6 +136,143 @@ def _payer_rows() -> list[PayerRow]:
     return rows
 
 
+def build_commission_stats() -> dict[str, Any]:
+    """Статистика комиссий 10% с исполнителей по заявкам."""
+    qs = WorkRequest.objects.exclude(
+        commission_status=WorkRequestCommissionStatus.NONE
+    ).exclude(commission_amount__isnull=True)
+
+    def _agg(status: str) -> tuple[Decimal, int]:
+        row = qs.filter(commission_status=status).aggregate(
+            total=Sum("commission_amount"),
+            cnt=Count("id"),
+        )
+        return _money(row["total"]), int(row["cnt"] or 0)
+
+    approved_total, approved_count = _agg(WorkRequestCommissionStatus.APPROVED)
+    pending_total, pending_count = _agg(WorkRequestCommissionStatus.PENDING_REVIEW)
+    awaiting_total, awaiting_count = _agg(WorkRequestCommissionStatus.AWAITING)
+    rejected_total, rejected_count = _agg(WorkRequestCommissionStatus.REJECTED)
+    open_total = _money(pending_total + awaiting_total + rejected_total)
+    open_count = pending_count + awaiting_count + rejected_count
+
+    by_executor_map: dict[int, dict[str, Any]] = {}
+    for wr in (
+        qs.select_related(
+            "assigned_contractor",
+            "assigned_contractor__user",
+            "assigned_contractor__role",
+            "role",
+        )
+        .order_by("-updated_at")
+    ):
+        contractor = wr.assigned_contractor
+        if contractor is None:
+            key = 0
+            name = "Без исполнителя"
+            role_name = wr.role.name if wr.role_id else "—"
+        else:
+            key = int(contractor.id)
+            name = (
+                (contractor.user.real_name or "").strip()
+                or (contractor.user.username or "").strip()
+                or f"#{contractor.user_id}"
+            )
+            role_name = (
+                contractor.role.name
+                if getattr(contractor, "role_id", None)
+                else (wr.role.name if wr.role_id else "—")
+            )
+        bucket = by_executor_map.setdefault(
+            key,
+            {
+                "contractor_id": key or None,
+                "name": name,
+                "role": role_name,
+                "approved_total": ZERO,
+                "approved_count": 0,
+                "pending_total": ZERO,
+                "pending_count": 0,
+                "awaiting_total": ZERO,
+                "awaiting_count": 0,
+                "rejected_total": ZERO,
+                "rejected_count": 0,
+            },
+        )
+        amount = _money(wr.commission_amount)
+        st = wr.commission_status
+        if st == WorkRequestCommissionStatus.APPROVED:
+            bucket["approved_total"] = _money(bucket["approved_total"] + amount)
+            bucket["approved_count"] += 1
+        elif st == WorkRequestCommissionStatus.PENDING_REVIEW:
+            bucket["pending_total"] = _money(bucket["pending_total"] + amount)
+            bucket["pending_count"] += 1
+        elif st == WorkRequestCommissionStatus.AWAITING:
+            bucket["awaiting_total"] = _money(bucket["awaiting_total"] + amount)
+            bucket["awaiting_count"] += 1
+        elif st == WorkRequestCommissionStatus.REJECTED:
+            bucket["rejected_total"] = _money(bucket["rejected_total"] + amount)
+            bucket["rejected_count"] += 1
+
+    by_executor = sorted(
+        by_executor_map.values(),
+        key=lambda x: (
+            -(x["approved_total"] + x["pending_total"] + x["awaiting_total"]),
+            x["name"].lower(),
+        ),
+    )
+
+    recent: list[dict[str, Any]] = []
+    for wr in (
+        qs.select_related(
+            "assigned_contractor",
+            "assigned_contractor__user",
+            "role",
+            "user",
+        )
+        .order_by("-updated_at")[:30]
+    ):
+        contractor = wr.assigned_contractor
+        if contractor is None:
+            exec_name = "—"
+        else:
+            exec_name = (
+                (contractor.user.real_name or "").strip()
+                or (contractor.user.username or "").strip()
+                or f"#{contractor.user_id}"
+            )
+        when = wr.commission_reviewed_at or wr.commission_submitted_at or wr.client_confirmed_at or wr.updated_at
+        recent.append(
+            {
+                "id": wr.id,
+                "executor": exec_name,
+                "role": wr.role.name if wr.role_id else "—",
+                "client": (wr.user.real_name or wr.user.username or f"#{wr.user_id}"),
+                "amount": _money(wr.commission_amount),
+                "confirmed_amount": _money(wr.confirmed_amount),
+                "status": wr.commission_status,
+                "status_label": wr.get_commission_status_display(),
+                "when": when,
+                "when_s": timezone.localtime(when).strftime("%d.%m.%Y %H:%M") if when else "—",
+            }
+        )
+
+    return {
+        "approved_total": approved_total,
+        "approved_count": approved_count,
+        "pending_total": pending_total,
+        "pending_count": pending_count,
+        "awaiting_total": awaiting_total,
+        "awaiting_count": awaiting_count,
+        "rejected_total": rejected_total,
+        "rejected_count": rejected_count,
+        "open_total": open_total,
+        "open_count": open_count,
+        "by_executor": by_executor,
+        "recent": recent,
+    }
+
+
 def build_earnings_forecast() -> dict[str, Any]:
     """
     Прогноз на следующий месяц.
@@ -194,4 +337,5 @@ def build_earnings_forecast() -> dict[str, Any]:
         "next_month_renewal_forecast": next_month_renewals,
         "groups": group_rows,
         "payers": detail_rows,
+        "commissions": build_commission_stats(),
     }

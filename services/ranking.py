@@ -129,9 +129,12 @@ def ranking_list(
     q: str = "",
     *,
     only_with_offers: bool = False,
+    user_ids: set[int] | list[int] | None = None,
 ) -> list[CitizenRank]:
     """Все пользователи бота. По умолчанию балл 100 (образцовый)."""
     qs = _annotate_users()
+    if user_ids is not None:
+        qs = qs.filter(id__in=user_ids)
     if only_with_offers:
         qs = qs.filter(Q(offered__gt=0) | Q(help_asked__gt=0))
     if locality:

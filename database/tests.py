@@ -204,15 +204,15 @@ class PipelineTests(TestCase):
         self.user.grace_until = None
         self.user.save()
         reply = self.pipeline.handle(self.user, "помощь")
-        self.assertIn("Что умеет бот", reply)
-        self.assertIn("придомовой", reply.lower())
+        self.assertIn("Что умею", reply)
+        self.assertIn("двор", reply.lower())
         self.assertIn("подписка", reply.lower())
         self.assertIn("дн", reply)
 
     def test_description_command_alias(self):
         reply = self.pipeline.handle(self.user, "описание")
         self.assertIn("Voitos", reply)
-        self.assertIn("самозанят", reply.lower())
+        self.assertIn("мастер", reply.lower())
         self.assertIn("сборы", reply.lower())
 
     def test_subscription_command_details(self):
@@ -228,8 +228,8 @@ class PipelineTests(TestCase):
             months_granted=1,
         )
         reply = self.pipeline.handle(self.user, "подписка")
-        self.assertIn("Условия пользования", reply)
-        self.assertIn("Осталось дней", reply)
+        self.assertIn("Стоимость", reply)
+        self.assertIn("активна", reply.lower())
         self.assertIn("Оплата подтверждена", reply)
         self.assertIn("89625507832", reply)
 

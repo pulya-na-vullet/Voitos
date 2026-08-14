@@ -15,7 +15,9 @@ from subscriptions.service import approve_receipt, submit_receipt
 class ReceiptDuplicateTests(TestCase):
     def setUp(self) -> None:
         self.user = BotUser.objects.create(max_user_id="dup1", display_name="Евген")
-        self.admin = User.objects.create_user("adm", password="pass")
+        self.admin = User.objects.create_superuser("adm", "adm@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="adm", password="pass")
         self.pdf = b"%PDF-1.4 identical cheque payload for tests"

@@ -6,6 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from django.conf import settings
+from django.db import transaction
 from django.core.files.base import ContentFile
 from django.utils import timezone
 
@@ -102,25 +103,23 @@ def format_period(months: int, days: int = 0) -> str:
 
 
 PAYMENT_HELP = (
-    "Чтобы продлить доступ, переведите оплату на номер {phone}\n"
+    "Переведите {price} ₽ / месяц на номер {phone}\n"
     "Получатель: {name}\n"
-    "Стоимость: {price} ₽ / месяц.\n"
-    "Пришлите в этот чат фото, скрин или PDF чека о переводе — всё прозрачно, "
-    "после проверки администратором доступ продлится."
+    "Пришлите фото или PDF чека в этот чат — после проверки доступ продлится."
 )
 
 
 def payment_help_text() -> str:
     cfg = AppSettings.load()
     return PAYMENT_HELP.format(
-        phone=cfg.payment_phone,
-        name=cfg.payment_name,
+        phone=(cfg.payment_phone or "—").strip() or "—",
+        name=(cfg.payment_name or "—").strip() or "—",
         price=cfg.subscription_price_rub,
     )
 
 
 def access_message(user: BotUser) -> str | None:
-    """Return a message if user should be notified / blocked; None if full access OK."""
+    """Сообщение при ограниченном доступе; None если всё ок."""
     user.ensure_grace_period()
     state = user.access_state()
     cfg = AppSettings.load()
@@ -130,16 +129,22 @@ def access_message(user: BotUser) -> str | None:
     if state == AccessState.GRACE:
         until = user.grace_until
         until_s = timezone.localtime(until).strftime("%d.%m.%Y") if until else "скоро"
+        if not user.subscription_until and not user.subscription_paid_by():
+            return (
+                f"Пробный период до {until_s} ({grace_days} дн.).\n\n"
+                f"{payment_help_text()}\n\n"
+                "Оплатите заранее, чтобы доступ не прервался."
+            )
         return (
-            f"Срок подписки истёк. Жду оплату в течение {grace_days} дн. "
-            f"(до {until_s}).\n\n"
+            f"Подписка закончилась. Оплатите до {until_s} "
+            f"(ещё {grace_days} дн.).\n\n"
             f"{payment_help_text()}\n\n"
-            "Пока идёт льготный период, базовые функции ещё доступны."
+            "Пока бот ещё работает."
         )
     return (
-        "Доступ к функциям закрыт: оплата не поступила.\n\n"
+        "Доступ закрыт — нужна оплата.\n\n"
         f"{payment_help_text()}\n\n"
-        "После проверки чека администратором доступ откроется автоматически."
+        "После проверки чека доступ откроется."
     )
 
 
@@ -230,65 +235,68 @@ def approve_receipt(
     Admin must confirm the accepted amount by hand; it becomes the saved
     payment fact and drives how many months are granted.
     """
-    if receipt.status == ReceiptStatus.APPROVED:
-        return receipt
-
     from subscriptions.duplicates import approved_identical, ensure_receipt_hash
 
-    ensure_receipt_hash(receipt)
-    approved_dupes = approved_identical(receipt)
-    if approved_dupes and not force_duplicate:
-        first = approved_dupes[0]
-        raise ValueError(
-            f"Чек #{receipt.id} попиксельно совпадает с уже принятым "
-            f"#{first.id} ({first.user}, {first.amount or '—'} ₽, "
-            f"{first.period_label()}). Повторное принятие удвоит срок подписки. "
-            "Чтобы всё равно принять — отметьте «Принять несмотря на дубль»."
+    with transaction.atomic():
+        receipt = PaymentReceipt.objects.select_for_update().select_related("user").get(
+            pk=receipt.pk
+        )
+        if receipt.status == ReceiptStatus.APPROVED:
+            return receipt
+
+        ensure_receipt_hash(receipt)
+        approved_dupes = approved_identical(receipt)
+        if approved_dupes and not force_duplicate:
+            first = approved_dupes[0]
+            raise ValueError(
+                f"Чек #{receipt.id} попиксельно совпадает с уже принятым "
+                f"#{first.id} ({first.user}, {first.amount or '—'} ₽, "
+                f"{first.period_label()}). Повторное принятие удвоит срок подписки. "
+                "Чтобы всё равно принять — отметьте «Принять несмотря на дубль»."
+            )
+
+        cfg = AppSettings.load()
+        price = Decimal(cfg.subscription_price_rub or 100)
+
+        if amount is None:
+            raise ValueError("Укажите сумму, которую принимаете по чеку.")
+        amount = Decimal(amount)
+        if amount <= 0:
+            raise ValueError("Сумма должна быть больше нуля.")
+
+        months, days = period_from_amount(amount, price)
+        if months < 1 and days < 1:
+            raise ValueError(
+                f"Сумма {amount:.0f} ₽ слишком мала для начисления срока "
+                f"(цена месяца {price:.0f} ₽)."
+            )
+
+        user = receipt.user
+        user.extend_subscription(months=months, days=days)
+        now = timezone.now()
+        receipt.amount = amount
+        receipt.status = ReceiptStatus.APPROVED
+        receipt.months_granted = months
+        receipt.days_granted = days
+        receipt.transfer_date = timezone.localdate(now)
+        receipt.details_match = True
+        receipt.admin_comment = comment
+        receipt.reviewed_at = now
+        receipt.save()
+        period = format_period(months, days)
+        ActivityLog.objects.create(
+            user=user,
+            kind=ActivityKind.RECEIPT_APPROVED,
+            title="Чек принят",
+            detail=f"{amount:.0f} ₽ → +{period} до {user.subscription_until}",
+            meta={
+                "receipt_id": receipt.id,
+                "amount": str(amount),
+                "months": months,
+                "days": days,
+            },
         )
 
-    cfg = AppSettings.load()
-    price = Decimal(cfg.subscription_price_rub or 100)
-
-    if amount is None:
-        raise ValueError("Укажите сумму, которую принимаете по чеку.")
-    amount = Decimal(amount)
-    if amount <= 0:
-        raise ValueError("Сумма должна быть больше нуля.")
-
-    months, days = period_from_amount(amount, price)
-    if months < 1 and days < 1:
-        raise ValueError(
-            f"Сумма {amount:.0f} ₽ слишком мала для начисления срока "
-            f"(цена месяца {price:.0f} ₽)."
-        )
-
-    user = receipt.user
-    user.extend_subscription(months=months, days=days)
-    now = timezone.now()
-    receipt.amount = amount
-    receipt.status = ReceiptStatus.APPROVED
-    receipt.months_granted = months
-    receipt.days_granted = days
-    # Admin confirmation becomes the payment transfer date.
-    receipt.transfer_date = timezone.localdate(now)
-    # Mark requisites as accepted by admin (shown as «распознано администратором»).
-    receipt.details_match = True
-    receipt.admin_comment = comment
-    receipt.reviewed_at = now
-    receipt.save()
-    period = format_period(months, days)
-    ActivityLog.objects.create(
-        user=user,
-        kind=ActivityKind.RECEIPT_APPROVED,
-        title="Чек принят",
-        detail=f"{amount:.0f} ₽ → +{period} до {user.subscription_until}",
-        meta={
-            "receipt_id": receipt.id,
-            "amount": str(amount),
-            "months": months,
-            "days": days,
-        },
-    )
     try:
         from services.tax import sync_self_employed_tax_collected
 

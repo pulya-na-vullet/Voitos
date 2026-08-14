@@ -72,7 +72,10 @@ class ContractorFlowTests(TestCase):
             verified_at=timezone.now(),
             phone=self.driver.phone,
         )
-        self.admin = User.objects.create_user("ctradm", password="pass")
+        self.admin = User.objects.create_superuser("ctradm", "c@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="ctradm", password="pass")
         self.sent: list[tuple[int, str]] = []
@@ -88,16 +91,24 @@ class ContractorFlowTests(TestCase):
         self.assertIn(EquipmentType.TRUCK, types)
 
     def test_registration_flow(self):
+        from database.models import ExecutorRole
+
+        truck_role = ExecutorRole.objects.create(
+            code=EquipmentType.TRUCK,
+            name="Грузовик / самосвал",
+            is_equipment=True,
+            is_active=True,
+        )
         user = BotUser.objects.create(max_user_id="ctr-reg", real_name="")
         pending, _ = PendingAction.objects.get_or_create(user=user)
-        start_contractor_registration(user, pending, equipment_type=EquipmentType.TRUCK)
+        start_contractor_registration(user, pending, role=truck_role)
         handle_contractor_registration_step(user, "Камаз 55111", pending)
         handle_contractor_registration_step(user, "А123ВС116", pending)
         handle_contractor_registration_step(user, "89005554433", pending)
         handle_contractor_registration_step(user, "Казань", pending)
         handle_contractor_registration_step(user, "Сбер", pending)
         reply = handle_contractor_registration_step(user, "89006667788", pending)
-        self.assertIn("отправлена", reply.lower())
+        self.assertIn("на проверку", reply.lower())
         profile = ContractorProfile.objects.get(user=user)
         self.assertEqual(profile.equipment_type, EquipmentType.TRUCK)
         self.assertEqual(profile.status, ContractorStatus.PENDING_REVIEW)
@@ -225,7 +236,7 @@ class ContractorFlowTests(TestCase):
     def test_panel_contractors_and_assign(self):
         resp = self.client.get("/panel/contractors/")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("Исполнители", resp.content.decode())
+        self.assertIn("Мастера", resp.content.decode())
         resp = self.client.post(
             f"/panel/services/campaigns/{self.campaign.id}/",
             {"action": "assign_contractor", "contractor_id": self.profile.id},
