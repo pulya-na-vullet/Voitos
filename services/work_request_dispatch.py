@@ -176,12 +176,14 @@ def active_offer(req: WorkRequest) -> WorkRequestOffer | None:
 def offer_message(offer: WorkRequestOffer) -> str:
     req = offer.work_request
     loc = request_locality(req) or "не указан"
+    address = (getattr(req.user, "address", None) or "").strip() or "не указан"
     deadline = ""
     if offer.respond_deadline:
         deadline = timezone.localtime(offer.respond_deadline).strftime("%H:%M")
     return (
         f"Новая заявка #{req.id}: {req.role.name}.\n"
         f"НП: {loc}\n"
+        f"Адрес: {address}\n"
         f"Описание: {(req.description or '').strip()[:800]}\n\n"
         f"Ответьте в течение {WORK_OFFER_MINUTES} мин"
         + (f" (до {deadline})" if deadline else "")
@@ -222,6 +224,13 @@ def send_offer(
     reason: str = "",
     send_fn=None,
 ) -> WorkRequestOffer:
+    from services.work_request_completion import contractor_blocked_for_new_offers
+
+    if contractor_blocked_for_new_offers(contractor):
+        raise ValueError(
+            "Исполнитель временно не получает заявки "
+            "(не закрыта комиссия 10% по предыдущей работе)."
+        )
     send_fn = send_fn or _default_send_fn()
     now = timezone.now()
     deadline = now + timedelta(minutes=WORK_OFFER_MINUTES)
@@ -277,6 +286,8 @@ def notify_client_no_executor(req: WorkRequest, *, send_fn=None) -> bool:
         return False
     if req.status in {
         WorkRequestStatus.IN_PROGRESS,
+        WorkRequestStatus.AWAITING_CLIENT,
+        WorkRequestStatus.AWAITING_COMMISSION,
         WorkRequestStatus.DONE,
         WorkRequestStatus.CANCELLED,
     }:
@@ -319,25 +330,41 @@ def try_dispatch_request(req: WorkRequest, *, send_fn=None, use_ai: bool = True)
         WorkRequestStatus.DONE,
         WorkRequestStatus.CANCELLED,
         WorkRequestStatus.IN_PROGRESS,
+        WorkRequestStatus.AWAITING_CLIENT,
+        WorkRequestStatus.AWAITING_COMMISSION,
     }:
         return None
     if active_offer(req):
         return None
 
     excluded = excluded_contractor_ids(req)
+    from services.work_request_completion import contractor_blocked_for_new_offers
+
     raw = heuristic_candidates(req)
-    raw = [(c, s, r) for c, s, r in raw if c.id not in excluded]
+    raw = [
+        (c, s, r)
+        for c, s, r in raw
+        if c.id not in excluded and not contractor_blocked_for_new_offers(c)
+    ]
     ranked = ai_rank_candidates(req, raw) if use_ai else raw
-    ranked = [(c, s, r) for c, s, r in ranked if c.id not in excluded]
+    ranked = [
+        (c, s, r)
+        for c, s, r in ranked
+        if c.id not in excluded and not contractor_blocked_for_new_offers(c)
+    ]
 
     if not ranked:
         notify_client_no_executor(req, send_fn=send_fn)
         return None
 
     contractor, score, reason = ranked[0]
-    return send_offer(
-        req, contractor, score=score, reason=reason, send_fn=send_fn
-    )
+    try:
+        return send_offer(
+            req, contractor, score=score, reason=reason, send_fn=send_fn
+        )
+    except ValueError:
+        notify_client_no_executor(req, send_fn=send_fn)
+        return None
 
 
 def dispatch_open_requests(*, send_fn=None, use_ai: bool = True) -> int:
@@ -407,10 +434,17 @@ def dispatch_for_new_contractor(
                 reason = "НП жителя не указан"
         if not matched:
             continue
+        from services.work_request_completion import contractor_blocked_for_new_offers
+
+        if contractor_blocked_for_new_offers(contractor):
+            continue
         if req.no_executor_notified_at:
             req.no_executor_notified_at = None
             req.save(update_fields=["no_executor_notified_at", "updated_at"])
-        send_offer(req, contractor, score=1.0, reason=reason, send_fn=send_fn)
+        try:
+            send_offer(req, contractor, score=1.0, reason=reason, send_fn=send_fn)
+        except ValueError:
+            continue
         n += 1
     return n
 
@@ -476,6 +510,7 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
     contractor = offer.contractor
     c_user = contractor.user
     phone = (contractor.phone or c_user.phone or "").strip()
+    address = (req.user.address or "").strip() or "—"
     client_text = (
         f"По заявке #{req.id} найден исполнитель: {c_user}.\n"
         f"Роль: {req.role.name}\n"
@@ -486,8 +521,10 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         f"Вы приняли заявку #{req.id}.\n"
         f"Клиент: {req.user}\n"
         f"НП: {request_locality(req) or '—'}\n"
+        f"Адрес: {address}\n"
         f"Телефон клиента: {(req.user.phone or '—')}\n"
-        f"Описание: {(req.description or '')[:500]}"
+        f"Описание: {(req.description or '')[:500]}\n\n"
+        "Когда закончите работу, напишите: заявка выполнена"
     )
     try:
         send_fn(req.user, client_text)

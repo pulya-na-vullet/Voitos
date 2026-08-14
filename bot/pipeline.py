@@ -103,6 +103,27 @@ class MessagePipeline:
                 self._store_out(user, reply, "work_request_offer")
                 return reply
 
+        if pending.pending_kind == "work_request_complete":
+            from services.work_request_completion import handle_completion_step
+
+            reply = handle_completion_step(user, text, pending)
+            self._store_out(user, reply, "work_request_complete")
+            return reply
+
+        if pending.pending_kind == "work_request_client_confirm":
+            from services.work_request_completion import handle_client_confirm_step
+
+            reply = handle_client_confirm_step(user, text, pending)
+            self._store_out(user, reply, "work_request_client_confirm")
+            return reply
+
+        if pending.pending_kind == "work_request_commission":
+            from services.work_request_completion import handle_commission_text
+
+            reply = handle_commission_text(user, text, pending)
+            self._store_out(user, reply, "work_request_commission")
+            return reply
+
         if pending.pending_kind == "volunteer_help_reply":
             from services.volunteer import handle_volunteer_help_reply
 
@@ -227,6 +248,11 @@ class MessagePipeline:
             from bot.work_request import start_work_request
 
             return start_work_request(user, pending, text=text)
+
+        if intent.intent == "work_request_done":
+            from services.work_request_completion import start_completion
+
+            return start_completion(user, pending)
 
         if intent.intent == "force_remember":
             source = pending.last_user_text.strip()

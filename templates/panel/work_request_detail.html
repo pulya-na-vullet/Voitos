@@ -13,6 +13,31 @@
   {% if item.assigned_contractor %}
     <p><strong>Исполнитель:</strong> {{ item.assigned_contractor }} ({{ item.assigned_contractor.locality|default:"—" }})</p>
   {% endif %}
+  {% if item.reported_amount or item.confirmed_amount %}
+    <p><strong>Оплата работы:</strong>
+      {{ item.get_pay_method_display|default:"—" }}
+      {% if item.reported_amount %} · отчёт {{ item.reported_amount }} ₽{% endif %}
+      {% if item.confirmed_amount %} · клиент {{ item.confirmed_amount }} ₽{% endif %}
+    </p>
+    {% if item.job_receipt %}
+      <p><a href="{{ item.job_receipt.url }}" target="_blank">Чек оплаты работы</a></p>
+    {% endif %}
+  {% endif %}
+  {% if item.commission_amount %}
+    <p><strong>Комиссия 10%:</strong> {{ item.commission_amount }} ₽ —
+      {{ item.get_commission_status_display }}</p>
+    {% if item.commission_receipt %}
+      <p><a href="{{ item.commission_receipt.url }}" target="_blank">Чек комиссии</a></p>
+    {% endif %}
+    {% if item.commission_status == "pending_review" or item.commission_status == "awaiting" or item.commission_status == "rejected" %}
+      <form method="post" style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0;">
+        {% csrf_token %}
+        <input type="text" name="note" placeholder="Комментарий" style="flex:1; min-width:160px;">
+        <button class="btn small" type="submit" name="action" value="approve_commission">Принять комиссию</button>
+        <button class="btn danger small" type="submit" name="action" value="reject_commission">Отклонить</button>
+      </form>
+    {% endif %}
+  {% endif %}
   {% if item.dispatch_note %}
     <p class="muted"><strong>Подбор:</strong> {{ item.dispatch_note }}</p>
   {% endif %}

@@ -164,12 +164,15 @@ class AdminTaskKind(models.TextChoices):
     CONTRACTOR_REVIEW = "contractor_review", "Проверка исполнителя"
     CONTRACTOR_COUNTER = "contractor_counter", "Другое время исполнителя"
     WORK_REQUEST = "work_request", "Заявка на исполнителя"
+    WORK_COMMISSION = "work_commission", "Комиссия исполнителя 10%"
 
 
 class WorkRequestStatus(models.TextChoices):
     PENDING = "pending", "Новая"
     OFFERING = "offering", "Ищем исполнителя"
     IN_PROGRESS = "in_progress", "В работе"
+    AWAITING_CLIENT = "awaiting_client", "Ждём подтверждения клиента"
+    AWAITING_COMMISSION = "awaiting_commission", "Ждём комиссию 10%"
     DONE = "done", "Выполнена"
     CANCELLED = "cancelled", "Отменена"
 
@@ -180,6 +183,19 @@ class WorkRequestOfferStatus(models.TextChoices):
     DECLINED = "declined", "Отказ"
     EXPIRED = "expired", "Истекло"
     CANCELLED = "cancelled", "Отменено"
+
+
+class WorkRequestPayMethod(models.TextChoices):
+    TRANSFER = "transfer", "Перевод"
+    CASH = "cash", "Наличные"
+
+
+class WorkRequestCommissionStatus(models.TextChoices):
+    NONE = "", "—"
+    AWAITING = "awaiting", "Ждём оплату 10%"
+    PENDING_REVIEW = "pending_review", "На проверке"
+    APPROVED = "approved", "Принято"
+    REJECTED = "rejected", "Отклонено"
 
 
 class EquipmentType(models.TextChoices):
@@ -1056,7 +1072,7 @@ class WorkRequest(models.Model):
     )
     description = models.TextField("Описание работ")
     status = models.CharField(
-        max_length=16,
+        max_length=32,
         choices=WorkRequestStatus.choices,
         default=WorkRequestStatus.PENDING,
         db_index=True,
@@ -1076,6 +1092,66 @@ class WorkRequest(models.Model):
         related_name="accepted_work_requests",
         verbose_name="Назначенный исполнитель",
     )
+    # Оплата за работу (отчёт исполнителя → подтверждение клиента)
+    pay_method = models.CharField(
+        "Способ оплаты работы",
+        max_length=16,
+        choices=WorkRequestPayMethod.choices,
+        blank=True,
+        default="",
+    )
+    reported_amount = models.DecimalField(
+        "Сумма по отчёту исполнителя, ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    confirmed_amount = models.DecimalField(
+        "Сумма по подтверждению клиента, ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    job_receipt = models.FileField(
+        "Чек оплаты работы (перевод)",
+        upload_to="work_job_receipts/%Y/%m/",
+        blank=True,
+        null=True,
+    )
+    executor_reported_at = models.DateTimeField(null=True, blank=True)
+    client_confirm_due_at = models.DateTimeField(
+        "Когда спросить клиента",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    client_confirmed_at = models.DateTimeField(null=True, blank=True)
+    # Комиссия платформы 10%
+    commission_amount = models.DecimalField(
+        "Комиссия 10%, ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    commission_status = models.CharField(
+        max_length=16,
+        choices=WorkRequestCommissionStatus.choices,
+        blank=True,
+        default=WorkRequestCommissionStatus.NONE,
+        db_index=True,
+    )
+    commission_receipt = models.FileField(
+        "Чек комиссии 10%",
+        upload_to="work_commission_receipts/%Y/%m/",
+        blank=True,
+        null=True,
+    )
+    commission_submitted_at = models.DateTimeField(null=True, blank=True)
+    commission_reviewed_at = models.DateTimeField(null=True, blank=True)
+    commission_admin_note = models.TextField(blank=True, default="")
     no_executor_notified_at = models.DateTimeField(
         "Клиенту сообщили, что нет исполнителя",
         null=True,
@@ -1142,6 +1218,34 @@ class WorkRequestOffer(models.Model):
 
     def __str__(self) -> str:
         return f"WR#{self.work_request_id} → {self.contractor_id} ({self.status})"
+
+
+class ScheduledBotMessage(models.Model):
+    """Отложенные сообщения бота (очередь), напр. опрос клиента через 20 мин."""
+
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="scheduled_bot_messages",
+    )
+    kind = models.CharField(max_length=64, db_index=True)
+    text = models.TextField()
+    send_at = models.DateTimeField(db_index=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Отложенное сообщение бота"
+        verbose_name_plural = "Отложенные сообщения бота"
+        ordering = ["send_at", "id"]
+        indexes = [
+            models.Index(fields=["sent_at", "cancelled_at", "send_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind} → {self.user_id} @ {self.send_at}"
 
 
 class WorkRequestPhoto(models.Model):

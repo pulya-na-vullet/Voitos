@@ -157,6 +157,18 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     "(или уже есть активное предложение).",
                 )
             return redirect("panel:work_request_detail", pk=pk)
+        if action == "approve_commission":
+            from services.work_request_completion import approve_commission
+
+            approve_commission(req, note=(request.POST.get("note") or "").strip())
+            messages.success(request, f"Комиссия по заявке #{req.id} принята.")
+            return redirect("panel:work_request_detail", pk=pk)
+        if action == "reject_commission":
+            from services.work_request_completion import reject_commission
+
+            reject_commission(req, note=(request.POST.get("note") or "").strip())
+            messages.info(request, f"Комиссия по заявке #{req.id} отклонена.")
+            return redirect("panel:work_request_detail", pk=pk)
         status = (request.POST.get("status") or "").strip()
         if status in WorkRequestStatus.values:
             req.status = status

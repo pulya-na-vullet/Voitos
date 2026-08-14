@@ -159,6 +159,16 @@ class UpdateHandler:
                     user, pending_early, receipt_url, filename
                 )
                 return
+            if pending_early.pending_kind == "work_request_complete":
+                self._handle_work_complete_receipt(
+                    user, pending_early, receipt_url, filename
+                )
+                return
+            if pending_early.pending_kind == "work_request_commission":
+                self._handle_work_commission_receipt(
+                    user, pending_early, receipt_url, filename
+                )
+                return
             self._handle_receipt(user, receipt_url, filename)
             return
 
@@ -210,6 +220,10 @@ class UpdateHandler:
             "contractor_offer_reply",
             "contractor_registration",
             "work_request",
+            "work_request_offer_reply",
+            "work_request_complete",
+            "work_request_client_confirm",
+            "work_request_commission",
         }:
             try:
                 reply = self.pipeline.handle(
@@ -308,6 +322,34 @@ class UpdateHandler:
             return
         reply = handle_contractor_qual_doc_photo(
             user, pending, image_bytes=raw, filename=filename or "doc.jpg"
+        )
+        self._reply(user, reply)
+
+    def _handle_work_complete_receipt(self, user, pending, image_url: str, filename: str) -> None:
+        from services.work_request_completion import handle_completion_receipt_photo
+
+        try:
+            raw = self.client.download(image_url)
+        except Exception:
+            logger.exception("Work completion receipt download failed")
+            self._reply(user, "Не удалось скачать чек. Пришлите ещё раз.")
+            return
+        reply = handle_completion_receipt_photo(
+            user, pending, image_bytes=raw, filename=filename or "receipt.jpg"
+        )
+        self._reply(user, reply)
+
+    def _handle_work_commission_receipt(self, user, pending, image_url: str, filename: str) -> None:
+        from services.work_request_completion import handle_commission_receipt_photo
+
+        try:
+            raw = self.client.download(image_url)
+        except Exception:
+            logger.exception("Commission receipt download failed")
+            self._reply(user, "Не удалось скачать чек комиссии. Пришлите ещё раз.")
+            return
+        reply = handle_commission_receipt_photo(
+            user, pending, image_bytes=raw, filename=filename or "commission.jpg"
         )
         self._reply(user, reply)
 

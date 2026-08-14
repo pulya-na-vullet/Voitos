@@ -176,6 +176,13 @@ CONTRACTOR_REG_RE = re.compile(
     r")\s*[.!]?\s*$",
     re.IGNORECASE,
 )
+WORK_DONE_RE = re.compile(
+    r"^\s*(/)?("
+    r"заявка\s+выполнена|заказ\s+выполнен|работу\s+выполнил|"
+    r"работа\s+выполнена|выполнил\s+заявку|выполнил\s+заказ"
+    r")\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
 WORK_REQUEST_RE = re.compile(
     r"^\s*(/)?("
     r"вызвать\s+исполнителя|вызови\s+исполнителя|нужен\s+исполнитель|"
@@ -588,6 +595,8 @@ class IntentAnalyzer:
             return IntentResult(intent="registration", confidence=1.0)
         if CONTRACTOR_REG_RE.match(text):
             return IntentResult(intent="contractor_registration", confidence=1.0)
+        if WORK_DONE_RE.match(text):
+            return IntentResult(intent="work_request_done", confidence=1.0)
         if WORK_REQUEST_RE.match(text):
             return IntentResult(intent="work_request", confidence=1.0)
         if FORCE_REMEMBER_RE.match(text) or text.lower().startswith("запомни это"):
