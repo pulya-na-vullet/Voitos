@@ -7,9 +7,20 @@ from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.utils import timezone
 
-from database.models import AppSettings, BotUser, ServiceGroup
+from database.models import (
+    AppSettings,
+    BotUser,
+    ContractorProfile,
+    ContractorStatus,
+    ExecutorRole,
+    PanelProfile,
+    PanelRole,
+    ServiceGroup,
+    WorkRequest,
+    WorkRequestCommissionStatus,
+)
 from subscriptions.family import link_family_members
-from subscriptions.forecast import build_earnings_forecast, next_month_bounds
+from subscriptions.forecast import build_commission_stats, build_earnings_forecast, next_month_bounds
 
 
 class EarningsForecastTests(TestCase):
@@ -39,6 +50,7 @@ class EarningsForecastTests(TestCase):
         link_family_members([self.elena, self.dmitry], payer=self.dmitry)
 
         self.admin = User.objects.create_user("fcadm", password="pass")
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="fcadm", password="pass")
 
@@ -53,6 +65,50 @@ class EarningsForecastTests(TestCase):
         alley = next(g for g in forecast["groups"] if g["name"] == "9 аллея")
         self.assertEqual(alley["payers"], 2)
         self.assertEqual(alley["renew_next_month"], 1)
+        self.assertIn("commissions", forecast)
+
+    def test_commission_stats_on_forecast_page(self):
+        role = ExecutorRole.objects.create(code="r_fc", name="Электрик", is_active=True)
+        exec_user = BotUser.objects.create(max_user_id="fc-ex", real_name="Мастер")
+        contractor = ContractorProfile.objects.create(
+            user=exec_user,
+            role=role,
+            equipment_type=role.code,
+            status=ContractorStatus.VERIFIED,
+        )
+        WorkRequest.objects.create(
+            user=self.dmitry,
+            role=role,
+            description="розетка",
+            assigned_contractor=contractor,
+            confirmed_amount=Decimal("2000.00"),
+            commission_amount=Decimal("200.00"),
+            commission_status=WorkRequestCommissionStatus.APPROVED,
+            client_confirmed_at=timezone.now(),
+            commission_reviewed_at=timezone.now(),
+        )
+        WorkRequest.objects.create(
+            user=self.dmitry,
+            role=role,
+            description="щиток",
+            assigned_contractor=contractor,
+            confirmed_amount=Decimal("1000.00"),
+            commission_amount=Decimal("100.00"),
+            commission_status=WorkRequestCommissionStatus.PENDING_REVIEW,
+            client_confirmed_at=timezone.now(),
+        )
+        stats = build_commission_stats()
+        self.assertEqual(stats["approved_total"], Decimal("200.00"))
+        self.assertEqual(stats["pending_total"], Decimal("100.00"))
+        self.assertEqual(stats["approved_count"], 1)
+        self.assertEqual(stats["pending_count"], 1)
+
+        resp = self.client.get("/panel/earnings-forecast/")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("Комиссии исполнителей", body)
+        self.assertIn("200", body)
+        self.assertIn("Мастер", body)
 
     def test_panel_page(self):
         resp = self.client.get("/panel/earnings-forecast/")
