@@ -134,3 +134,5 @@ class PanelRolesTests(TestCase):
         self.assertEqual(called_text, expected)
         self.assertIn("Логин:", called_text)
         self.assertIn("Пароль: MgrPass99", called_text)
+        self.assertIn("URL:", called_text)
+        self.assertIn("/panel/login/", called_text)

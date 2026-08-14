@@ -154,6 +154,10 @@ ADMIN_EMAIL = env("ADMIN_EMAIL", default="admin@localhost")
 HOST = env("HOST")
 PORT = env("PORT")
 
+# Публичный URL стенда (https://voitos.example.com) — если задан, в MAX
+# уходит он. Если пусто — локальный режим: http://LAN_IP:PORT + пометка про Wi‑Fi.
+PANEL_PUBLIC_URL = env("PANEL_PUBLIC_URL", default="")
+
 # Optional env overrides for runtime settings
 MAX_BOT_TOKEN = env("MAX_BOT_TOKEN", default="")
 ALLOWED_MAX_USER_ID = env("ALLOWED_MAX_USER_ID", default="")

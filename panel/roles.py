@@ -244,17 +244,33 @@ def manager_credentials_max_message(
     username: str,
     password: str,
     group_name: str,
+    login_url: str | None = None,
+    access_hint: str | None = None,
 ) -> str:
-    """Текст для MAX: доступы к панели менеджера."""
-    return (
-        "Вам назначена роль менеджера в панели Voitos.\n"
-        f"Группа: {group_name}\n\n"
-        "Данные для входа в веб-панель:\n"
-        f"Логин: {username}\n"
-        f"Пароль: {password}\n\n"
-        "Войдите по адресу /panel/login/ и смените пароль после первого входа, "
-        "если передавали его другим людям."
+    """Текст для MAX: доступы к панели менеджера с полным URL."""
+    from panel.network import panel_access_hint, panel_login_url
+
+    url = (login_url or panel_login_url()).strip()
+    hint = access_hint if access_hint is not None else panel_access_hint()
+    lines = [
+        "Вам назначена роль менеджера в панели Voitos.",
+        f"Группа: {group_name}",
+        "",
+        "Данные для входа в веб-панель:",
+        f"Логин: {username}",
+        f"Пароль: {password}",
+        "",
+        f"URL: {url}",
+    ]
+    if hint:
+        lines.append(hint)
+    lines.extend(
+        [
+            "",
+            "Смените пароль после первого входа, если передавали его другим людям.",
+        ]
     )
+    return "\n".join(lines)
 
 
 def clear_group_manager(group: ServiceGroup) -> None:
