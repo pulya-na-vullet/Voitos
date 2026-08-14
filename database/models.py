@@ -170,6 +170,7 @@ class AdminTaskKind(models.TextChoices):
 class WorkRequestStatus(models.TextChoices):
     PENDING = "pending", "Новая"
     OFFERING = "offering", "Ищем исполнителя"
+    SCHEDULING = "scheduling", "Согласование времени"
     IN_PROGRESS = "in_progress", "В работе"
     AWAITING_CLIENT = "awaiting_client", "Ждём подтверждения клиента"
     AWAITING_COMMISSION = "awaiting_commission", "Ждём комиссию 10%"
@@ -1017,6 +1018,11 @@ class ExecutorRole(models.Model):
         default=False,
         help_text="Трактор, камаз и т.п. — при регистрации спрашиваем технику.",
     )
+    accepts_at_home = models.BooleanField(
+        "Мастер принимает на дому",
+        default=False,
+        help_text="После принятия заявки согласовываем окна приёма у мастера.",
+    )
     for_snow = models.BooleanField("Для уборки снега", default=False)
     for_road = models.BooleanField("Для дорожных работ", default=False)
     for_snow_haul = models.BooleanField(
@@ -1169,6 +1175,32 @@ class WorkRequest(models.Model):
         blank=True,
         default="",
     )
+    # Приём на дому: слоты мастера и согласованное окно
+    master_address = models.CharField(
+        "Адрес приёма у мастера",
+        max_length=512,
+        blank=True,
+        default="",
+    )
+    proposed_slots = models.JSONField(
+        "Предложенные окна приёма",
+        default=list,
+        blank=True,
+        help_text='Список строк/объектов {"label": "..."} от мастера.',
+    )
+    agreed_slot = models.CharField(
+        "Согласованное окно",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    schedule_agreed_at = models.DateTimeField(null=True, blank=True)
+    rating_asked_at = models.DateTimeField(
+        "Запрошена оценка работы",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     admin_note = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1180,6 +1212,38 @@ class WorkRequest(models.Model):
 
     def __str__(self) -> str:
         return f"#{self.pk} {self.role} — {self.user}"
+
+
+
+class WorkRequestRating(models.Model):
+    """Оценка жителем работы исполнителя (1–5) + комментарий."""
+
+    work_request = models.OneToOneField(
+        WorkRequest,
+        on_delete=models.CASCADE,
+        related_name="rating",
+    )
+    contractor = models.ForeignKey(
+        "ContractorProfile",
+        on_delete=models.CASCADE,
+        related_name="work_ratings",
+    )
+    client = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="work_ratings_given",
+    )
+    score = models.PositiveSmallIntegerField("Оценка 1–5")
+    comment = models.TextField("Комментарий", blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Оценка заявки"
+        verbose_name_plural = "Оценки заявок"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"WR#{self.work_request_id}: {self.score}/5"
 
 
 class WorkRequestOffer(models.Model):

@@ -47,6 +47,26 @@
       <p><a href="{{ item.job_receipt.url }}" target="_blank">Чек оплаты работы</a></p>
     {% endif %}
   {% endif %}
+  {% if item.proposed_slots or item.agreed_slot or item.master_address %}
+    <p><strong>Приём на дому:</strong>
+      {% if item.master_address %}{{ item.master_address }}{% else %}—{% endif %}
+      {% if item.agreed_slot %} · согласовано: <strong>{{ item.agreed_slot }}</strong>{% endif %}
+    </p>
+    {% if item.proposed_slots and not item.agreed_slot %}
+      <p class="muted">Предложенные окна:
+        {% for s in item.proposed_slots %}
+          {% if s.label %}{{ s.label }}{% else %}{{ s }}{% endif %}{% if not forloop.last %}; {% endif %}
+        {% endfor %}
+      </p>
+    {% endif %}
+  {% endif %}
+  {% if item.rating %}
+    <p><strong>Оценка клиента:</strong> {{ item.rating.score }}/5
+      {% if item.rating.comment %} — {{ item.rating.comment }}{% endif %}
+    </p>
+  {% elif item.rating_asked_at %}
+    <p class="muted">Оценка запрошена {{ item.rating_asked_at|date:"d.m.Y H:i" }}, ответа пока нет.</p>
+  {% endif %}
   {% if item.commission_amount %}
     <p><strong>Комиссия 10%:</strong> {{ item.commission_amount }} ₽ —
       {{ item.get_commission_status_display }}</p>

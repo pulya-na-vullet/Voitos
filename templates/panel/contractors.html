@@ -40,6 +40,7 @@
         <th>Перевод</th>
         <th>Банк</th>
         <th>НП</th>
+        <th>Рейтинг</th>
         <th>Заработано</th>
         <th>Статус</th>
         <th></th>
@@ -58,6 +59,7 @@
         <td class="mono">{{ c.payout_phone|default:c.phone|default:"—" }}</td>
         <td>{{ c.bank_name|default:"—" }}</td>
         <td>{{ c.locality|default:"—" }}</td>
+        <td class="mono">{% if c.rating_avg %}{{ c.rating_avg|floatformat:1 }}/5 <span class="muted">({{ c.rating_count }})</span>{% else %}—{% endif %}</td>
         <td class="mono"><strong>{{ c.total_earned|default:0 }} ₽</strong></td>
         <td>
           <span class="badge {% if c.status == status_verified %}ok{% elif c.status == 'rejected' or c.status == 'disabled' %}bad{% endif %}">

@@ -13,6 +13,7 @@ from database.models import EquipmentType, ExecutorRole, ServiceCampaign, Servic
 SYSTEM_FLAG_DEFS: list[tuple[str, str]] = [
     ("requires_qualification_docs", "нужны подтверждающие документы"),
     ("is_equipment", "техника (госномер)"),
+    ("accepts_at_home", "мастер принимает на дому"),
     ("for_snow", "снег"),
     ("for_road", "дорога"),
     ("for_snow_haul", "вывоз снега"),
@@ -88,7 +89,7 @@ def flags_from_role(role: ExecutorRole) -> list[dict[str, Any]]:
 
 # Документы и техника задаются отдельными галочками в форме, не в списке признаков.
 FORM_SYSTEM_FLAG_CODES = frozenset(
-    {"requires_qualification_docs", "is_equipment"}
+    {"requires_qualification_docs", "is_equipment", "accepts_at_home"}
 )
 
 
@@ -144,7 +145,19 @@ def apply_role_form_fields(role: ExecutorRole, post) -> None:
                 "on": True,
             },
         )
+    if post.get("accepts_at_home"):
+        flags.append(
+            {
+                "code": "accepts_at_home",
+                "label": SYSTEM_FLAG_LABELS["accepts_at_home"],
+                "on": True,
+            },
+        )
     apply_flags_to_role(role, flags)
+    # Гарантия boolean даже если флаг не в JSON-списке
+    role.accepts_at_home = bool(post.get("accepts_at_home"))
+    role.requires_qualification_docs = bool(post.get("requires_qualification_docs"))
+    role.is_equipment = bool(post.get("is_equipment"))
 
 
 def parse_flags_from_post(post) -> list[dict[str, Any]]:

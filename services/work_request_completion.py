@@ -98,7 +98,7 @@ def active_job_for_contractor(contractor: ContractorProfile) -> WorkRequest | No
     return (
         WorkRequest.objects.filter(
             assigned_contractor=contractor,
-            status=WorkRequestStatus.IN_PROGRESS,
+            status__in=[WorkRequestStatus.SCHEDULING, WorkRequestStatus.IN_PROGRESS],
         )
         .select_related("user", "role", "assigned_contractor")
         .order_by("-updated_at")
@@ -118,6 +118,8 @@ def contractor_blocked_for_new_offers(contractor: ContractorProfile) -> bool:
     ).exists() or WorkRequest.objects.filter(
         assigned_contractor=contractor,
         status__in=[
+            WorkRequestStatus.SCHEDULING,
+            WorkRequestStatus.IN_PROGRESS,
             WorkRequestStatus.AWAITING_CLIENT,
             WorkRequestStatus.AWAITING_COMMISSION,
         ],
@@ -426,9 +428,21 @@ def _apply_client_confirmation(
         c_pending.pending_payload = {"work_request_id": req.id}
         c_pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
 
+    try:
+        from services.work_request_rating import ask_client_for_rating, rating_ask_message
+
+        ask_client_for_rating(req, send=False)
+        rating_line = "\n\n" + rating_ask_message(req)
+    except Exception:
+        logger.exception("Failed to ask rating after confirm WR %s", req.id)
+        rating_line = (
+            "\n\nОцените работу исполнителя от 1 до 5 (5 — отлично)."
+        )
+
     return (
         f"Спасибо! Зафиксировали сумму {amount} ₽ по заявке #{req.id}.\n"
         "Исполнителю отправлен запрос на комиссию сервиса."
+        + rating_line
     )
 
 

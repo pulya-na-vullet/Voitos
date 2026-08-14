@@ -285,6 +285,7 @@ def notify_client_no_executor(req: WorkRequest, *, send_fn=None) -> bool:
     if req.no_executor_notified_at:
         return False
     if req.status in {
+        WorkRequestStatus.SCHEDULING,
         WorkRequestStatus.IN_PROGRESS,
         WorkRequestStatus.AWAITING_CLIENT,
         WorkRequestStatus.AWAITING_COMMISSION,
@@ -329,6 +330,7 @@ def try_dispatch_request(req: WorkRequest, *, send_fn=None, use_ai: bool = True)
     if req.status in {
         WorkRequestStatus.DONE,
         WorkRequestStatus.CANCELLED,
+        WorkRequestStatus.SCHEDULING,
         WorkRequestStatus.IN_PROGRESS,
         WorkRequestStatus.AWAITING_CLIENT,
         WorkRequestStatus.AWAITING_COMMISSION,
@@ -501,16 +503,40 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         other.responded_at = now
         other.save(update_fields=["status", "responded_at"])
 
-    req.status = WorkRequestStatus.IN_PROGRESS
     req.assigned_contractor = offer.contractor
-    req.save(
-        update_fields=["status", "assigned_contractor", "updated_at"]
-    )
-
     contractor = offer.contractor
     c_user = contractor.user
     phone = (contractor.phone or c_user.phone or "").strip()
     address = (req.user.address or "").strip() or "—"
+
+    pending = PendingAction.objects.filter(user=c_user).first()
+    if pending and pending.pending_kind == WORK_OFFER_PENDING:
+        pending.clear_pending()
+
+    # Приём на дому — сначала согласование окон, не сразу IN_PROGRESS
+    if getattr(req.role, "accepts_at_home", False):
+        from services.work_request_schedule import start_master_scheduling
+
+        req.status = WorkRequestStatus.SCHEDULING
+        req.save(update_fields=["status", "assigned_contractor", "updated_at"])
+        client_text = (
+            f"По заявке #{req.id} найден мастер: {c_user}.\n"
+            f"Роль: {req.role.name}\n"
+            + (f"Телефон: {phone}\n" if phone else "")
+            + "Сейчас мастер укажет, когда сможет вас принять — пришлём варианты времени."
+        )
+        try:
+            send_fn(req.user, client_text)
+        except Exception:
+            logger.exception("notify client accept(home) WR %s", req.id)
+        start_master_scheduling(req, send_fn=send_fn)
+        return (
+            "Спасибо! Заявка за вами. Укажите окна приёма — "
+            "сообщение с инструкцией уже в чате."
+        )
+
+    req.status = WorkRequestStatus.IN_PROGRESS
+    req.save(update_fields=["status", "assigned_contractor", "updated_at"])
     client_text = (
         f"По заявке #{req.id} найден исполнитель: {c_user}.\n"
         f"Роль: {req.role.name}\n"
@@ -534,11 +560,8 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         send_fn(c_user, exec_text)
     except Exception:
         logger.exception("notify contractor accept WR %s", req.id)
-
-    pending = PendingAction.objects.filter(user=c_user).first()
-    if pending and pending.pending_kind == WORK_OFFER_PENDING:
-        pending.clear_pending()
     return "Спасибо! Заявка закреплена за вами. Контакты клиента отправлены в чат."
+
 
 
 def decline_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:

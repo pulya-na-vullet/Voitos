@@ -108,19 +108,36 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
                 messages.success(request, f"Заявка #{req.id}: {req.get_status_display()}.")
         return redirect("panel:work_requests")
 
-    status = (request.GET.get("status") or "").strip()
+    # По умолчанию — все статусы кроме «выполнена».
+    # ?status=all — включая выполненные; ?status=<code> — один статус.
+    raw = request.GET.get("status")
     qs = WorkRequest.objects.select_related("user", "role").prefetch_related("photos")
-    if status in WorkRequestStatus.values:
-        qs = qs.filter(status=status)
+    if raw is None or raw == "":
+        status_filter = "active"
+        qs = qs.exclude(status=WorkRequestStatus.DONE)
+        status = ""
+    elif raw == "all":
+        status_filter = "all"
+        status = "all"
+    elif raw in WorkRequestStatus.values:
+        status_filter = raw
+        status = raw
+        qs = qs.filter(status=raw)
+    else:
+        status_filter = "active"
+        status = ""
+        qs = qs.exclude(status=WorkRequestStatus.DONE)
     return render(
         request,
         "panel/work_requests.html",
         {
             "items": qs[:200],
             "status": status,
+            "status_filter": status_filter,
             "statuses": WorkRequestStatus.choices,
         },
     )
+
 
 
 @login_required
@@ -128,7 +145,12 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
 def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(
         WorkRequest.objects.select_related(
-            "user", "role", "assigned_contractor", "assigned_contractor__user"
+            "user",
+            "role",
+            "assigned_contractor",
+            "assigned_contractor__user",
+            "rating",
+            "rating__client",
         ).prefetch_related("photos", "offers__contractor__user"),
         pk=pk,
     )

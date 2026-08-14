@@ -224,6 +224,9 @@ class UpdateHandler:
             "work_request_complete",
             "work_request_client_confirm",
             "work_request_commission",
+            "work_request_rating",
+            "work_request_schedule_master",
+            "work_request_schedule_client",
         }:
             try:
                 reply = self.pipeline.handle(

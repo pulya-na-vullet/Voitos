@@ -7,9 +7,10 @@
 </div>
 <form method="get" style="margin-bottom:12px;">
   <select name="status" onchange="this.form.submit()">
-    <option value="">Все статусы</option>
+    <option value="" {% if status_filter == "active" %}selected{% endif %}>Активные (кроме выполненных)</option>
+    <option value="all" {% if status_filter == "all" %}selected{% endif %}>Все статусы</option>
     {% for v,l in statuses %}
-      <option value="{{ v }}" {% if status == v %}selected{% endif %}>{{ l }}</option>
+      <option value="{{ v }}" {% if status_filter == v %}selected{% endif %}>{{ l }}</option>
     {% endfor %}
   </select>
 </form>

@@ -486,9 +486,17 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
         payer_choices[bot_user.family_payer_id] = bot_user.family_payer
     for u in family_dependents:
         payer_choices[u.id] = u
+    executor_profile = getattr(bot_user, "contractor_profile", None)
+    executor_ratings = None
+    if executor_profile is not None:
+        from services.work_request_rating import contractor_rating_stats
+
+        executor_ratings = contractor_rating_stats(executor_profile)
+
     return render(
         request,
         "panel/user_dashboard.html",
+
         {
             "bot_user": bot_user,
             "access_state": bot_user.access_state(),
@@ -499,6 +507,8 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
             "family_payer_choices": sorted(payer_choices.values(), key=lambda u: str(u)),
             "missing_fields": missing_fields,
             "citizen": citizen_stats(bot_user),
+            "executor_profile": executor_profile,
+            "executor_ratings": executor_ratings,
             "stats": {
                 "messages": ChatMessage.objects.filter(user=bot_user).count(),
                 "memories": MemoryItem.objects.filter(user=bot_user).count(),
@@ -1808,11 +1818,15 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             messages.success(request, f"Реквизиты «{profile}» сохранены.")
         return redirect("panel:contractors")
 
+    from django.db.models import Avg, Count
     from services.contractors import annotate_contractor_total_earned
 
     eq_filter = (request.GET.get("type") or "").strip()
     qs = annotate_contractor_total_earned(
         ContractorProfile.objects.select_related("user", "role")
+    ).annotate(
+        rating_avg=Avg("work_ratings__score"),
+        rating_count=Count("work_ratings", distinct=True),
     ).order_by("status", "equipment_type", "-submitted_at")
     if eq_filter:
         qs = qs.filter(equipment_type=eq_filter)

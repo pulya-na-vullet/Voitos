@@ -124,6 +124,27 @@ class MessagePipeline:
             self._store_out(user, reply, "work_request_commission")
             return reply
 
+        if pending.pending_kind == "work_request_rating":
+            from services.work_request_rating import handle_rating_step
+
+            reply = handle_rating_step(user, text, pending)
+            self._store_out(user, reply, "work_request_rating")
+            return reply
+
+        if pending.pending_kind == "work_request_schedule_master":
+            from services.work_request_schedule import handle_master_schedule_step
+
+            reply = handle_master_schedule_step(user, text, pending)
+            self._store_out(user, reply, "work_request_schedule_master")
+            return reply
+
+        if pending.pending_kind == "work_request_schedule_client":
+            from services.work_request_schedule import handle_client_schedule_step
+
+            reply = handle_client_schedule_step(user, text, pending)
+            self._store_out(user, reply, "work_request_schedule_client")
+            return reply
+
         if pending.pending_kind == "volunteer_help_reply":
             from services.volunteer import handle_volunteer_help_reply
 

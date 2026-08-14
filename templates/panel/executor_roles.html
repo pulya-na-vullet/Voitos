@@ -17,7 +17,7 @@
     <table>
       <thead>
         <tr>
-          <th>Название и признаки</th><th>Документы</th><th>Техника</th><th>Активна</th><th></th>
+          <th>Название и признаки</th><th>Документы</th><th>Техника</th><th>На дому</th><th>Активна</th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -32,6 +32,7 @@
               <input type="text" name="name" value="{{ r.name }}" required>
               <label class="muted"><input type="checkbox" name="requires_qualification_docs" {% if r.requires_qualification_docs %}checked{% endif %}> нужны подтверждающие документы о квалификации</label>
               <label class="muted"><input type="checkbox" name="is_equipment" {% if r.is_equipment %}checked{% endif %}> техника (госномер / модель)</label>
+              <label class="muted"><input type="checkbox" name="accepts_at_home" {% if r.accepts_at_home %}checked{% endif %}> мастер принимает на дому</label>
               <div class="flag-editor" data-editor="role-{{ r.id }}"></div>
               <label class="muted"><input type="checkbox" name="is_active" {% if r.is_active %}checked{% endif %}> активна</label>
               <button class="btn small" type="submit">Сохранить</button>
@@ -39,6 +40,7 @@
           </td>
           <td>{% if r.requires_qualification_docs %}да{% else %}нет{% endif %}</td>
           <td>{% if r.is_equipment %}да{% else %}—{% endif %}</td>
+          <td>{% if r.accepts_at_home %}да{% else %}—{% endif %}</td>
           <td>{% if r.is_active %}<span class="badge ok">да</span>{% else %}<span class="badge">нет</span>{% endif %}</td>
           <td>
             <form method="post" onsubmit="return confirm('Удалить / скрыть роль?');">
@@ -50,7 +52,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="5" class="muted">Ролей пока нет — создайте справа</td></tr>
+        <tr><td colspan="6" class="muted">Ролей пока нет — создайте справа</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -63,7 +65,8 @@
       <input type="hidden" name="flags_json" class="flags-json" value="[]">
       <div class="form-row"><label>Название</label><input name="name" required placeholder="Сантехник"></div>
       <label class="muted"><input type="checkbox" name="requires_qualification_docs"> нужны подтверждающие документы о квалификации</label><br>
-      <label class="muted"><input type="checkbox" name="is_equipment"> техника (госномер / модель)</label>
+      <label class="muted"><input type="checkbox" name="is_equipment"> техника (госномер / модель)</label><br>
+      <label class="muted"><input type="checkbox" name="accepts_at_home"> мастер принимает на дому</label>
       <div class="form-row" style="margin-top:10px;">
         <label>Доп. признаки</label>
         <div class="flag-editor" data-editor="new"></div>
