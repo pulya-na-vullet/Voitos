@@ -44,6 +44,23 @@ from database.models import (
     YandexBillingEntry,
 )
 from logs.service import log_activity
+from panel.manager_log import log_manager_action
+from panel.security import redirect_after_post, safe_redirect_target
+from panel.roles import (
+    admin_required,
+    assign_group_manager,
+    can_access_bot_user,
+    can_access_group,
+    clear_group_manager,
+    filter_tasks_for_user,
+    is_panel_admin,
+    manager_credentials_max_message,
+    manager_group_ids,
+    manager_groups_qs,
+    panel_home_url_name,
+    scoped_bot_user_ids,
+    scoped_bot_users_qs,
+)
 from services.ranking import citizen_stats, ranking_list, sort_ranking_rows
 from services.service import (
     WORK_STAGE_NEXT,
@@ -184,7 +201,7 @@ def _parse_payout_items_from_request(request: HttpRequest, campaign) -> list[dic
 
 def login_view(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
-        return redirect("panel:users")
+        return redirect(panel_home_url_name(request.user))
     error = ""
     if request.method == "POST":
         username = request.POST.get("username", "")
@@ -192,9 +209,28 @@ def login_view(request: HttpRequest) -> HttpResponse:
         user = authenticate(request, username=username, password=password)
         if user is not None:
             login(request, user)
-            return redirect("panel:users")
+            log_manager_action(
+                user,
+                action="login",
+                title="Вход в панель",
+            )
+            return redirect(panel_home_url_name(user))
         error = "Неверный логин или пароль"
     return render(request, "panel/login.html", {"error": error})
+
+
+def _require_bot_user_access(request: HttpRequest, bot_user: BotUser) -> HttpResponse | None:
+    if can_access_bot_user(request.user, bot_user):
+        return None
+    messages.error(request, "Нет доступа к этому пользователю.")
+    return redirect(panel_home_url_name(request.user))
+
+
+def _require_group_access(request: HttpRequest, group: ServiceGroup) -> HttpResponse | None:
+    if can_access_group(request.user, group):
+        return None
+    messages.error(request, "Нет доступа к этой группе.")
+    return redirect("panel:services_groups")
 
 
 @login_required
@@ -216,6 +252,9 @@ def _delete_bot_user(user: BotUser) -> str:
 @require_http_methods(["GET", "POST"])
 def users_list(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
+        if not is_panel_admin(request.user):
+            messages.error(request, "Удаление пользователей доступно только администратору.")
+            return redirect("panel:users")
         action = request.POST.get("action")
         if action == "delete_user":
             user = get_object_or_404(BotUser, pk=request.POST.get("user_id"))
@@ -235,10 +274,12 @@ def users_list(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
     locality = request.GET.get("locality", "").strip()
     sort = request.GET.get("sort", "-rating").strip() or "-rating"
-    rows = ranking_list(locality=locality, q=q)
+    scope_ids = scoped_bot_user_ids(request.user)
+    rows = ranking_list(locality=locality, q=q, user_ids=scope_ids)
     rows = sort_ranking_rows(rows, sort=sort)[:500]
+    users_scope = scoped_bot_users_qs(request.user)
     localities = list(
-        BotUser.objects.exclude(locality="")
+        users_scope.exclude(locality="")
         .exclude(locality__isnull=True)
         .values_list("locality", flat=True)
         .distinct()
@@ -248,11 +289,17 @@ def users_list(request: HttpRequest) -> HttpResponse:
         localities = [locality, *localities]
     bot_status = BotRuntimeStatus.load()
     pending_receipts = PaymentReceipt.objects.filter(status=ReceiptStatus.PENDING).count()
-    pending_profiles = BotUser.objects.filter(profile_status=ProfileStatus.PENDING_REVIEW).count()
+    pending_profiles = users_scope.filter(profile_status=ProfileStatus.PENDING_REVIEW).count()
     pending_service = ServiceReceipt.objects.filter(status=ReceiptStatus.PENDING).count()
+    if scope_ids is not None:
+        pending_service = ServiceReceipt.objects.filter(
+            status=ReceiptStatus.PENDING, user_id__in=scope_ids
+        ).count()
+        pending_receipts = 0
     from database.models import AdminTask, AdminTaskStatus
 
-    open_admin_tasks = AdminTask.objects.filter(status=AdminTaskStatus.OPEN).count()
+    open_tasks_qs = AdminTask.objects.filter(status=AdminTaskStatus.OPEN)
+    open_admin_tasks = filter_tasks_for_user(open_tasks_qs, request.user).count()
     return render(
         request,
         "panel/users.html",
@@ -267,11 +314,12 @@ def users_list(request: HttpRequest) -> HttpResponse:
             "pending_profiles": pending_profiles,
             "pending_service": pending_service,
             "open_admin_tasks": open_admin_tasks,
-            "tax_warning": AppSettings.load().tax_limit_warning(),
+            "tax_warning": AppSettings.load().tax_limit_warning() if is_panel_admin(request.user) else "",
+            "can_delete_users": is_panel_admin(request.user),
             "stats": {
-                "users": BotUser.objects.count(),
-                "active": sum(1 for u in BotUser.objects.all() if u.access_state() == "active"),
-                "receipts": PaymentReceipt.objects.count(),
+                "users": users_scope.count(),
+                "active": sum(1 for u in users_scope if u.access_state() == "active"),
+                "receipts": PaymentReceipt.objects.count() if is_panel_admin(request.user) else 0,
             },
         },
     )
@@ -287,6 +335,9 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
     from database.models import PendingAction
 
     bot_user = get_object_or_404(BotUser, pk=user_id)
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     action = request.POST.get("action")
     note = request.POST.get("note", "").strip()
     # Always apply form edits first
@@ -389,6 +440,13 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
         task_profile_review(bot_user)
     except Exception:
         pass
+    log_manager_action(
+        request,
+        action="profile_" + (action or "edit"),
+        title=f"Анкета пользователя #{bot_user.id}",
+        detail=f"{action}: {bot_user}",
+        meta={"bot_user_id": bot_user.id},
+    )
     return redirect("panel:user_dashboard", user_id=user_id)
 
 
@@ -402,7 +460,13 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
         BotUser.objects.select_related("family_payer"),
         pk=user_id,
     )
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     if request.method == "POST" and request.POST.get("action") == "delete_user":
+        if not is_panel_admin(request.user):
+            messages.error(request, "Удаление пользователей доступно только администратору.")
+            return redirect("panel:user_dashboard", user_id=user_id)
         label = _delete_bot_user(bot_user)
         messages.success(request, f"Пользователь «{label}» удалён.")
         return redirect("panel:users")
@@ -424,9 +488,42 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
         payer_choices[bot_user.family_payer_id] = bot_user.family_payer
     for u in family_dependents:
         payer_choices[u.id] = u
+    executor_profiles = list(
+        bot_user.contractor_profiles.select_related("role").order_by("id")
+    )
+    executor_profile = executor_profiles[0] if executor_profiles else None
+    executor_ratings = None
+    executor_role_stats: list[dict] = []
+    if executor_profiles:
+        from services.work_request_rating import contractor_rating_stats
+
+        for profile in executor_profiles:
+            stats = contractor_rating_stats(profile)
+            executor_role_stats.append({"profile": profile, "ratings": stats})
+        # Сводный блок для совместимости шаблона
+        executor_ratings = contractor_rating_stats(executor_profiles[0])
+        if len(executor_profiles) > 1:
+            # объединить отзывы всех ролей для таблицы
+            all_ratings = []
+            total_score = 0
+            count = 0
+            for item in executor_role_stats:
+                st = item["ratings"]
+                all_ratings.extend(st.get("ratings") or [])
+                if st.get("count"):
+                    total_score += (st.get("avg") or 0) * st["count"]
+                    count += st["count"]
+            all_ratings.sort(key=lambda r: r.created_at, reverse=True)
+            executor_ratings = {
+                "avg": round(total_score / count, 2) if count else None,
+                "count": count,
+                "ratings": all_ratings[:20],
+            }
+
     return render(
         request,
         "panel/user_dashboard.html",
+
         {
             "bot_user": bot_user,
             "access_state": bot_user.access_state(),
@@ -437,6 +534,10 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
             "family_payer_choices": sorted(payer_choices.values(), key=lambda u: str(u)),
             "missing_fields": missing_fields,
             "citizen": citizen_stats(bot_user),
+            "executor_profile": executor_profile,
+            "executor_profiles": executor_profiles,
+            "executor_role_stats": executor_role_stats,
+            "executor_ratings": executor_ratings,
             "stats": {
                 "messages": ChatMessage.objects.filter(user=bot_user).count(),
                 "memories": MemoryItem.objects.filter(user=bot_user).count(),
@@ -461,6 +562,9 @@ def user_family_link(request: HttpRequest, user_id: int) -> HttpResponse:
     from subscriptions.family import link_family_members, unlink_family_member
 
     bot_user = get_object_or_404(BotUser, pk=user_id)
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     action = (request.POST.get("action") or "link").strip()
     if action == "unlink":
         unlink_family_member(bot_user)
@@ -487,6 +591,15 @@ def user_family_link(request: HttpRequest, user_id: int) -> HttpResponse:
             "Укажите ещё одного члена семьи: отметьте в списке или введите его id.",
         )
         return redirect("panel:user_dashboard", user_id=user_id)
+    # Менеджер не может привязывать жителей вне своих групп
+    scope = scoped_bot_user_ids(request.user)
+    if scope is not None:
+        bad = [i for i in set(member_ids) if i not in scope]
+        if payer_id is not None and payer_id not in scope:
+            bad.append(payer_id)
+        if bad:
+            messages.error(request, "Нельзя связывать пользователей вне ваших групп.")
+            return redirect("panel:user_dashboard", user_id=user_id)
     payer = link_family_members(
         member_ids,
         payer=payer_id,
@@ -510,6 +623,9 @@ def user_family_link(request: HttpRequest, user_id: int) -> HttpResponse:
 @login_required
 def user_messages(request: HttpRequest, user_id: int) -> HttpResponse:
     bot_user = get_object_or_404(BotUser, pk=user_id)
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     qs = ChatMessage.objects.filter(user=bot_user)
     q = request.GET.get("q", "").strip()
     if q:
@@ -524,6 +640,9 @@ def user_messages(request: HttpRequest, user_id: int) -> HttpResponse:
 @login_required
 def user_memories(request: HttpRequest, user_id: int) -> HttpResponse:
     bot_user = get_object_or_404(BotUser, pk=user_id)
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     return render(
         request,
         "panel/memories.html",
@@ -534,6 +653,9 @@ def user_memories(request: HttpRequest, user_id: int) -> HttpResponse:
 @login_required
 def user_tasks(request: HttpRequest, user_id: int) -> HttpResponse:
     bot_user = get_object_or_404(BotUser, pk=user_id)
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     return render(
         request,
         "panel/tasks.html",
@@ -544,6 +666,9 @@ def user_tasks(request: HttpRequest, user_id: int) -> HttpResponse:
 @login_required
 def user_reminders(request: HttpRequest, user_id: int) -> HttpResponse:
     bot_user = get_object_or_404(BotUser, pk=user_id)
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     return render(
         request,
         "panel/reminders.html",
@@ -554,6 +679,9 @@ def user_reminders(request: HttpRequest, user_id: int) -> HttpResponse:
 @login_required
 def user_logs(request: HttpRequest, user_id: int) -> HttpResponse:
     bot_user = get_object_or_404(BotUser, pk=user_id)
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     qs = ActivityLog.objects.filter(user=bot_user)
     kind = request.GET.get("kind", "").strip()
     if kind:
@@ -641,6 +769,9 @@ def receipts_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def user_receipts(request: HttpRequest, user_id: int) -> HttpResponse:
     bot_user = get_object_or_404(BotUser, pk=user_id)
+    denied = _require_bot_user_access(request, bot_user)
+    if denied:
+        return denied
     return render(
         request,
         "panel/receipts.html",
@@ -668,10 +799,7 @@ def receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
     except (InvalidOperation, ValueError):
         amount = None
         messages.error(request, "Некорректная сумма. Укажите число, например 100.")
-        next_url = request.POST.get("next") or "panel:receipts"
-        if isinstance(next_url, str) and next_url.startswith("/"):
-            return redirect(next_url)
-        return redirect("panel:receipts")
+        return redirect_after_post(request, fallback="panel:receipts")
     try:
         approve_receipt(
             receipt,
@@ -688,10 +816,7 @@ def receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
         )
     except ValueError as exc:
         messages.error(request, str(exc))
-    next_url = request.POST.get("next") or "panel:receipts"
-    if next_url.startswith("/"):
-        return redirect(next_url)
-    return redirect(next_url)
+    return redirect_after_post(request, fallback="panel:receipts")
 
 
 @login_required
@@ -702,10 +827,7 @@ def receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
     reject_receipt(receipt, comment=comment)
     _notify_user(receipt.user, rejected_user_message(receipt))
     messages.success(request, f"Чек #{pk} отклонён, пользователь уведомлён.")
-    next_url = request.POST.get("next") or "panel:receipts"
-    if next_url.startswith("/"):
-        return redirect(next_url)
-    return redirect(next_url)
+    return redirect_after_post(request, fallback="panel:receipts")
 
 
 @login_required
@@ -713,7 +835,6 @@ def receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
 def receipt_delete(request: HttpRequest, pk: int) -> HttpResponse:
     receipt = get_object_or_404(PaymentReceipt, pk=pk)
     reason = request.POST.get("reason", "").strip()
-    next_url = request.POST.get("next") or "panel:receipts"
     try:
         user = delete_receipt(receipt, reason=reason)
         user.refresh_from_db()
@@ -735,12 +856,11 @@ def receipt_delete(request: HttpRequest, pk: int) -> HttpResponse:
         )
     except ValueError as exc:
         messages.error(request, str(exc))
-    if isinstance(next_url, str) and next_url.startswith("/"):
-        return redirect(next_url)
-    return redirect("panel:receipts")
+    return redirect_after_post(request, fallback="panel:receipts")
 
 
 @login_required
+@admin_required
 @require_http_methods(["GET", "POST"])
 def settings_view(request: HttpRequest) -> HttpResponse:
     cfg = AppSettings.load()
@@ -862,11 +982,14 @@ def check_max(request: HttpRequest) -> HttpResponse:
 def delete_memory(request: HttpRequest, pk: int) -> HttpResponse:
     from memory.service import MemoryService
 
-    item = get_object_or_404(MemoryItem, pk=pk)
+    item = get_object_or_404(MemoryItem.objects.select_related("user"), pk=pk)
+    denied = _require_bot_user_access(request, item.user)
+    if denied:
+        return denied
     uid = item.user_id
     MemoryService().delete(item.id)
     messages.success(request, "Память удалена")
-    return redirect(request.POST.get("next") or f"/panel/users/{uid}/memories/")
+    return redirect_after_post(request, fallback=f"/panel/users/{uid}/memories/")
 
 
 @login_required
@@ -874,11 +997,14 @@ def delete_memory(request: HttpRequest, pk: int) -> HttpResponse:
 def delete_task(request: HttpRequest, pk: int) -> HttpResponse:
     from tasks.service import TaskService
 
-    item = get_object_or_404(TaskItem, pk=pk)
+    item = get_object_or_404(TaskItem.objects.select_related("user"), pk=pk)
+    denied = _require_bot_user_access(request, item.user)
+    if denied:
+        return denied
     uid = item.user_id
     TaskService().delete(pk)
     messages.success(request, "Задача удалена")
-    return redirect(request.POST.get("next") or f"/panel/users/{uid}/tasks/")
+    return redirect_after_post(request, fallback=f"/panel/users/{uid}/tasks/")
 
 
 @login_required
@@ -886,24 +1012,31 @@ def delete_task(request: HttpRequest, pk: int) -> HttpResponse:
 def delete_reminder(request: HttpRequest, pk: int) -> HttpResponse:
     from reminders.service import ReminderService
 
-    item = get_object_or_404(Reminder, pk=pk)
+    item = get_object_or_404(Reminder.objects.select_related("user"), pk=pk)
+    denied = _require_bot_user_access(request, item.user)
+    if denied:
+        return denied
     uid = item.user_id
     ReminderService().delete(pk)
     messages.success(request, "Напоминание удалено")
-    return redirect(request.POST.get("next") or f"/panel/users/{uid}/reminders/")
+    return redirect_after_post(request, fallback=f"/panel/users/{uid}/reminders/")
 
 
 @login_required
 @require_POST
 def delete_message(request: HttpRequest, pk: int) -> HttpResponse:
-    item = get_object_or_404(ChatMessage, pk=pk)
+    item = get_object_or_404(ChatMessage.objects.select_related("user"), pk=pk)
+    denied = _require_bot_user_access(request, item.user)
+    if denied:
+        return denied
     uid = item.user_id
     item.delete()
     messages.success(request, "Сообщение удалено")
-    return redirect(request.POST.get("next") or f"/panel/users/{uid}/messages/")
+    return redirect_after_post(request, fallback=f"/panel/users/{uid}/messages/")
 
 
 @login_required
+@admin_required
 @require_POST
 def dump_now(request: HttpRequest) -> HttpResponse:
     path = create_db_dump()
@@ -914,7 +1047,7 @@ def dump_now(request: HttpRequest) -> HttpResponse:
 # Backward-compatible aliases
 @login_required
 def dashboard(request: HttpRequest) -> HttpResponse:
-    return redirect("panel:users")
+    return redirect(panel_home_url_name(request.user))
 
 
 @login_required
@@ -926,6 +1059,9 @@ def services_home(request: HttpRequest) -> HttpResponse:
         if action == "launch":
             group_id = request.POST.get("group_id")
             group = get_object_or_404(ServiceGroup, pk=group_id)
+            denied = _require_group_access(request, group)
+            if denied:
+                return denied
             category = request.POST.get("category", "").strip()
             try:
                 total = Decimal(request.POST.get("total_amount") or "0")
@@ -990,7 +1126,7 @@ def services_home(request: HttpRequest) -> HttpResponse:
                     f"Сбор запущен для группы «{group.name}»: разослано {sent} сообщ.{extra}",
                 )
                 tax_warn = AppSettings.load().tax_limit_warning()
-                if tax_warn:
+                if tax_warn and is_panel_admin(request.user):
                     messages.warning(request, tax_warn)
                 return redirect("panel:service_campaign_detail", pk=campaign.id)
             except ValueError as exc:
@@ -998,23 +1134,25 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 return redirect("panel:services")
         return redirect("panel:services")
 
-    groups = list(ServiceGroup.objects.prefetch_related("members").all())
+    groups = list(manager_groups_qs(request.user).prefetch_related("members"))
     from services.tax import sync_self_employed_tax_collected
 
-    tax_stats = sync_self_employed_tax_collected(cfg)
+    tax_stats = sync_self_employed_tax_collected(cfg) if is_panel_admin(request.user) else {}
     cfg.refresh_from_db()
+    pending_qs = ServiceReceipt.objects.filter(status=ReceiptStatus.PENDING)
+    scope_ids = scoped_bot_user_ids(request.user)
+    if scope_ids is not None:
+        pending_qs = pending_qs.filter(user_id__in=scope_ids)
     return render(
         request,
         "panel/services_home.html",
         {
             "groups": groups,
             "category_choices": ServiceCategory.choices,
-            "tax_warning": cfg.tax_limit_warning(),
+            "tax_warning": cfg.tax_limit_warning() if is_panel_admin(request.user) else "",
             "cfg": cfg,
             "tax_stats": tax_stats,
-            "pending_service": ServiceReceipt.objects.filter(
-                status=ReceiptStatus.PENDING
-            ).count(),
+            "pending_service": pending_qs.count(),
         },
     )
 
@@ -1023,6 +1161,9 @@ def services_home(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 def services_groups(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
+        if not is_panel_admin(request.user):
+            messages.error(request, "Создание и удаление групп доступно только администратору.")
+            return redirect("panel:services_groups")
         action = request.POST.get("action")
         if action == "create_group":
             name = request.POST.get("name", "").strip()
@@ -1046,7 +1187,9 @@ def services_groups(request: HttpRequest) -> HttpResponse:
         return redirect("panel:services_groups")
 
     groups = list(
-        ServiceGroup.objects.prefetch_related("members")
+        manager_groups_qs(request.user)
+        .select_related("manager", "manager__panel_profile", "manager__panel_profile__bot_user")
+        .prefetch_related("members")
         .annotate(wish_count=Count("wishes"))
         .all()
     )
@@ -1058,26 +1201,55 @@ def services_groups(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "panel/services_groups.html",
-        {"groups": groups},
+        {
+            "groups": groups,
+            "can_manage_groups": is_panel_admin(request.user),
+        },
     )
 
 
 @login_required
 def services_wishes(request: HttpRequest) -> HttpResponse:
+    from database.models import NeighborhoodWish, WishTopic
     from services.wishes import aggregate_home_stats, topic_stats
 
     groups = list(
-        ServiceGroup.objects.prefetch_related("members")
+        manager_groups_qs(request.user)
+        .prefetch_related("members")
         .annotate(wish_count=Count("wishes"))
         .all()
     )
+    allowed_ids = {g.id for g in groups}
+    wish_overview = [
+        row
+        for row in aggregate_home_stats()
+        if getattr(row.get("group"), "id", None) in allowed_ids
+    ]
+    if is_panel_admin(request.user):
+        wish_topics_all = topic_stats()
+    else:
+        topic_rows = (
+            NeighborhoodWish.objects.filter(group_id__in=allowed_ids)
+            .values("topic")
+            .annotate(count=Count("id"))
+            .order_by("-count")
+        )
+        labels = dict(WishTopic.choices)
+        wish_topics_all = [
+            {
+                "topic": r["topic"],
+                "label": labels.get(r["topic"], r["topic"]),
+                "count": r["count"],
+            }
+            for r in topic_rows
+        ]
     return render(
         request,
         "panel/services_wishes.html",
         {
             "groups": groups,
-            "wish_overview": aggregate_home_stats(),
-            "wish_topics_all": topic_stats(),
+            "wish_overview": wish_overview,
+            "wish_topics_all": wish_topics_all,
         },
     )
 
@@ -1085,10 +1257,14 @@ def services_wishes(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_http_methods(["GET", "POST"])
 def services_archive(request: HttpRequest) -> HttpResponse:
+    allowed_group_ids = manager_group_ids(request.user)
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "delete_campaign":
             campaign = get_object_or_404(ServiceCampaign, pk=request.POST.get("campaign_id"))
+            if campaign.group_id and campaign.group_id not in allowed_group_ids:
+                messages.error(request, "Нет доступа к этому сбору.")
+                return redirect("panel:services_archive")
             reason = (request.POST.get("reason") or "").strip()
             if not reason:
                 messages.error(request, "Укажите причину удаления сбора.")
@@ -1098,9 +1274,10 @@ def services_archive(request: HttpRequest) -> HttpResponse:
             return redirect("panel:services_archive")
         return redirect("panel:services_archive")
 
+    campaigns_base = ServiceCampaign.objects.filter(group_id__in=allowed_group_ids)
     categories = []
     for value, label in ServiceCategory.choices:
-        qs = ServiceCampaign.objects.filter(category=value)
+        qs = campaigns_base.filter(category=value)
         categories.append(
             {
                 "value": value,
@@ -1108,12 +1285,14 @@ def services_archive(request: HttpRequest) -> HttpResponse:
                 "count": qs.count(),
                 "active": qs.filter(status=CampaignStatus.ACTIVE).count(),
                 "pending_receipts": ServiceReceipt.objects.filter(
-                    campaign__category=value, status=ReceiptStatus.PENDING
+                    campaign__category=value,
+                    campaign__group_id__in=allowed_group_ids,
+                    status=ReceiptStatus.PENDING,
                 ).count(),
             }
         )
     recent = (
-        ServiceCampaign.objects.select_related("group")
+        campaigns_base.select_related("group")
         .prefetch_related("invites")
         .all()[:20]
     )
@@ -1130,20 +1309,79 @@ def services_archive(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_http_methods(["GET", "POST"])
 def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
-    group = get_object_or_404(ServiceGroup, pk=pk)
+    group = get_object_or_404(
+        ServiceGroup.objects.select_related(
+            "manager", "manager__panel_profile", "manager__panel_profile__bot_user"
+        ),
+        pk=pk,
+    )
+    denied = _require_group_access(request, group)
+    if denied:
+        return denied
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "delete":
+            if not is_panel_admin(request.user):
+                messages.error(request, "Удаление группы доступно только администратору.")
+                return redirect("panel:service_group_edit", pk=pk)
             name = group.name
             group.delete()
             messages.success(request, f"Группа «{name}» удалена")
             return redirect("panel:services_groups")
+        if action == "assign_manager":
+            if not is_panel_admin(request.user):
+                messages.error(request, "Назначать менеджера может только администратор.")
+                return redirect("panel:service_group_edit", pk=pk)
+            raw_id = (request.POST.get("manager_bot_user_id") or "").strip()
+            if not raw_id.isdigit():
+                messages.error(request, "Выберите участника группы.")
+                return redirect("panel:service_group_edit", pk=pk)
+            bot_user = get_object_or_404(BotUser, pk=int(raw_id))
+            password = (request.POST.get("manager_password") or "").strip() or None
+            try:
+                account, plain = assign_group_manager(
+                    group, bot_user, password=password
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect("panel:service_group_edit", pk=pk)
+            max_text = manager_credentials_max_message(
+                username=account.username,
+                password=plain,
+                group_name=group.name,
+            )
+            _notify_user(bot_user, max_text)
+            messages.success(
+                request,
+                f"Менеджер группы: {bot_user}. "
+                f"Логин: {account.username}. "
+                f"Пароль и данные для входа отправлены пользователю в MAX.",
+            )
+            return redirect("panel:service_group_edit", pk=pk)
+        if action == "clear_manager":
+            if not is_panel_admin(request.user):
+                messages.error(request, "Снимать менеджера может только администратор.")
+                return redirect("panel:service_group_edit", pk=pk)
+            clear_group_manager(group)
+            messages.success(request, "Менеджер группы снят.")
+            return redirect("panel:service_group_edit", pk=pk)
+
         group.name = request.POST.get("name", group.name).strip() or group.name
         group.description = request.POST.get("description", "").strip()
         group.save()
         old_ids = set(group.members.values_list("id", flat=True))
         ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
         group.members.set(BotUser.objects.filter(id__in=ids))
+        # Если менеджер больше не в группе — снять назначение.
+        if group.manager_id:
+            profile = getattr(group.manager, "panel_profile", None)
+            bot_id = getattr(profile, "bot_user_id", None) if profile else None
+            if bot_id and bot_id not in ids:
+                clear_group_manager(group)
+                messages.warning(
+                    request,
+                    "Менеджер был исключён из состава — назначение снято.",
+                )
         new_ids = [i for i in ids if i not in old_ids]
         group_notices = 0
         campaign_notices = 0
@@ -1168,10 +1406,18 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         if campaign_notices:
             parts.append(f"отправленных сборов: {campaign_notices}")
         messages.success(request, ". ".join(parts) + ".")
+        log_manager_action(
+            request,
+            action="group_edit",
+            title=f"Группа сохранена: {group.name}",
+            meta={"group_id": group.id},
+        )
         return redirect("panel:service_group_edit", pk=pk)
 
     member_ids = set(group.members.values_list("id", flat=True))
-    users = BotUser.objects.all().order_by("real_name", "display_name")
+    # Админ видит всех для набора состава; менеджер — тоже всех (чтобы добавлять жителей).
+    users = scoped_bot_users_qs(request.user) if not is_panel_admin(request.user) else BotUser.objects.all().order_by("real_name", "display_name")
+    members = list(group.members.all().order_by("real_name", "display_name"))
     from database.models import NeighborhoodWish
     from services.service import group_accumulated_budget
     from services.wishes import topic_stats
@@ -1182,12 +1428,20 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         .select_related("user")
         .order_by("-created_at")[:40]
     )
+    current_manager_bot_id = None
+    manager_login = ""
+    if group.manager_id:
+        manager_login = group.manager.username
+        profile = getattr(group.manager, "panel_profile", None)
+        if profile and profile.bot_user_id:
+            current_manager_bot_id = profile.bot_user_id
     return render(
         request,
         "panel/service_group_edit.html",
         {
             "group": group,
             "users": users,
+            "members": members,
             "member_ids": member_ids,
             "group_budget": group_accumulated_budget(group),
             "wish_stats": wish_stats,
@@ -1197,6 +1451,10 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 [s["label"] for s in wish_stats], ensure_ascii=False
             ),
             "wish_chart_values_json": json.dumps([s["count"] for s in wish_stats]),
+            "can_assign_manager": is_panel_admin(request.user),
+            "can_delete_group": is_panel_admin(request.user),
+            "current_manager_bot_id": current_manager_bot_id,
+            "manager_login": manager_login,
         },
     )
 
@@ -1207,8 +1465,9 @@ def services_category(request: HttpRequest, category: str) -> HttpResponse:
         messages.error(request, "Неизвестная категория")
         return redirect("panel:services_archive")
     label = dict(ServiceCategory.choices)[category]
+    allowed_group_ids = manager_group_ids(request.user)
     campaigns = (
-        ServiceCampaign.objects.filter(category=category)
+        ServiceCampaign.objects.filter(category=category, group_id__in=allowed_group_ids)
         .select_related("group")
         .prefetch_related("invites")
     )
@@ -1219,7 +1478,9 @@ def services_category(request: HttpRequest, category: str) -> HttpResponse:
             "category": category,
             "category_label": label,
             "campaigns": campaigns,
-            "tax_warning": AppSettings.load().tax_limit_warning(),
+            "tax_warning": AppSettings.load().tax_limit_warning()
+            if is_panel_admin(request.user)
+            else "",
         },
     )
 
@@ -1234,6 +1495,13 @@ def service_campaign_create(request: HttpRequest, category: str) -> HttpResponse
 @require_http_methods(["GET", "POST"])
 def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
     campaign = get_object_or_404(ServiceCampaign.objects.select_related("group"), pk=pk)
+    if campaign.group_id:
+        denied = _require_group_access(request, campaign.group)
+        if denied:
+            return denied
+    elif not is_panel_admin(request.user):
+        messages.error(request, "Нет доступа к этому сбору.")
+        return redirect("panel:services_archive")
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "resend":
@@ -1511,11 +1779,16 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
+@admin_required
 @require_http_methods(["GET", "POST"])
 def contractors_list(request: HttpRequest) -> HttpResponse:
-    from database.models import ContractorProfile, ContractorStatus, EquipmentType
+    from database.models import ContractorProfile, ContractorStatus, ExecutorRole
     from panel.admin_tasks import close_task_for_source
     from database.models import AdminTaskKind
+
+    if not is_panel_admin(request.user):
+        messages.error(request, "Раздел исполнителей доступен только администратору.")
+        return redirect(panel_home_url_name(request.user))
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -1543,6 +1816,17 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
                 profile.user,
                 "Анкета исполнителя проверена. Теперь вы можете получать заказы.",
             )
+            try:
+                from services.work_request_dispatch import dispatch_for_new_contractor
+
+                n = dispatch_for_new_contractor(profile, send_fn=_notify_user)
+                if n:
+                    messages.info(
+                        request,
+                        f"Исполнителю предложено открытых заявок: {n}.",
+                    )
+            except Exception:
+                pass
             messages.success(request, f"Исполнитель «{profile}» подтверждён.")
         elif action == "reject":
             profile.status = ContractorStatus.REJECTED
@@ -1575,29 +1859,29 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             messages.success(request, f"Реквизиты «{profile}» сохранены.")
         return redirect("panel:contractors")
 
-    from django.db.models import DecimalField, Sum, Value
-    from django.db.models.functions import Coalesce
+    from django.db.models import Avg, Count
+    from services.contractors import annotate_contractor_total_earned
 
     eq_filter = (request.GET.get("type") or "").strip()
-    qs = (
-        ContractorProfile.objects.select_related("user")
-        .annotate(
-            total_earned=Coalesce(
-                Sum("payouts__amount"),
-                Value(Decimal("0")),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            )
-        )
-        .order_by("status", "equipment_type", "-submitted_at")
-    )
-    if eq_filter in EquipmentType.values:
+    qs = annotate_contractor_total_earned(
+        ContractorProfile.objects.select_related("user", "role")
+    ).annotate(
+        rating_avg=Avg("work_ratings__score"),
+        rating_count=Count("work_ratings", distinct=True),
+    ).order_by("status", "equipment_type", "-submitted_at")
+    if eq_filter:
         qs = qs.filter(equipment_type=eq_filter)
+    role_choices = list(
+        ExecutorRole.objects.filter(is_active=True)
+        .order_by("id")
+        .values_list("code", "name")
+    )
     return render(
         request,
         "panel/contractors.html",
         {
             "contractors": qs,
-            "equipment_choices": EquipmentType.choices,
+            "equipment_choices": role_choices,
             "type_filter": eq_filter,
             "status_verified": ContractorStatus.VERIFIED,
             "status_pending": ContractorStatus.PENDING_REVIEW,
@@ -1608,7 +1892,17 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
-    receipt = get_object_or_404(ServiceReceipt, pk=pk)
+    receipt = get_object_or_404(
+        ServiceReceipt.objects.select_related("campaign", "campaign__group", "user"),
+        pk=pk,
+    )
+    if receipt.campaign.group_id:
+        denied = _require_group_access(request, receipt.campaign.group)
+        if denied:
+            return denied
+    elif not is_panel_admin(request.user):
+        messages.error(request, "Нет доступа.")
+        return redirect(panel_home_url_name(request.user))
     comment = request.POST.get("comment", "").strip()
     try:
         approve_service_receipt(receipt, comment=comment, send_fn=_notify_user)
@@ -1620,24 +1914,32 @@ def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
         if receipt.campaign.status == CampaignStatus.CLOSED:
             messages.info(request, "Цель сбора достигнута — рассылка «Сбор закрыт.»")
         tax_warn = AppSettings.load().tax_limit_warning()
-        if tax_warn:
+        if tax_warn and is_panel_admin(request.user):
             messages.warning(request, tax_warn)
     except ValueError as exc:
         messages.error(request, str(exc))
-    next_url = request.POST.get("next") or f"/panel/services/campaigns/{receipt.campaign_id}/"
-    return redirect(next_url)
+    return redirect_after_post(request, fallback=f"/panel/services/campaigns/{receipt.campaign_id}/")
 
 
 @login_required
 @require_POST
 def service_receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
-    receipt = get_object_or_404(ServiceReceipt, pk=pk)
+    receipt = get_object_or_404(
+        ServiceReceipt.objects.select_related("campaign", "campaign__group", "user"),
+        pk=pk,
+    )
+    if receipt.campaign.group_id:
+        denied = _require_group_access(request, receipt.campaign.group)
+        if denied:
+            return denied
+    elif not is_panel_admin(request.user):
+        messages.error(request, "Нет доступа.")
+        return redirect(panel_home_url_name(request.user))
     comment = request.POST.get("comment", "").strip() or "Реквизиты не подтверждены"
     reject_service_receipt(receipt, comment=comment)
     _notify_user(receipt.user, rejected_service_message(receipt))
     messages.success(request, f"Сервис-чек #{pk} отклонён.")
-    next_url = request.POST.get("next") or f"/panel/services/campaigns/{receipt.campaign_id}/"
-    return redirect(next_url)
+    return redirect_after_post(request, fallback=f"/panel/services/campaigns/{receipt.campaign_id}/")
 
 
 @login_required
@@ -1645,10 +1947,14 @@ def services_ranking(request: HttpRequest) -> HttpResponse:
     locality = request.GET.get("locality", "").strip()
     q = request.GET.get("q", "").strip()
     sort = request.GET.get("sort", "-rating").strip() or "-rating"
-    rows = sort_ranking_rows(ranking_list(locality=locality, q=q), sort=sort)
-    # Distinct localities already stored on users — no external suggest/Yandex.
+    scope_ids = scoped_bot_user_ids(request.user)
+    rows = sort_ranking_rows(
+        ranking_list(locality=locality, q=q, user_ids=scope_ids),
+        sort=sort,
+    )
+    users_scope = scoped_bot_users_qs(request.user)
     localities = list(
-        BotUser.objects.exclude(locality="")
+        users_scope.exclude(locality="")
         .exclude(locality__isnull=True)
         .values_list("locality", flat=True)
         .distinct()
@@ -1674,7 +1980,8 @@ def services_ranking(request: HttpRequest) -> HttpResponse:
 def clients_map(request: HttpRequest) -> HttpResponse:
     from services.clients_map import build_clients_map
 
-    graphs = build_clients_map()
+    group_ids = None if is_panel_admin(request.user) else manager_group_ids(request.user)
+    graphs = build_clients_map(group_ids=group_ids)
     graphs_payload = [
         {
             "group_id": g["group_id"],
@@ -1700,6 +2007,7 @@ def clients_map(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@admin_required
 def earnings_forecast(request: HttpRequest) -> HttpResponse:
     from subscriptions.forecast import build_earnings_forecast
 
@@ -1717,7 +2025,16 @@ def admin_tasks_today(request: HttpRequest) -> HttpResponse:
     from panel.admin_tasks import build_task_sections, sync_admin_tasks
 
     sync_admin_tasks()
-    sections, total, fingerprint = build_task_sections()
+    scope_ids = scoped_bot_user_ids(request.user)
+    exclude = None
+    if not is_panel_admin(request.user):
+        from database.models import AdminTaskKind
+
+        # Оплата подписок — только администратор.
+        exclude = {AdminTaskKind.PAYMENT_RECEIPT}
+    sections, total, fingerprint = build_task_sections(
+        user_ids=scope_ids, exclude_kinds=exclude
+    )
     return render(
         request,
         "panel/admin_tasks_today.html",
@@ -1740,7 +2057,16 @@ def admin_tasks_feed(request: HttpRequest) -> JsonResponse:
 
     # Keep inbox in sync with pending receipts/profiles while the page is open.
     sync_admin_tasks()
-    sections, total, fingerprint = build_task_sections()
+    scope_ids = scoped_bot_user_ids(request.user)
+    exclude = None
+    if not is_panel_admin(request.user):
+        from database.models import AdminTaskKind
+
+        # Оплата подписок — только администратор.
+        exclude = {AdminTaskKind.PAYMENT_RECEIPT}
+    sections, total, fingerprint = build_task_sections(
+        user_ids=scope_ids, exclude_kinds=exclude
+    )
     client_fp = (request.GET.get("fp") or "").strip()
     if client_fp and client_fp == fingerprint:
         return JsonResponse(
@@ -1768,6 +2094,10 @@ def admin_task_done(request: HttpRequest, pk: int) -> HttpResponse:
     from subscriptions.family import confirm_family_from_task
 
     task = get_object_or_404(AdminTask, pk=pk)
+    if not is_panel_admin(request.user):
+        if not task.user_id or not can_access_bot_user(request.user, task.user):
+            messages.error(request, "Нет доступа к этой задаче.")
+            return redirect("panel:admin_tasks_today")
     family_note = ""
     if task.kind == AdminTaskKind.FAMILY_CLAIM:
         try:
@@ -1787,6 +2117,13 @@ def admin_task_done(request: HttpRequest, pk: int) -> HttpResponse:
             logger.exception("Family confirm failed for task #%s", pk)
             messages.error(request, "Не удалось объединить семью — проверьте карточку пользователя.")
     task.mark_done()
+    log_manager_action(
+        request,
+        action="task_done",
+        title=f"Задача выполнена: {task.title}",
+        detail=family_note.strip(),
+        meta={"task_id": task.id, "kind": task.kind},
+    )
     messages.success(request, f"Задача «{task.title}» выполнена.{family_note}")
     return redirect("panel:admin_tasks_today")
 
@@ -1797,6 +2134,9 @@ def admin_task_dismiss(request: HttpRequest, pk: int) -> HttpResponse:
     from database.models import AdminTask
 
     task = get_object_or_404(AdminTask, pk=pk)
+    if task.user_id and not can_access_bot_user(request.user, task.user):
+        messages.error(request, "Нет доступа к этой задаче.")
+        return redirect("panel:admin_tasks_today")
     task.dismiss()
     messages.success(request, f"Задача «{task.title}» скрыта.")
     return redirect("panel:admin_tasks_today")
@@ -1805,6 +2145,9 @@ def admin_task_dismiss(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_POST
 def admin_address_scan(request: HttpRequest) -> HttpResponse:
+    if not is_panel_admin(request.user):
+        messages.error(request, "Сканирование адресов доступно только администратору.")
+        return redirect("panel:admin_tasks_today")
     from services.address_overlap import scan_all_addresses
 
     use_ai = request.POST.get("use_ai", "1") != "0"

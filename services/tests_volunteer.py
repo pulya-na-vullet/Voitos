@@ -118,7 +118,10 @@ class VolunteerHelpTests(TestCase):
 
 class GroupsPageTests(TestCase):
     def setUp(self) -> None:
-        self.admin = User.objects.create_user("grpadm", password="pass")
+        self.admin = User.objects.create_superuser("grpadm", "g@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="grpadm", password="pass")
 
@@ -138,7 +141,7 @@ class GroupsPageTests(TestCase):
         body = resp.content.decode()
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn('value="create_group"', body)
-        self.assertIn("Запустить сбор", body)
+        self.assertIn("Новый сбор", body)
         self.assertIn('id="snow-haul-row" hidden', body)
         self.assertIn("data-members=", body)
 

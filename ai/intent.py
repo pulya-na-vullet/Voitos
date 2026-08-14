@@ -38,7 +38,7 @@ INTENT_SYSTEM_PROMPT = """Ты классификатор намерений п�
 - neighborhood_wish — идея/голос за улучшение двора, улицы, придомовой территории для группы жителей
 - list_wishes — «пожелания» — показать статистику тем по группе
 - registration — начать или продолжить анкету
-- contractor_registration — регистрация тракториста / водителя камаза
+- contractor_registration — регистрация исполнителя по списку ролей из каталога
 - chat — обычный вопрос или разговор
 
 Категории памяти: purchases, home, car, finance, health, preferences, people, ideas, other
@@ -171,8 +171,29 @@ CONTRACTOR_REG_RE = re.compile(
     r"^\s*(/)?("
     r"регистрация\s+техники|я\s+тракторист|я\s+водитель|"
     r"я\s+владелец\s+техники|зарегистрировать\s+технику|"
-    r"стать\s+исполнителем|исполнитель|трактор-погрузчик|"
+    r"стать\s+исполнителем|регистрация\s+исполнителя|"
     r"я\s+на\s+камазе|регистрация\s+камаза|регистрация\s+трактора"
+    r")\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+WORK_DONE_RE = re.compile(
+    r"^\s*(/)?("
+    r"заявка\s+выполнена|заказ\s+выполнен|работу\s+выполнил|"
+    r"работа\s+выполнена|выполнил\s+заявку|выполнил\s+заказ"
+    r")\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+WORK_REQUEST_RE = re.compile(
+    r"^\s*(/)?("
+    r"вызвать\s+исполнителя|вызови\s+исполнителя|нужен\s+исполнитель|"
+    r"заказать\s+мастера|вызвать\s+мастера|"
+    r"нужен\s+(разнорабочий|каменщик|плиточник|электрик|сварщик|грузчик|"
+    r"компьютерный\s+мастер|мастер\s+по\s+маникюру|репетитор\s+\w+)|"
+    r"нужна\s+(няня|домработница)|"
+    r"вызови\s+(разнорабочего|каменщика|плиточника|электрика|сварщика|грузчика|"
+    r"репетитора)|"
+    r"вызвать\s+(разнорабочего|каменщика|плиточника|электрика|сварщика|грузчика|"
+    r"репетитора)"
     r")\s*[.!]?\s*$",
     re.IGNORECASE,
 )
@@ -574,6 +595,17 @@ class IntentAnalyzer:
             return IntentResult(intent="registration", confidence=1.0)
         if CONTRACTOR_REG_RE.match(text):
             return IntentResult(intent="contractor_registration", confidence=1.0)
+        if WORK_DONE_RE.match(text):
+            return IntentResult(intent="work_request_done", confidence=1.0)
+        if WORK_REQUEST_RE.match(text):
+            return IntentResult(intent="work_request", confidence=1.0)
+        try:
+            from services.executor_roles import looks_like_work_request_call
+
+            if looks_like_work_request_call(text):
+                return IntentResult(intent="work_request", confidence=1.0)
+        except Exception:
+            pass
         if FORCE_REMEMBER_RE.match(text) or text.lower().startswith("запомни это"):
             return IntentResult(intent="force_remember", confidence=1.0)
         if FORCE_FORGET_RE.match(text):

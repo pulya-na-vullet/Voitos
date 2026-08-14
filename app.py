@@ -94,9 +94,13 @@ def ensure_admin_user() -> None:
             user.save()
         logger.info("Admin user '%s' ready", username)
 
-    from database.models import AppSettings
+    from database.models import AppSettings, PanelProfile, PanelRole
 
     AppSettings.load()
+    PanelProfile.objects.update_or_create(
+        user=user,
+        defaults={"role": PanelRole.ADMIN},
+    )
 
 
 def _ensure_env_file() -> None:
@@ -114,6 +118,7 @@ def _ensure_env_file() -> None:
             "DEBUG=True\nALLOWED_HOSTS=*\n"
             "ADMIN_USERNAME=admin\nADMIN_PASSWORD=admin\n"
             "HOST=0.0.0.0\nPORT=18765\n"
+            "# PANEL_PUBLIC_URL=\n"
             "YANDEX_MODEL=yandexgpt-lite\n"
             "MAX_SSL_VERIFY=true\n",
             encoding="utf-8",
@@ -131,9 +136,15 @@ def sync_env_into_settings() -> None:
     if cfg.allowed_max_user_id:
         cfg.allowed_max_user_id = ""
         cfg.save(update_fields=["allowed_max_user_id", "updated_at"])
-    if not cfg.payment_phone:
-        cfg.payment_phone = "89625507832"
+    # Реквизиты оплаты — только из панели / env, без хардкода получателя
+    env_phone = (os.environ.get("PAYMENT_PHONE") or "").strip()
+    env_name = (os.environ.get("PAYMENT_NAME") or "").strip()
+    if env_phone and not cfg.payment_phone:
+        cfg.payment_phone = env_phone
         cfg.save(update_fields=["payment_phone", "updated_at"])
+    if env_name and not cfg.payment_name:
+        cfg.payment_name = env_name
+        cfg.save(update_fields=["payment_name", "updated_at"])
     # Safety net: never leave unpaid users on a gifted full subscription
     try:
         from subscriptions.service import (
@@ -191,10 +202,14 @@ def run_web_server(stop_event: threading.Event) -> None:
     from waitress import serve
 
     from config.wsgi import application
+    from panel.network import ensure_network_csrf_trusted, panel_login_url
 
     host = settings.HOST
     port = int(settings.PORT)
+    # Всегда слушаем на всех интерфейсах при 0.0.0.0 — иначе с телефонов в Wi‑Fi не зайти.
+    ensure_network_csrf_trusted()
     logger.info("Web panel listening on http://%s:%s/panel/", host, port)
+    logger.info("Panel login URL for LAN/clients: %s", panel_login_url())
     serve(application, host=host, port=port, threads=8, channel_timeout=120)
 
 
@@ -257,10 +272,31 @@ def main() -> int:
 
     from django.conf import settings
 
+    from panel.network import (
+        WIFI_WORKSHOP_NOTE,
+        ensure_network_csrf_trusted,
+        is_local_lan_mode,
+        panel_login_url,
+    )
+
+    access_origin = ensure_network_csrf_trusted()
+    login_url = panel_login_url()
+
     logger.info("=" * 60)
     logger.info("Voitos is running")
-    logger.info("Admin panel: http://%s:%s/panel/", settings.HOST if settings.HOST != "0.0.0.0" else "127.0.0.1", settings.PORT)
-    logger.info("Login: %s / %s", settings.ADMIN_USERNAME, settings.ADMIN_PASSWORD)
+    logger.info("Admin panel (local): http://127.0.0.1:%s/panel/", settings.PORT)
+    logger.info("Admin panel (network): %s", access_origin + "/panel/")
+    logger.info("Login URL for managers: %s", login_url)
+    if is_local_lan_mode():
+        logger.info("LAN mode %s — HOST=%s (Wi‑Fi clients OK)", WIFI_WORKSHOP_NOTE, settings.HOST)
+        if settings.HOST not in {"0.0.0.0", "::", "[::]", "*"}:
+            logger.warning(
+                "HOST=%s — для доступа из Wi‑Fi сети лучше HOST=0.0.0.0",
+                settings.HOST,
+            )
+    else:
+        logger.info("Public stand URL mode (PANEL_PUBLIC_URL set)")
+    logger.info("Login user: %s (password not logged)", settings.ADMIN_USERNAME)
     logger.info("Configure Yandex AI + MAX token in the panel, then chat in MAX")
     logger.info("=" * 60)
 

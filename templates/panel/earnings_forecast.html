@@ -94,4 +94,103 @@
     </tbody>
   </table>
 </div>
+
+<div class="card" style="margin-top:24px;">
+  <h2 style="margin-top:0; font-size:1.1rem;">Комиссии исполнителей</h2>
+  <p class="muted" style="margin-top:-4px;">10% от подтверждённой суммы работ по заявкам.</p>
+  <div class="grid stats" style="margin-top:12px;">
+    <div class="card">
+      <div class="stat-label">Принято</div>
+      <div class="stat-value" style="color: var(--ok);">{{ forecast.commissions.approved_total }} ₽</div>
+      <div class="muted">{{ forecast.commissions.approved_count }} комиссий</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">На проверке</div>
+      <div class="stat-value">{{ forecast.commissions.pending_total }} ₽</div>
+      <div class="muted">{{ forecast.commissions.pending_count }} комиссий</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Ждём оплату</div>
+      <div class="stat-value">{{ forecast.commissions.awaiting_total }} ₽</div>
+      <div class="muted">{{ forecast.commissions.awaiting_count }} комиссий</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">В открытом контуре</div>
+      <div class="stat-value">{{ forecast.commissions.open_total }} ₽</div>
+      <div class="muted">проверка + ожидание + отклонено: {{ forecast.commissions.open_count }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h2 style="margin-top:0; font-size:1.1rem;">Комиссии по исполнителям</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Исполнитель</th>
+        <th>Роль</th>
+        <th>Принято</th>
+        <th>На проверке</th>
+        <th>Ждём</th>
+        <th>Отклонено</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in forecast.commissions.by_executor %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ row.role }}</td>
+        <td class="mono">{{ row.approved_total }} ₽ <span class="muted">({{ row.approved_count }})</span></td>
+        <td class="mono">{{ row.pending_total }} ₽ <span class="muted">({{ row.pending_count }})</span></td>
+        <td class="mono">{{ row.awaiting_total }} ₽ <span class="muted">({{ row.awaiting_count }})</span></td>
+        <td class="mono">{{ row.rejected_total }} ₽ <span class="muted">({{ row.rejected_count }})</span></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="muted">Пока нет комиссий по заявкам</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h2 style="margin-top:0; font-size:1.1rem;">Последние комиссии</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Заявка</th>
+        <th>Исполнитель</th>
+        <th>Клиент</th>
+        <th>Сумма работ</th>
+        <th>Комиссия 10%</th>
+        <th>Статус</th>
+        <th>Когда</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in forecast.commissions.recent %}
+      <tr>
+        <td><a href="{% url 'panel:work_request_detail' row.id %}">#{{ row.id }}</a> · {{ row.role }}</td>
+        <td>{{ row.executor }}</td>
+        <td>{{ row.client }}</td>
+        <td class="mono">{% if row.confirmed_amount %}{{ row.confirmed_amount }} ₽{% else %}—{% endif %}</td>
+        <td class="mono">{{ row.amount }} ₽</td>
+        <td>
+          {% if row.status == "approved" %}
+            <span class="badge ok">{{ row.status_label }}</span>
+          {% elif row.status == "pending_review" %}
+            <span class="badge warn">{{ row.status_label }}</span>
+          {% elif row.status == "rejected" %}
+            <span class="badge danger">{{ row.status_label }}</span>
+          {% else %}
+            <span class="muted">{{ row.status_label }}</span>
+          {% endif %}
+        </td>
+        <td class="mono">{{ row.when_s }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="muted">Нет записей о комиссиях</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}

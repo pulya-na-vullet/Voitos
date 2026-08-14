@@ -1,0 +1,204 @@
+{% extends "panel/base.html" %}
+{% block title %}Роли исполнителей — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Роли мастеров</h1>
+  <a class="btn secondary small" href="{% url 'panel:contractors' %}">← Исполнители</a>
+</div>
+<p class="muted" style="margin-top:-6px;">
+  Каталог ролей для регистрации и заявок «вызвать исполнителя».
+  Код роли создаётся автоматически. Галочки «документы» и «техника» влияют на регистрацию в боте.
+  Доп. признаки добавляете сами.
+</p>
+
+<div class="grid two">
+  <div class="card">
+    <h3 style="margin-top:0;">Список</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Название и признаки</th><th>Документы</th><th>Техника</th><th>На дому</th><th>Активна</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in roles %}
+        <tr>
+          <td>
+            <form method="post" class="role-edit-form" data-role-id="{{ r.id }}" style="display:flex; flex-direction:column; gap:8px;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="save">
+              <input type="hidden" name="role_id" value="{{ r.id }}">
+              <input type="hidden" name="flags_json" class="flags-json" value="[]">
+              <input type="text" name="name" value="{{ r.name }}" required>
+              <label class="muted"><input type="checkbox" name="requires_qualification_docs" {% if r.requires_qualification_docs %}checked{% endif %}> нужны подтверждающие документы о квалификации</label>
+              <label class="muted"><input type="checkbox" name="is_equipment" {% if r.is_equipment %}checked{% endif %}> техника (госномер / модель)</label>
+              <label class="muted"><input type="checkbox" name="accepts_at_home" {% if r.accepts_at_home %}checked{% endif %}> мастер принимает на дому</label>
+              <div class="flag-editor" data-editor="role-{{ r.id }}"></div>
+              <label class="muted"><input type="checkbox" name="is_active" {% if r.is_active %}checked{% endif %}> активна</label>
+              <button class="btn small" type="submit">Сохранить</button>
+            </form>
+          </td>
+          <td>{% if r.requires_qualification_docs %}да{% else %}нет{% endif %}</td>
+          <td>{% if r.is_equipment %}да{% else %}—{% endif %}</td>
+          <td>{% if r.accepts_at_home %}да{% else %}—{% endif %}</td>
+          <td>{% if r.is_active %}<span class="badge ok">да</span>{% else %}<span class="badge">нет</span>{% endif %}</td>
+          <td>
+            <form method="post" onsubmit="return confirm('Удалить / скрыть роль?');">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="role_id" value="{{ r.id }}">
+              <button class="btn danger small" type="submit">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">Ролей пока нет — создайте справа</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Новая роль</h3>
+    <form method="post" id="new-role-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="create">
+      <input type="hidden" name="flags_json" class="flags-json" value="[]">
+      <div class="form-row"><label>Название</label><input name="name" required placeholder="Сантехник"></div>
+      <label class="muted"><input type="checkbox" name="requires_qualification_docs"> нужны подтверждающие документы о квалификации</label><br>
+      <label class="muted"><input type="checkbox" name="is_equipment"> техника (госномер / модель)</label><br>
+      <label class="muted"><input type="checkbox" name="accepts_at_home"> мастер принимает на дому</label>
+      <div class="form-row" style="margin-top:10px;">
+        <label>Доп. признаки</label>
+        <div class="flag-editor" data-editor="new"></div>
+      </div>
+      <div style="margin-top:12px;"><button class="btn" type="submit">Добавить</button></div>
+    </form>
+  </div>
+</div>
+
+<style>
+  .flag-editor { display:flex; flex-direction:column; gap:6px; }
+  .flag-row {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 8px; border:1px solid var(--line); border-radius:8px;
+    background: rgba(255,255,255,0.03);
+  }
+  .flag-row .flag-label { flex:1; margin:0; color: var(--muted); }
+  .flag-row .flag-del {
+    border:none; background:transparent; color:var(--danger);
+    cursor:pointer; font-size:1.1rem; line-height:1; padding:2px 6px;
+  }
+  .flag-row .flag-del:hover { opacity:0.8; }
+  .flag-add { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; }
+  .flag-add input[type="text"] { flex:1; min-width:140px; }
+  .flag-empty { color:var(--muted); font-size:0.85rem; }
+</style>
+
+<script>
+(function () {
+  const ROLES_FLAGS = {{ roles_flags_json|safe }};
+  const byRole = Object.fromEntries(ROLES_FLAGS.map(r => [String(r.id), r.flags || []]));
+
+  function slugCustom(label) {
+    const base = (label || "flag").toLowerCase().replace(/ё/g, "е")
+      .replace(/[^a-z0-9а-я]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "flag";
+    return "custom_" + base + "_" + Math.random().toString(16).slice(2, 8);
+  }
+
+  function FlagEditor(root, initial, hiddenInput) {
+    this.root = root;
+    this.flags = (initial || []).map(f => ({ code: f.code, label: f.label, on: true }));
+    this.hidden = hiddenInput;
+    this.render();
+  }
+
+  FlagEditor.prototype.sync = function () {
+    this.hidden.value = JSON.stringify(this.flags.map(f => ({
+      code: f.code, label: f.label, on: true
+    })));
+  };
+
+  FlagEditor.prototype.add = function (label) {
+    const text = (label || "").trim();
+    if (!text) return;
+    if (this.flags.some(f => f.label.toLowerCase() === text.toLowerCase())) return;
+    this.flags.push({ code: slugCustom(text), label: text, on: true });
+    this.render();
+  };
+
+  FlagEditor.prototype.remove = function (code) {
+    this.flags = this.flags.filter(f => f.code !== code);
+    this.render();
+  };
+
+  FlagEditor.prototype.render = function () {
+    const self = this;
+    this.root.innerHTML = "";
+    if (!this.flags.length) {
+      const empty = document.createElement("div");
+      empty.className = "flag-empty";
+      empty.textContent = "Признаков нет — добавьте ниже";
+      this.root.appendChild(empty);
+    }
+    this.flags.forEach(flag => {
+      const row = document.createElement("div");
+      row.className = "flag-row";
+      const lab = document.createElement("span");
+      lab.className = "flag-label";
+      lab.textContent = flag.label;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "flag-del";
+      del.title = "Удалить признак";
+      del.setAttribute("aria-label", "Удалить");
+      del.textContent = "×";
+      del.addEventListener("click", () => self.remove(flag.code));
+      row.appendChild(lab);
+      row.appendChild(del);
+      this.root.appendChild(row);
+    });
+
+    const add = document.createElement("div");
+    add.className = "flag-add";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Текст признака…";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn secondary small";
+    btn.textContent = "Добавить признак";
+    const doAdd = () => {
+      self.add(input.value);
+      input.value = "";
+      input.focus();
+    };
+    btn.addEventListener("click", doAdd);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); doAdd(); }
+    });
+    add.appendChild(input);
+    add.appendChild(btn);
+    this.root.appendChild(add);
+    this.sync();
+  };
+
+  document.querySelectorAll(".role-edit-form").forEach(form => {
+    const roleId = form.getAttribute("data-role-id");
+    new FlagEditor(
+      form.querySelector(".flag-editor"),
+      byRole[roleId] || [],
+      form.querySelector(".flags-json")
+    );
+  });
+
+  const newForm = document.getElementById("new-role-form");
+  if (newForm) {
+    new FlagEditor(
+      newForm.querySelector(".flag-editor"),
+      [],
+      newForm.querySelector(".flags-json")
+    );
+  }
+})();
+</script>
+{% endblock %}

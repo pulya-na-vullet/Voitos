@@ -1,0 +1,54 @@
+{% extends "panel/base.html" %}
+{% block title %}Заявки — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Заявки на мастеров</h1>
+  {% if panel_is_admin %}
+  <a class="btn secondary small" href="{% url 'panel:contractors' %}">← Мастера</a>
+  {% else %}
+  <a class="btn secondary small" href="{% url 'panel:users' %}">← Жители</a>
+  {% endif %}
+</div>
+<form method="get" style="margin-bottom:12px;">
+  <select name="status" onchange="this.form.submit()">
+    <option value="" {% if status_filter == "active" %}selected{% endif %}>Активные</option>
+    <option value="all" {% if status_filter == "all" %}selected{% endif %}>Все</option>
+    {% for v,l in statuses %}
+      <option value="{{ v }}" {% if status_filter == v %}selected{% endif %}>{{ l }}</option>
+    {% endfor %}
+  </select>
+</form>
+<div class="card">
+  <table>
+    <thead><tr><th>#</th><th>Когда</th><th>Кто</th><th>Роль</th><th>Описание</th><th>Фото</th><th>Статус</th><th></th></tr></thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.id }}</td>
+        <td class="mono">{{ item.created_at|date:"d.m H:i" }}</td>
+        <td><a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></td>
+        <td>{{ item.role.name }}</td>
+        <td>{{ item.description|truncatechars:80 }}</td>
+        <td class="mono">{{ item.photos.count }}</td>
+        <td><span class="badge">{{ item.get_status_display }}</span></td>
+        <td style="white-space:nowrap;">
+          <a class="btn small" href="{% url 'panel:work_request_detail' item.id %}">Открыть</a>
+          {% if can_delete %}
+          <form method="post" style="display:inline;" onsubmit="return confirm('Удалить заявку #{{ item.id }}?');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="request_id" value="{{ item.id }}">
+            <button class="btn danger small" type="submit">Удалить</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8" class="muted">
+        Активных заявок нет. Жители создают их в боте: «вызвать мастера».
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -284,8 +284,50 @@ class MaxClient:
             if token
         ]
 
+    # Max media size we accept (receipts / photos)
+    MAX_DOWNLOAD_MAX_BYTES = 15 * 1024 * 1024
+    ALLOWED_DOWNLOAD_CONTENT_TYPES = (
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+        "application/pdf",
+        "audio/ogg",
+        "audio/mpeg",
+        "audio/mp4",
+        "application/octet-stream",  # MAX иногда не шлёт тип
+    )
+
     def download(self, url: str) -> bytes:
-        response = self.session.get(url, timeout=60, verify=self.session.verify)
-        if response.status_code >= 400:
-            raise MaxApiError(f"Failed to download media: {response.status_code}")
-        return response.content
+        """Download attachment WITHOUT bot Authorization (avoid token leak to 3rd-party URLs)."""
+        import requests as _requests
+
+        from bot.ssl_utils import apply_session_ssl
+
+        anon = _requests.Session()
+        apply_session_ssl(anon)
+        # stream to enforce size limit
+        with anon.get(url, timeout=60, verify=anon.verify, stream=True) as response:
+            if response.status_code >= 400:
+                raise MaxApiError(f"Failed to download media: {response.status_code}")
+            ctype = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype and ctype not in self.ALLOWED_DOWNLOAD_CONTENT_TYPES:
+                # Allow empty/unknown only if URL looks like media path
+                if not any(
+                    x in (url or "").lower()
+                    for x in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf", ".ogg", ".mp3")
+                ):
+                    raise MaxApiError(f"Unsupported media type: {ctype or 'unknown'}")
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > self.MAX_DOWNLOAD_MAX_BYTES:
+                    raise MaxApiError(
+                        f"Media too large (>{self.MAX_DOWNLOAD_MAX_BYTES} bytes)"
+                    )
+                chunks.append(chunk)
+            return b"".join(chunks)

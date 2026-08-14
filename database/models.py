@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -59,6 +60,7 @@ class ActivityKind(models.TextChoices):
     CONTRACTOR_OFFER = "contractor_offer", "Предложение исполнителю"
     CONTRACTOR_REPLY = "contractor_reply", "Ответ исполнителя"
     CONTRACTOR_PAYOUT = "contractor_payout", "Оплата исполнителю"
+    WORK_REQUEST = "work_request", "Заявка на исполнителя"
     ERROR = "error", "Ошибка"
     SETTINGS = "settings", "Настройки"
     OTHER = "other", "Прочее"
@@ -161,6 +163,41 @@ class AdminTaskKind(models.TextChoices):
     ADDRESS_OVERLAP = "address_overlap", "Совпадение адреса"
     CONTRACTOR_REVIEW = "contractor_review", "Проверка исполнителя"
     CONTRACTOR_COUNTER = "contractor_counter", "Другое время исполнителя"
+    WORK_REQUEST = "work_request", "Заявка на исполнителя"
+    WORK_COMMISSION = "work_commission", "Комиссия исполнителя 10%"
+
+
+class WorkRequestStatus(models.TextChoices):
+    DRAFT = "draft", "Черновик"
+    PENDING = "pending", "Новая"
+    OFFERING = "offering", "Ищем исполнителя"
+    SCHEDULING = "scheduling", "Согласование времени"
+    IN_PROGRESS = "in_progress", "В работе"
+    AWAITING_CLIENT = "awaiting_client", "Ждём подтверждения клиента"
+    AWAITING_COMMISSION = "awaiting_commission", "Ждём комиссию 10%"
+    DONE = "done", "Выполнена"
+    CANCELLED = "cancelled", "Отменена"
+
+
+class WorkRequestOfferStatus(models.TextChoices):
+    OFFERED = "offered", "Предложено"
+    ACCEPTED = "accepted", "Принято"
+    DECLINED = "declined", "Отказ"
+    EXPIRED = "expired", "Истекло"
+    CANCELLED = "cancelled", "Отменено"
+
+
+class WorkRequestPayMethod(models.TextChoices):
+    TRANSFER = "transfer", "Перевод"
+    CASH = "cash", "Наличные"
+
+
+class WorkRequestCommissionStatus(models.TextChoices):
+    NONE = "", "—"
+    AWAITING = "awaiting", "Ждём оплату 10%"
+    PENDING_REVIEW = "pending_review", "На проверке"
+    APPROVED = "approved", "Принято"
+    REJECTED = "rejected", "Отклонено"
 
 
 class EquipmentType(models.TextChoices):
@@ -209,12 +246,14 @@ class AppSettings(models.Model):
     payment_phone = models.CharField(
         "Телефон для оплаты",
         max_length=32,
-        default="89625507832",
+        blank=True,
+        default="",
     )
     payment_name = models.CharField(
         "Получатель оплаты",
         max_length=255,
-        default="Григорьев Дмитрий Вячеславович",
+        blank=True,
+        default="",
     )
     subscription_price_rub = models.PositiveIntegerField("Цена подписки, ₽/мес", default=100)
     grace_days = models.PositiveIntegerField(
@@ -226,12 +265,14 @@ class AppSettings(models.Model):
     service_payee_name = models.CharField(
         "Сервис: получатель",
         max_length=255,
-        default="Григорьев Д.В.",
+        blank=True,
+        default="",
     )
     service_payee_phone = models.CharField(
         "Сервис: телефон",
         max_length=32,
-        default="89625507832",
+        blank=True,
+        default="",
     )
     service_payee_status = models.CharField(
         "Сервис: статус",
@@ -387,6 +428,14 @@ class BotUser(models.Model):
     def __str__(self) -> str:
         return self.real_name or self.display_name or self.username or self.max_user_id
 
+    @property
+    def contractor_profile(self):
+        """Совместимость: «основной» профиль = последний обновлённый."""
+        qs = getattr(self, "contractor_profiles", None)
+        if qs is None:
+            return None
+        return qs.select_related("role").order_by("-updated_at", "-id").first()
+
     def profile_complete(self) -> bool:
         return bool(self.real_name.strip() and self.phone.strip() and self.address.strip())
 
@@ -534,6 +583,55 @@ class PaymentReceipt(models.Model):
         return " ".join(parts) if parts else "0"
 
 
+class PanelRole(models.TextChoices):
+    ADMIN = "admin", "Администратор"
+    MANAGER = "manager", "Менеджер"
+
+
+class PanelProfile(models.Model):
+    """Роль пользователя панели (администратор / менеджер)."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="panel_profile",
+        verbose_name="Учётная запись",
+    )
+    role = models.CharField(
+        "Роль",
+        max_length=16,
+        choices=PanelRole.choices,
+        default=PanelRole.MANAGER,
+        db_index=True,
+    )
+    bot_user = models.OneToOneField(
+        "BotUser",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="panel_account",
+        verbose_name="Пользователь бота",
+        help_text="Для менеджера — житель, из которого назначена роль.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Профиль панели"
+        verbose_name_plural = "Профили панели"
+
+    def __str__(self) -> str:
+        return f"{self.user.username} ({self.get_role_display()})"
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == PanelRole.ADMIN
+
+    @property
+    def is_manager(self) -> bool:
+        return self.role == PanelRole.MANAGER
+
+
 class ServiceGroup(models.Model):
     """Admin-defined group of residents for service campaign broadcasts."""
 
@@ -541,6 +639,16 @@ class ServiceGroup(models.Model):
     description = models.TextField(blank=True, default="")
     members = models.ManyToManyField(
         BotUser, blank=True, related_name="service_groups"
+    )
+    # Один менеджер (администратор группы) на группу; один менеджер — на несколько групп.
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="managed_service_groups",
+        verbose_name="Менеджер группы",
+        help_text="Роль менеджера: один на группу, может вести несколько групп.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -822,20 +930,31 @@ class CampaignResidentHelper(models.Model):
 
 
 class ContractorProfile(models.Model):
-    """Владелец техники: тракторист / водитель камаза."""
+    """Исполнитель: одна роль/техника на запись; у пользователя может быть несколько ролей."""
 
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         BotUser,
         on_delete=models.CASCADE,
-        related_name="contractor_profile",
+        related_name="contractor_profiles",
+    )
+    role = models.ForeignKey(
+        "ExecutorRole",
+        on_delete=models.PROTECT,
+        related_name="contractors",
+        null=True,
+        blank=True,
+        verbose_name="Роль",
     )
     equipment_type = models.CharField(
-        "Тип техники",
-        max_length=32,
-        choices=EquipmentType.choices,
+        "Код роли / тип техники",
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Совпадает с ExecutorRole.code (tractor/truck/…).",
     )
     equipment_label = models.CharField(
-        "Модель / описание",
+        "Модель / описание / специализация",
         max_length=255,
         blank=True,
         default="",
@@ -857,6 +976,11 @@ class ContractorProfile(models.Model):
         help_text="Например: Сбер, Тинькофф, Альфа.",
     )
     locality = models.CharField("Населённый пункт", max_length=255, blank=True, default="")
+    qualification_doc = models.FileField(
+        "Документ о квалификации",
+        upload_to="contractor_docs/%Y/%m/",
+        blank=True,
+    )
     status = models.CharField(
         max_length=32,
         choices=ContractorStatus.choices,
@@ -872,13 +996,388 @@ class ContractorProfile(models.Model):
         verbose_name = "Исполнитель"
         verbose_name_plural = "Исполнители"
         ordering = ["equipment_type", "user_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "equipment_type"],
+                name="uniq_contractor_user_equipment_type",
+            ),
+        ]
 
     def __str__(self) -> str:
-        return f"{self.get_equipment_type_display()}: {self.user}"
+        return f"{self.role_label}: {self.user}"
 
     @property
     def display_name(self) -> str:
         return str(self.user)
+
+    @property
+    def role_label(self) -> str:
+        if self.role_id:
+            return self.role.name
+        if self.equipment_type in EquipmentType.values:
+            return dict(EquipmentType.choices).get(self.equipment_type, self.equipment_type)
+        return self.equipment_type or "Исполнитель"
+
+    def get_equipment_type_display(self) -> str:
+        """Совместимость со старыми шаблонами."""
+        return self.role_label
+
+
+class ExecutorRole(models.Model):
+    """Каталог ролей исполнителей (редактируется администратором)."""
+
+    code = models.SlugField("Код", max_length=64, unique=True)
+    name = models.CharField("Название", max_length=128)
+    requires_qualification_docs = models.BooleanField(
+        "Нужны подтверждающие документы о квалификации",
+        default=False,
+    )
+    is_equipment = models.BooleanField(
+        "Техника (госномер / модель)",
+        default=False,
+        help_text="Трактор, камаз и т.п. — при регистрации спрашиваем технику.",
+    )
+    accepts_at_home = models.BooleanField(
+        "Мастер принимает на дому",
+        default=False,
+        help_text="После принятия заявки согласовываем окна приёма у мастера.",
+    )
+    for_snow = models.BooleanField("Для уборки снега", default=False)
+    for_road = models.BooleanField("Для дорожных работ", default=False)
+    for_snow_haul = models.BooleanField(
+        "Нужен при вывозе снега",
+        default=False,
+        help_text="Например камаз — только если в сборе включён вывоз.",
+    )
+    # Динамические чекбоксы роли: [{code, label, on}, ...]. Системные code
+    # синхронизируются с boolean-полями выше (бот/кампании).
+    flags = models.JSONField(
+        "Признаки (чекбоксы)",
+        default=list,
+        blank=True,
+        help_text="Список признаков роли; админ добавляет и удаляет в панели.",
+    )
+    is_active = models.BooleanField("Активна", default=True)
+    sort_order = models.PositiveIntegerField(
+        "Порядок в списке",
+        default=0,
+        help_text="Служебное поле; в панели не редактируется — список по порядку создания.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Роль исполнителя"
+        verbose_name_plural = "Роли исполнителей"
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def flags_for_ui(self) -> list[dict]:
+        """Признаки для формы."""
+        from services.executor_roles import flags_from_role
+
+        return flags_from_role(self)
+
+
+class WorkRequest(models.Model):
+    """Заявка жителя: вызвать исполнителя (электрик, грузчик, …)."""
+
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="work_requests",
+    )
+    role = models.ForeignKey(
+        ExecutorRole,
+        on_delete=models.PROTECT,
+        related_name="work_requests",
+        verbose_name="Нужная роль",
+    )
+    description = models.TextField("Описание работ")
+    status = models.CharField(
+        max_length=32,
+        choices=WorkRequestStatus.choices,
+        default=WorkRequestStatus.PENDING,
+        db_index=True,
+    )
+    # Снимок НП жителя на момент заявки (для подбора исполнителя).
+    client_locality = models.CharField(
+        "НП жителя",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    assigned_contractor = models.ForeignKey(
+        "ContractorProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="accepted_work_requests",
+        verbose_name="Назначенный исполнитель",
+    )
+    # Оплата за работу (отчёт исполнителя → подтверждение клиента)
+    pay_method = models.CharField(
+        "Способ оплаты работы",
+        max_length=16,
+        choices=WorkRequestPayMethod.choices,
+        blank=True,
+        default="",
+    )
+    reported_amount = models.DecimalField(
+        "Сумма по отчёту исполнителя, ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    confirmed_amount = models.DecimalField(
+        "Сумма по подтверждению клиента, ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    job_receipt = models.FileField(
+        "Чек оплаты работы (перевод)",
+        upload_to="work_job_receipts/%Y/%m/",
+        blank=True,
+        null=True,
+    )
+    executor_reported_at = models.DateTimeField(null=True, blank=True)
+    client_confirm_due_at = models.DateTimeField(
+        "Когда спросить клиента",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    client_confirmed_at = models.DateTimeField(null=True, blank=True)
+    # Комиссия платформы 10%
+    commission_amount = models.DecimalField(
+        "Комиссия 10%, ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    commission_status = models.CharField(
+        max_length=16,
+        choices=WorkRequestCommissionStatus.choices,
+        blank=True,
+        default=WorkRequestCommissionStatus.NONE,
+        db_index=True,
+    )
+    commission_receipt = models.FileField(
+        "Чек комиссии 10%",
+        upload_to="work_commission_receipts/%Y/%m/",
+        blank=True,
+        null=True,
+    )
+    commission_submitted_at = models.DateTimeField(null=True, blank=True)
+    commission_reviewed_at = models.DateTimeField(null=True, blank=True)
+    commission_admin_note = models.TextField(blank=True, default="")
+    executor_earned_amount = models.DecimalField(
+        "Заработок исполнителя (сумма клиента − комиссия), ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    no_executor_notified_at = models.DateTimeField(
+        "Клиенту сообщили, что нет исполнителя",
+        null=True,
+        blank=True,
+    )
+    dispatch_note = models.TextField(
+        "Заметка подбора (ИИ / система)",
+        blank=True,
+        default="",
+    )
+    # Приём на дому: слоты мастера и согласованное окно
+    master_address = models.CharField(
+        "Адрес приёма у мастера",
+        max_length=512,
+        blank=True,
+        default="",
+    )
+    proposed_slots = models.JSONField(
+        "Предложенные окна приёма",
+        default=list,
+        blank=True,
+        help_text='Список строк/объектов {"label": "..."} от мастера.',
+    )
+    agreed_slot = models.CharField(
+        "Согласованное окно",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    schedule_agreed_at = models.DateTimeField(null=True, blank=True)
+    rating_asked_at = models.DateTimeField(
+        "Запрошена оценка работы",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    admin_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Заявка на исполнителя"
+        verbose_name_plural = "Заявки на исполнителей"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"#{self.pk} {self.role} — {self.user}"
+
+
+
+class WorkRequestRating(models.Model):
+    """Оценка жителем работы исполнителя (1–5) + комментарий."""
+
+    work_request = models.OneToOneField(
+        WorkRequest,
+        on_delete=models.CASCADE,
+        related_name="rating",
+    )
+    contractor = models.ForeignKey(
+        "ContractorProfile",
+        on_delete=models.CASCADE,
+        related_name="work_ratings",
+    )
+    client = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="work_ratings_given",
+    )
+    score = models.PositiveSmallIntegerField("Оценка 1–5")
+    comment = models.TextField("Комментарий", blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Оценка заявки"
+        verbose_name_plural = "Оценки заявок"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"WR#{self.work_request_id}: {self.score}/5"
+
+
+class WorkRequestOffer(models.Model):
+    """Предложение заявки конкретному исполнителю (ответ за 20 минут)."""
+
+    work_request = models.ForeignKey(
+        WorkRequest,
+        on_delete=models.CASCADE,
+        related_name="offers",
+    )
+    contractor = models.ForeignKey(
+        ContractorProfile,
+        on_delete=models.CASCADE,
+        related_name="work_offers",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=WorkRequestOfferStatus.choices,
+        default=WorkRequestOfferStatus.OFFERED,
+        db_index=True,
+    )
+    offered_at = models.DateTimeField(auto_now_add=True)
+    respond_deadline = models.DateTimeField(
+        "Ответить до",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    responded_at = models.DateTimeField(null=True, blank=True)
+    rank_score = models.FloatField(default=0)
+    rank_reason = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        verbose_name = "Предложение по заявке"
+        verbose_name_plural = "Предложения по заявкам"
+        ordering = ["-offered_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["work_request", "contractor"],
+                name="uniq_work_request_contractor_offer",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"WR#{self.work_request_id} → {self.contractor_id} ({self.status})"
+
+
+class ScheduledBotMessage(models.Model):
+    """Отложенные сообщения бота (очередь), напр. опрос клиента через 20 мин."""
+
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="scheduled_bot_messages",
+    )
+    kind = models.CharField(max_length=64, db_index=True)
+    text = models.TextField()
+    send_at = models.DateTimeField(db_index=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Отложенное сообщение бота"
+        verbose_name_plural = "Отложенные сообщения бота"
+        ordering = ["send_at", "id"]
+        indexes = [
+            models.Index(fields=["sent_at", "cancelled_at", "send_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind} → {self.user_id} @ {self.send_at}"
+
+
+class WorkRequestPhoto(models.Model):
+    request = models.ForeignKey(
+        WorkRequest,
+        on_delete=models.CASCADE,
+        related_name="photos",
+    )
+    image = models.FileField(upload_to="work_requests/%Y/%m/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Фото заявки"
+        verbose_name_plural = "Фото заявок"
+        ordering = ["id"]
+
+
+class PanelActionLog(models.Model):
+    """Действия менеджеров панели — видно только администратору."""
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="panel_action_logs",
+        verbose_name="Менеджер",
+    )
+    action = models.CharField("Действие", max_length=64, db_index=True)
+    title = models.CharField(max_length=255)
+    detail = models.TextField(blank=True, default="")
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Лог действия менеджера"
+        verbose_name_plural = "Логи действий менеджеров"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["actor", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.actor_id}: {self.title}"
 
 
 class CampaignAssignment(models.Model):
@@ -895,8 +1394,9 @@ class CampaignAssignment(models.Model):
         related_name="assignments",
     )
     equipment_type = models.CharField(
-        max_length=32,
-        choices=EquipmentType.choices,
+        max_length=64,
+        blank=True,
+        default="",
     )
     status = models.CharField(
         max_length=32,
@@ -940,6 +1440,12 @@ class CampaignAssignment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.contractor} → {self.campaign_id} ({self.status})"
+
+    def get_equipment_type_display(self) -> str:
+        if self.equipment_type in EquipmentType.values:
+            return dict(EquipmentType.choices)[self.equipment_type]
+        role = ExecutorRole.objects.filter(code=self.equipment_type).first()
+        return role.name if role else (self.equipment_type or "—")
 
 
 class ContractorPayout(models.Model):

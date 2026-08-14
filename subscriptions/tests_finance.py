@@ -23,7 +23,10 @@ from subscriptions.service import approve_receipt
 class SubscriptionFinanceTests(TestCase):
     def setUp(self) -> None:
         self.user = BotUser.objects.create(max_user_id="fin1", display_name="Fin")
-        self.admin = User.objects.create_user("admin", password="pass")
+        self.admin = User.objects.create_superuser("admin", "a@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="admin", password="pass")
 
