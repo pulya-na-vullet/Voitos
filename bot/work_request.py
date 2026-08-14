@@ -60,6 +60,12 @@ def start_work_request(
 
 
 def handle_work_request_step(user: BotUser, text: str, pending: PendingAction) -> str:
+    from services.work_request_cancel import maybe_cancel_work_flow
+
+    cancelled = maybe_cancel_work_flow(user, text, pending)
+    if cancelled is not None:
+        return cancelled
+
     payload = dict(pending.pending_payload or {})
     step = payload.get("step") or "role"
     raw = (text or "").strip()

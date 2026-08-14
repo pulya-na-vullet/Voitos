@@ -80,6 +80,24 @@ class MessagePipeline:
             self._store_out(user, reply, "contractor_registration")
             return reply
 
+        # Отмена оформления / шагов заявки на мастера («отмена», «я ошибся», …)
+        if pending.pending_kind in {
+            "work_request",
+            "work_request_offer_reply",
+            "work_request_complete",
+            "work_request_client_confirm",
+            "work_request_commission",
+            "work_request_rating",
+            "work_request_schedule_master",
+            "work_request_schedule_client",
+        }:
+            from services.work_request_cancel import maybe_cancel_work_flow
+
+            cancelled = maybe_cancel_work_flow(user, text, pending)
+            if cancelled is not None:
+                self._store_out(user, cancelled, "work_request_cancel")
+                return cancelled
+
         from bot.work_request import WORK_REQUEST_KIND, handle_work_request_step
 
         if pending.pending_kind == WORK_REQUEST_KIND:

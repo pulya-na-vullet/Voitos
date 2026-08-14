@@ -257,6 +257,10 @@ def match_role_from_text(text: str, roles=None) -> ExecutorRole | None:
     if not raw or not roles:
         return None
 
+    # Голые «мастер/исполнитель» — не роль, нужен выбор из списка
+    if _is_generic_executor_phrase(raw):
+        return None
+
     num = _parse_role_list_number(raw)
     if num is not None:
         idx = num - 1
@@ -264,20 +268,39 @@ def match_role_from_text(text: str, roles=None) -> ExecutorRole | None:
             return roles[idx]
         return None
 
-    # Точное / вхождение названия роли из каталога администратора
+    # Точное совпадение названия
     for role in roles:
         name = (role.name or "").lower().replace("ё", "е").strip()
-        if not name:
-            continue
-        if raw == name or name in raw or raw in name:
+        if name and raw == name:
             return role
 
-    # Слова из названия (длиннее 3 символов): «тракторист» ↔ «Тракторист-погрузчик»
-    for role in roles:
+    # Полное название роли внутри фразы (длиннее общих слов)
+    # Сортируем по длине имени — более специфичные первыми
+    named = sorted(
+        roles,
+        key=lambda r: len((r.name or "").strip()),
+        reverse=True,
+    )
+    for role in named:
+        name = (role.name or "").lower().replace("ё", "е").strip()
+        if len(name) < 4:
+            continue
+        if name in raw or (len(raw) >= 4 and raw in name and not _is_generic_executor_phrase(raw)):
+            # «мастера» не должно матчить «компьютерный мастер» через raw in name
+            if raw in name and raw != name and _is_generic_executor_phrase(raw):
+                continue
+            if len(raw) < len(name) and _stem_is_generic(raw):
+                continue
+            return role
+
+    # Слова из названия (длиннее 3 символов), кроме общих «мастер» и т.п.
+    for role in named:
         name = (role.name or "").lower().replace("ё", "е")
         for part in re.split(r"[\s/,\-]+", name):
             part = part.strip()
-            if len(part) >= 4 and (part in raw or raw in part):
+            if len(part) < 4 or _stem_is_generic(part):
+                continue
+            if part in raw or (len(raw) >= 4 and raw in part):
                 return role
 
     # Устаревшие коды (на случай ручных code=tractor и т.п.)
@@ -296,7 +319,6 @@ def match_role_from_text(text: str, roles=None) -> ExecutorRole | None:
             for role in roles:
                 if role.code == code:
                     return role
-            # если кода нет — ищем роль, в названии которой есть ключ
             for role in roles:
                 name = (role.name or "").lower().replace("ё", "е")
                 if key in name:
@@ -304,12 +326,57 @@ def match_role_from_text(text: str, roles=None) -> ExecutorRole | None:
     return None
 
 
+_GENERIC_EXECUTOR_STEMS = frozenset(
+    {
+        "мастер",
+        "мастера",
+        "мастеру",
+        "мастером",
+        "мастере",
+        "исполнитель",
+        "исполнителя",
+        "исполнителю",
+        "исполнителем",
+        "специалист",
+        "специалиста",
+        "специалисту",
+        "человека",
+        "работника",
+        "кого",
+        "кого-нибудь",
+        "любого",
+    }
+)
+
+
+def _stem_is_generic(token: str) -> bool:
+    t = (token or "").strip().lower().replace("ё", "е")
+    if t in _GENERIC_EXECUTOR_STEMS:
+        return True
+    # «мастеров», «мастерами»
+    for stem in ("мастер", "исполнитель", "специалист"):
+        if t.startswith(stem) and len(t) <= len(stem) + 3:
+            return True
+    return False
+
+
+def _is_generic_executor_phrase(text: str) -> bool:
+    raw = (text or "").strip().lower().replace("ё", "е")
+    raw = re.sub(r"[^a-zа-я0-9\s\-]+", " ", raw)
+    parts = [p for p in raw.split() if p]
+    if not parts:
+        return True
+    return all(_stem_is_generic(p) for p in parts)
+
+
 def extract_role_from_call_phrase(text: str) -> ExecutorRole | None:
-    """«нужен электрик», «вызови грузчика» → роль."""
+    """«нужен электрик», «вызови грузчика» → роль. «вызвать мастера» → None (список)."""
     raw = (text or "").strip().lower().replace("ё", "е")
     m = re.search(
-        r"(?:нужен|нужна|нужно|вызвать|вызови|позови|требуется|ищу)\s+(.+)$",
+        r"(?:нужен|нужна|нужно|вызвать|вызови|позови|требуется|ищу|заказать)\s+(.+)$",
         raw,
     )
-    chunk = m.group(1).strip() if m else raw
+    chunk = (m.group(1).strip() if m else raw).strip(" .,!")
+    if _is_generic_executor_phrase(chunk):
+        return None
     return match_role_from_text(chunk)
