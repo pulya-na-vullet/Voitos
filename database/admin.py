@@ -110,6 +110,7 @@ class ServiceInviteAdmin(admin.ModelAdmin):
 class ContractorProfileAdmin(admin.ModelAdmin):
     list_display = (
         "user",
+        "role",
         "equipment_type",
         "equipment_label",
         "plate_number",
@@ -119,7 +120,7 @@ class ContractorProfileAdmin(admin.ModelAdmin):
         "locality",
         "submitted_at",
     )
-    list_filter = ("equipment_type", "status")
+    list_filter = ("equipment_type", "status", "role")
     search_fields = (
         "user__real_name",
         "user__display_name",
@@ -128,6 +129,37 @@ class ContractorProfileAdmin(admin.ModelAdmin):
         "bank_name",
         "payout_phone",
     )
+    raw_id_fields = ("user", "role")
+
+
+@admin.register(ExecutorRole)
+class ExecutorRoleAdmin(admin.ModelAdmin):
+    list_display = (
+        "code",
+        "name",
+        "requires_qualification_docs",
+        "is_equipment",
+        "is_active",
+        "sort_order",
+    )
+    list_filter = ("is_active", "requires_qualification_docs", "is_equipment")
+    search_fields = ("code", "name")
+
+
+@admin.register(WorkRequest)
+class WorkRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "role", "user", "status", "created_at")
+    list_filter = ("status", "role")
+    search_fields = ("description", "user__real_name")
+    raw_id_fields = ("user", "role")
+
+
+@admin.register(PanelActionLog)
+class PanelActionLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "actor", "action", "title", "created_at")
+    list_filter = ("action",)
+    search_fields = ("title", "detail", "actor__username")
+    raw_id_fields = ("actor",)
 
 
 @admin.register(ContractorPayout)

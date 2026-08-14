@@ -999,8 +999,20 @@ class ExecutorRole(models.Model):
         default=False,
         help_text="Например камаз — только если в сборе включён вывоз.",
     )
+    # Динамические чекбоксы роли: [{code, label, on}, ...]. Системные code
+    # синхронизируются с boolean-полями выше (бот/кампании).
+    flags = models.JSONField(
+        "Признаки (чекбоксы)",
+        default=list,
+        blank=True,
+        help_text="Список признаков роли; админ добавляет и удаляет в панели.",
+    )
     is_active = models.BooleanField("Активна", default=True)
-    sort_order = models.PositiveIntegerField("Порядок", default=100)
+    sort_order = models.PositiveIntegerField(
+        "Порядок в списке",
+        default=100,
+        help_text="Сортировка в боте и панели: меньше число — выше в списке (10, 20, 30…).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1011,6 +1023,12 @@ class ExecutorRole(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def flags_for_ui(self) -> list[dict]:
+        """Признаки для формы; если JSON пуст — собираем из boolean-полей."""
+        from services.executor_roles import flags_from_role
+
+        return flags_from_role(self)
 
 
 class WorkRequest(models.Model):

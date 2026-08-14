@@ -37,19 +37,52 @@ class ExecutorRolesPanelTests(TestCase):
         resp = self.client.get(reverse("panel:executor_roles"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Трактор")
+        self.assertContains(resp, "Порядок в списке")
         resp = self.client.post(
             reverse("panel:executor_roles"),
             {
                 "action": "create",
                 "code": "plumber",
                 "name": "Сантехник",
-                "requires_qualification_docs": "on",
                 "sort_order": "50",
+                "flags_json": (
+                    '[{"code":"requires_qualification_docs",'
+                    '"label":"нужны подтверждающие документы","on":true},'
+                    '{"code":"custom_dopusk","label":"нужен допуск","on":true}]'
+                ),
             },
         )
         self.assertEqual(resp.status_code, 302)
         role = ExecutorRole.objects.get(code="plumber")
         self.assertTrue(role.requires_qualification_docs)
+        self.assertEqual(len(role.flags), 2)
+        codes = {f["code"] for f in role.flags}
+        self.assertIn("requires_qualification_docs", codes)
+        self.assertIn("custom_dopusk", codes)
+
+    def test_save_can_remove_flag(self):
+        role = ExecutorRole.objects.get(code="tractor")
+        self.assertTrue(role.for_snow)
+        resp = self.client.post(
+            reverse("panel:executor_roles"),
+            {
+                "action": "save",
+                "role_id": str(role.id),
+                "name": role.name,
+                "is_active": "on",
+                "sort_order": str(role.sort_order),
+                "flags_json": (
+                    '[{"code":"is_equipment","label":"техника (госномер)","on":true},'
+                    '{"code":"for_road","label":"дорога","on":true}]'
+                ),
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        role.refresh_from_db()
+        self.assertFalse(role.for_snow)
+        self.assertTrue(role.is_equipment)
+        self.assertTrue(role.for_road)
+        self.assertEqual([f["code"] for f in role.flags], ["is_equipment", "for_road"])
 
 
 class WorkRequestBotTests(TestCase):

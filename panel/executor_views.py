@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
@@ -10,6 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
 from database.models import (
+    AdminTaskKind,
     ExecutorRole,
     PanelActionLog,
     PanelProfile,
@@ -18,8 +21,13 @@ from database.models import (
     WorkRequestStatus,
 )
 from panel.admin_tasks import close_task_for_source
-from database.models import AdminTaskKind
 from panel.roles import admin_required, is_panel_admin
+from services.executor_roles import (
+    SYSTEM_FLAG_DEFS,
+    apply_flags_to_role,
+    flags_from_role,
+    parse_flags_from_post,
+)
 
 User = get_user_model()
 
@@ -38,36 +46,25 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
             elif ExecutorRole.objects.filter(code=code).exists():
                 messages.error(request, f"Роль с кодом «{code}» уже есть.")
             else:
-                ExecutorRole.objects.create(
+                role = ExecutorRole(
                     code=code[:64],
                     name=name[:128],
-                    requires_qualification_docs=bool(
-                        request.POST.get("requires_qualification_docs")
-                    ),
-                    is_equipment=bool(request.POST.get("is_equipment")),
-                    for_snow=bool(request.POST.get("for_snow")),
-                    for_road=bool(request.POST.get("for_road")),
-                    for_snow_haul=bool(request.POST.get("for_snow_haul")),
                     is_active=True,
                     sort_order=int(request.POST.get("sort_order") or 100),
                 )
+                apply_flags_to_role(role, parse_flags_from_post(request.POST))
+                role.save()
                 messages.success(request, f"Роль «{name}» создана.")
             return redirect("panel:executor_roles")
         if action == "save":
             role = get_object_or_404(ExecutorRole, pk=request.POST.get("role_id"))
             role.name = (request.POST.get("name") or role.name).strip()[:128]
-            role.requires_qualification_docs = bool(
-                request.POST.get("requires_qualification_docs")
-            )
-            role.is_equipment = bool(request.POST.get("is_equipment"))
-            role.for_snow = bool(request.POST.get("for_snow"))
-            role.for_road = bool(request.POST.get("for_road"))
-            role.for_snow_haul = bool(request.POST.get("for_snow_haul"))
             role.is_active = bool(request.POST.get("is_active"))
             try:
                 role.sort_order = int(request.POST.get("sort_order") or role.sort_order)
             except ValueError:
                 pass
+            apply_flags_to_role(role, parse_flags_from_post(request.POST))
             role.save()
             messages.success(request, f"Роль «{role.name}» сохранена.")
             return redirect("panel:executor_roles")
@@ -87,8 +84,20 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
             return redirect("panel:executor_roles")
         return redirect("panel:executor_roles")
 
-    roles = ExecutorRole.objects.all().order_by("sort_order", "name")
-    return render(request, "panel/executor_roles.html", {"roles": roles})
+    roles = list(ExecutorRole.objects.all().order_by("sort_order", "name"))
+    roles_payload = [{"id": r.id, "flags": flags_from_role(r)} for r in roles]
+    return render(
+        request,
+        "panel/executor_roles.html",
+        {
+            "roles": roles,
+            "roles_flags_json": json.dumps(roles_payload, ensure_ascii=False),
+            "system_flags_json": json.dumps(
+                [{"code": c, "label": lbl} for c, lbl in SYSTEM_FLAG_DEFS],
+                ensure_ascii=False,
+            ),
+        },
+    )
 
 
 @login_required
