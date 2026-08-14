@@ -69,6 +69,19 @@ def commission_for_amount(amount: Decimal) -> Decimal:
     return (amount * COMMISSION_RATE).quantize(Decimal("0.01"))
 
 
+def executor_net_earned(confirmed: Decimal, commission: Decimal | None = None) -> Decimal:
+    """Чистый заработок исполнителя: сумма клиента минус комиссия 10%."""
+    confirmed = Decimal(confirmed or 0).quantize(Decimal("0.01"))
+    if commission is None:
+        commission = commission_for_amount(confirmed)
+    else:
+        commission = Decimal(commission or 0).quantize(Decimal("0.01"))
+    net = confirmed - commission
+    if net < 0:
+        return Decimal("0.00")
+    return net.quantize(Decimal("0.01"))
+
+
 def platform_payee_lines() -> str:
     cfg = AppSettings.load()
     phone = (cfg.payment_phone or cfg.service_payee_phone or "").strip()
@@ -370,9 +383,11 @@ def _apply_client_confirmation(
 ) -> str:
     now = timezone.now()
     commission = commission_for_amount(amount)
+    earned = executor_net_earned(amount, commission)
     req.confirmed_amount = amount
     req.client_confirmed_at = now
     req.commission_amount = commission
+    req.executor_earned_amount = earned
     req.commission_status = WorkRequestCommissionStatus.AWAITING
     req.status = WorkRequestStatus.AWAITING_COMMISSION
     req.save(
@@ -380,6 +395,7 @@ def _apply_client_confirmation(
             "confirmed_amount",
             "client_confirmed_at",
             "commission_amount",
+            "executor_earned_amount",
             "commission_status",
             "status",
             "updated_at",
@@ -391,7 +407,8 @@ def _apply_client_confirmation(
     if contractor:
         ask = (
             f"Клиент подтвердил оплату по заявке #{req.id}: {amount} ₽.\n"
-            f"Комиссия сервиса 10%: {commission} ₽.\n\n"
+            f"Комиссия сервиса 10%: {commission} ₽.\n"
+            f"Ваш заработок по заявке: {earned} ₽.\n\n"
             "Переведите эту сумму самозанятому, закреплённому в системе:\n"
             f"{platform_payee_lines()}\n\n"
             "После перевода пришлите фото/PDF чека в этот чат.\n"

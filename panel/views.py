@@ -1808,21 +1808,12 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             messages.success(request, f"Реквизиты «{profile}» сохранены.")
         return redirect("panel:contractors")
 
-    from django.db.models import DecimalField, Sum, Value
-    from django.db.models.functions import Coalesce
+    from services.contractors import annotate_contractor_total_earned
 
     eq_filter = (request.GET.get("type") or "").strip()
-    qs = (
+    qs = annotate_contractor_total_earned(
         ContractorProfile.objects.select_related("user", "role")
-        .annotate(
-            total_earned=Coalesce(
-                Sum("payouts__amount"),
-                Value(Decimal("0")),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            )
-        )
-        .order_by("status", "equipment_type", "-submitted_at")
-    )
+    ).order_by("status", "equipment_type", "-submitted_at")
     if eq_filter:
         qs = qs.filter(equipment_type=eq_filter)
     role_choices = list(

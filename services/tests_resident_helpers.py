@@ -152,3 +152,35 @@ class ContractorEarningsTests(TestCase):
         body = resp.content.decode()
         self.assertIn("Заработано", body)
         self.assertIn("1500", body)
+
+
+    def test_contractors_page_includes_work_request_earned(self):
+        from database.models import (
+            ExecutorRole,
+            WorkRequest,
+            WorkRequestCommissionStatus,
+            WorkRequestStatus,
+        )
+
+        role = ExecutorRole.objects.create(code="r_earn", name="Электрик", is_active=True)
+        client = BotUser.objects.create(max_user_id="earn-cl", real_name="Клиент")
+        self.profile.role = role
+        self.profile.equipment_type = role.code
+        self.profile.save(update_fields=["role", "equipment_type", "updated_at"])
+        WorkRequest.objects.create(
+            user=client,
+            role=role,
+            description="розетка",
+            assigned_contractor=self.profile,
+            confirmed_amount=Decimal("2000.00"),
+            commission_amount=Decimal("200.00"),
+            executor_earned_amount=Decimal("1800.00"),
+            commission_status=WorkRequestCommissionStatus.APPROVED,
+            status=WorkRequestStatus.DONE,
+            client_confirmed_at=timezone.now(),
+        )
+        resp = self.client.get("/panel/contractors/")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        # 1500 payout + 1800 work = 3300
+        self.assertIn("3300", body)

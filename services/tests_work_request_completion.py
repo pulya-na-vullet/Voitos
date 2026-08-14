@@ -20,6 +20,7 @@ from database.models import (
     WorkRequestPayMethod,
     WorkRequestStatus,
 )
+from services.contractors import contractor_total_earned
 from services.work_request_completion import (
     CLIENT_CONFIRM_PENDING,
     COMMISSION_PENDING,
@@ -103,6 +104,7 @@ class WorkRequestCompletionFlowTests(TestCase):
         self.req.refresh_from_db()
         self.assertEqual(self.req.confirmed_amount, Decimal("3000.00"))
         self.assertEqual(self.req.commission_amount, Decimal("300.00"))
+        self.assertEqual(self.req.executor_earned_amount, Decimal("2700.00"))
         self.assertEqual(self.req.status, WorkRequestStatus.AWAITING_COMMISSION)
 
         e_pending = PendingAction.objects.get(user=self.exec_user)
@@ -120,6 +122,7 @@ class WorkRequestCompletionFlowTests(TestCase):
         self.req.refresh_from_db()
         self.assertEqual(self.req.status, WorkRequestStatus.DONE)
         self.assertFalse(contractor_blocked_for_new_offers(self.contractor))
+        self.assertEqual(contractor_total_earned(self.contractor), Decimal("2700.00"))
 
     def test_transfer_asks_receipt(self):
         offer = try_dispatch_request(self.req, send_fn=self.capture, use_ai=False)

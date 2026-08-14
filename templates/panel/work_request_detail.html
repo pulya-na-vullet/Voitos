@@ -50,6 +50,10 @@
   {% if item.commission_amount %}
     <p><strong>Комиссия 10%:</strong> {{ item.commission_amount }} ₽ —
       {{ item.get_commission_status_display }}</p>
+    {% if item.executor_earned_amount is not None %}
+      <p><strong>Заработок исполнителя:</strong> {{ item.executor_earned_amount }} ₽
+        <span class="muted">(клиент − комиссия)</span></p>
+    {% endif %}
     {% if item.commission_receipt %}
       <p><a href="{{ item.commission_receipt.url }}" target="_blank">Чек комиссии</a></p>
     {% endif %}

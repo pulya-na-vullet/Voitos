@@ -1152,6 +1152,13 @@ class WorkRequest(models.Model):
     commission_submitted_at = models.DateTimeField(null=True, blank=True)
     commission_reviewed_at = models.DateTimeField(null=True, blank=True)
     commission_admin_note = models.TextField(blank=True, default="")
+    executor_earned_amount = models.DecimalField(
+        "Заработок исполнителя (сумма клиента − комиссия), ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     no_executor_notified_at = models.DateTimeField(
         "Клиенту сообщили, что нет исполнителя",
         null=True,
