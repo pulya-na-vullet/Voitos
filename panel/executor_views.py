@@ -23,10 +23,9 @@ from database.models import (
 from panel.admin_tasks import close_task_for_source
 from panel.roles import admin_required, is_panel_admin
 from services.executor_roles import (
-    apply_flags_to_role,
-    flags_from_role,
+    apply_role_form_fields,
+    custom_flags_from_role,
     generate_role_code,
-    parse_flags_from_post,
 )
 
 User = get_user_model()
@@ -49,7 +48,7 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
                     is_active=True,
                     sort_order=0,
                 )
-                apply_flags_to_role(role, parse_flags_from_post(request.POST))
+                apply_role_form_fields(role, request.POST)
                 role.save()
                 messages.success(request, f"Роль «{name}» создана.")
             return redirect("panel:executor_roles")
@@ -57,7 +56,7 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
             role = get_object_or_404(ExecutorRole, pk=request.POST.get("role_id"))
             role.name = (request.POST.get("name") or role.name).strip()[:128]
             role.is_active = bool(request.POST.get("is_active"))
-            apply_flags_to_role(role, parse_flags_from_post(request.POST))
+            apply_role_form_fields(role, request.POST)
             role.save()
             messages.success(request, f"Роль «{role.name}» сохранена.")
             return redirect("panel:executor_roles")
@@ -78,7 +77,7 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
         return redirect("panel:executor_roles")
 
     roles = list(ExecutorRole.objects.all().order_by("id"))
-    roles_payload = [{"id": r.id, "flags": flags_from_role(r)} for r in roles]
+    roles_payload = [{"id": r.id, "flags": custom_flags_from_role(r)} for r in roles]
     return render(
         request,
         "panel/executor_roles.html",

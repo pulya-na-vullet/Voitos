@@ -42,19 +42,21 @@ class ExecutorRolesPanelTests(TestCase):
             {
                 "action": "create",
                 "name": "Сантехник",
-                "flags_json": (
-                    '[{"code":"x1","label":"нужны подтверждающие документы","on":true},'
-                    '{"code":"x2","label":"нужен допуск","on":true}]'
-                ),
+                "requires_qualification_docs": "on",
+                "flags_json": '[{"code":"x2","label":"нужен допуск","on":true}]',
             },
         )
         self.assertEqual(resp.status_code, 302)
         role = ExecutorRole.objects.get(name="Сантехник")
         self.assertTrue(role.code.startswith("r_"))
         self.assertTrue(role.requires_qualification_docs)
-        self.assertEqual(len(role.flags), 2)
+        self.assertContains(
+            self.client.get(reverse("panel:executor_roles")),
+            "нужны подтверждающие документы",
+        )
         labels = {f["label"] for f in role.flags}
         self.assertIn("нужен допуск", labels)
+        self.assertIn("нужны подтверждающие документы", labels)
 
     def test_create_starts_without_flags_and_can_remove(self):
         resp = self.client.post(
@@ -79,14 +81,15 @@ class ExecutorRolesPanelTests(TestCase):
                 "role_id": str(role.id),
                 "name": role.name,
                 "is_active": "on",
+                "is_equipment": "on",
                 "flags_json": '[{"code":"for_road","label":"дорога","on":true}]',
             },
         )
         self.assertEqual(resp.status_code, 302)
         role.refresh_from_db()
-        self.assertFalse(role.is_equipment)
+        self.assertTrue(role.is_equipment)
+        self.assertFalse(role.requires_qualification_docs)
         self.assertTrue(role.for_road)
-        self.assertEqual([f["code"] for f in role.flags], ["for_road"])
 
 
 class WorkRequestBotTests(TestCase):

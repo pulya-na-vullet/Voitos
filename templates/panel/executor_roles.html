@@ -7,7 +7,8 @@
 </div>
 <p class="muted" style="margin-top:-6px;">
   Каталог ролей для регистрации и заявок «вызвать исполнителя».
-  Код роли создаётся автоматически. Признаки добавляете сами — изначально их нет.
+  Код роли создаётся автоматически. Галочки «документы» и «техника» влияют на регистрацию в боте.
+  Доп. признаки добавляете сами.
 </p>
 
 <div class="grid two">
@@ -29,6 +30,8 @@
               <input type="hidden" name="role_id" value="{{ r.id }}">
               <input type="hidden" name="flags_json" class="flags-json" value="[]">
               <input type="text" name="name" value="{{ r.name }}" required>
+              <label class="muted"><input type="checkbox" name="requires_qualification_docs" {% if r.requires_qualification_docs %}checked{% endif %}> нужны подтверждающие документы о квалификации</label>
+              <label class="muted"><input type="checkbox" name="is_equipment" {% if r.is_equipment %}checked{% endif %}> техника (госномер / модель)</label>
               <div class="flag-editor" data-editor="role-{{ r.id }}"></div>
               <label class="muted"><input type="checkbox" name="is_active" {% if r.is_active %}checked{% endif %}> активна</label>
               <button class="btn small" type="submit">Сохранить</button>
@@ -59,8 +62,10 @@
       <input type="hidden" name="action" value="create">
       <input type="hidden" name="flags_json" class="flags-json" value="[]">
       <div class="form-row"><label>Название</label><input name="name" required placeholder="Сантехник"></div>
-      <div class="form-row">
-        <label>Признаки</label>
+      <label class="muted"><input type="checkbox" name="requires_qualification_docs"> нужны подтверждающие документы о квалификации</label><br>
+      <label class="muted"><input type="checkbox" name="is_equipment"> техника (госномер / модель)</label>
+      <div class="form-row" style="margin-top:10px;">
+        <label>Доп. признаки</label>
         <div class="flag-editor" data-editor="new"></div>
       </div>
       <div style="margin-top:12px;"><button class="btn" type="submit">Добавить</button></div>

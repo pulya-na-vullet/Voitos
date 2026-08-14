@@ -86,6 +86,21 @@ def flags_from_role(role: ExecutorRole) -> list[dict[str, Any]]:
     return [item for item in (_normalize_flag_item(x) for x in stored) if item]
 
 
+# Документы и техника задаются отдельными галочками в форме, не в списке признаков.
+FORM_SYSTEM_FLAG_CODES = frozenset(
+    {"requires_qualification_docs", "is_equipment"}
+)
+
+
+def custom_flags_from_role(role: ExecutorRole) -> list[dict[str, Any]]:
+    """Свободные признаки для UI (без документов/техники)."""
+    return [
+        f
+        for f in flags_from_role(role)
+        if f["code"] not in FORM_SYSTEM_FLAG_CODES
+    ]
+
+
 def apply_flags_to_role(role: ExecutorRole, flags: list[dict[str, Any]]) -> None:
     """Записать flags и синхронизировать системные boolean-поля."""
     cleaned: list[dict[str, Any]] = []
@@ -102,6 +117,34 @@ def apply_flags_to_role(role: ExecutorRole, flags: list[dict[str, Any]]) -> None
     enabled = {f["code"] for f in cleaned}
     for code, _label in SYSTEM_FLAG_DEFS:
         setattr(role, code, code in enabled)
+
+
+def apply_role_form_fields(role: ExecutorRole, post) -> None:
+    """Признаки из JSON + галочки документов/техники из формы."""
+    flags = [
+        f
+        for f in parse_flags_from_post(post)
+        if f["code"] not in FORM_SYSTEM_FLAG_CODES
+    ]
+    if post.get("requires_qualification_docs"):
+        flags.insert(
+            0,
+            {
+                "code": "requires_qualification_docs",
+                "label": SYSTEM_FLAG_LABELS["requires_qualification_docs"],
+                "on": True,
+            },
+        )
+    if post.get("is_equipment"):
+        flags.insert(
+            0 if not post.get("requires_qualification_docs") else 1,
+            {
+                "code": "is_equipment",
+                "label": SYSTEM_FLAG_LABELS["is_equipment"],
+                "on": True,
+            },
+        )
+    apply_flags_to_role(role, flags)
 
 
 def parse_flags_from_post(post) -> list[dict[str, Any]]:
