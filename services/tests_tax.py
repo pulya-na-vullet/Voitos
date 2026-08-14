@@ -110,7 +110,9 @@ class SelfEmployedTaxSyncTests(TestCase):
             status=ReceiptStatus.APPROVED,
             reviewed_at=timezone.now(),
         )
-        admin = User.objects.create_user("adm", password="pass")
+        admin = User.objects.create_superuser("adm", "adm@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+        PanelProfile.objects.create(user=admin, role=PanelRole.ADMIN)
         client = Client()
         client.login(username="adm", password="pass")
         resp = client.get("/panel/services/")

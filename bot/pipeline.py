@@ -11,6 +11,7 @@ from database.models import (
     ActivityLog,
     BotUser,
     ChatMessage,
+    MemoryItem,
     MessageRole,
     PendingAction,
     ReminderRepeat,
@@ -310,6 +311,10 @@ class MessagePipeline:
         if intent.intent == "force_forget":
             pending.last_user_text = ""
             pending.save(update_fields=["last_user_text", "updated_at"])
+            deleted = MemoryItem.objects.filter(user=user).count()
+            MemoryItem.objects.filter(user=user).delete()
+            if deleted:
+                return f"Хорошо, не запоминаю. Удалил записей из памяти: {deleted}."
             return "Хорошо, не запоминаю."
 
         if intent.intent == "save_memory" or (intent.should_save and intent.memory_text):

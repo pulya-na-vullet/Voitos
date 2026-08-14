@@ -33,7 +33,9 @@ class WishCaptureTests(TestCase):
         )
         self.group = ServiceGroup.objects.create(name="ул. Лесная")
         self.group.members.add(self.user)
-        self.admin = User.objects.create_user("adm", password="pass")
+        self.admin = User.objects.create_superuser("adm", "adm@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="adm", password="pass")
 
@@ -77,5 +79,8 @@ class WishCaptureTests(TestCase):
         capture_wish(self.user, "Почините дорогу", group=self.group)
         resp = self.client.get("/panel/services/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Пожелания жителей по темам")
-        self.assertContains(resp, "Дороги")
+        self.assertContains(resp, "Запустить сбор")
+        resp_w = self.client.get("/panel/services/wishes/")
+        self.assertEqual(resp_w.status_code, 200)
+        self.assertContains(resp_w, "Пожелания жителей по темам")
+        self.assertContains(resp_w, "Дороги")

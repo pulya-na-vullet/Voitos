@@ -45,7 +45,9 @@ from database.models import (
 )
 from logs.service import log_activity
 from panel.manager_log import log_manager_action
+from panel.security import redirect_after_post, safe_redirect_target
 from panel.roles import (
+    admin_required,
     assign_group_manager,
     can_access_bot_user,
     can_access_group,
@@ -562,6 +564,15 @@ def user_family_link(request: HttpRequest, user_id: int) -> HttpResponse:
             "Укажите ещё одного члена семьи: отметьте в списке или введите его id.",
         )
         return redirect("panel:user_dashboard", user_id=user_id)
+    # Менеджер не может привязывать жителей вне своих групп
+    scope = scoped_bot_user_ids(request.user)
+    if scope is not None:
+        bad = [i for i in set(member_ids) if i not in scope]
+        if payer_id is not None and payer_id not in scope:
+            bad.append(payer_id)
+        if bad:
+            messages.error(request, "Нельзя связывать пользователей вне ваших групп.")
+            return redirect("panel:user_dashboard", user_id=user_id)
     payer = link_family_members(
         member_ids,
         payer=payer_id,
@@ -761,10 +772,7 @@ def receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
     except (InvalidOperation, ValueError):
         amount = None
         messages.error(request, "Некорректная сумма. Укажите число, например 100.")
-        next_url = request.POST.get("next") or "panel:receipts"
-        if isinstance(next_url, str) and next_url.startswith("/"):
-            return redirect(next_url)
-        return redirect("panel:receipts")
+        return redirect_after_post(request, fallback="panel:receipts")
     try:
         approve_receipt(
             receipt,
@@ -781,10 +789,7 @@ def receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
         )
     except ValueError as exc:
         messages.error(request, str(exc))
-    next_url = request.POST.get("next") or "panel:receipts"
-    if next_url.startswith("/"):
-        return redirect(next_url)
-    return redirect(next_url)
+    return redirect_after_post(request, fallback="panel:receipts")
 
 
 @login_required
@@ -795,10 +800,7 @@ def receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
     reject_receipt(receipt, comment=comment)
     _notify_user(receipt.user, rejected_user_message(receipt))
     messages.success(request, f"Чек #{pk} отклонён, пользователь уведомлён.")
-    next_url = request.POST.get("next") or "panel:receipts"
-    if next_url.startswith("/"):
-        return redirect(next_url)
-    return redirect(next_url)
+    return redirect_after_post(request, fallback="panel:receipts")
 
 
 @login_required
@@ -806,7 +808,6 @@ def receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
 def receipt_delete(request: HttpRequest, pk: int) -> HttpResponse:
     receipt = get_object_or_404(PaymentReceipt, pk=pk)
     reason = request.POST.get("reason", "").strip()
-    next_url = request.POST.get("next") or "panel:receipts"
     try:
         user = delete_receipt(receipt, reason=reason)
         user.refresh_from_db()
@@ -828,12 +829,11 @@ def receipt_delete(request: HttpRequest, pk: int) -> HttpResponse:
         )
     except ValueError as exc:
         messages.error(request, str(exc))
-    if isinstance(next_url, str) and next_url.startswith("/"):
-        return redirect(next_url)
-    return redirect("panel:receipts")
+    return redirect_after_post(request, fallback="panel:receipts")
 
 
 @login_required
+@admin_required
 @require_http_methods(["GET", "POST"])
 def settings_view(request: HttpRequest) -> HttpResponse:
     cfg = AppSettings.load()
@@ -955,11 +955,14 @@ def check_max(request: HttpRequest) -> HttpResponse:
 def delete_memory(request: HttpRequest, pk: int) -> HttpResponse:
     from memory.service import MemoryService
 
-    item = get_object_or_404(MemoryItem, pk=pk)
+    item = get_object_or_404(MemoryItem.objects.select_related("user"), pk=pk)
+    denied = _require_bot_user_access(request, item.user)
+    if denied:
+        return denied
     uid = item.user_id
     MemoryService().delete(item.id)
     messages.success(request, "Память удалена")
-    return redirect(request.POST.get("next") or f"/panel/users/{uid}/memories/")
+    return redirect_after_post(request, fallback=f"/panel/users/{uid}/memories/")
 
 
 @login_required
@@ -967,11 +970,14 @@ def delete_memory(request: HttpRequest, pk: int) -> HttpResponse:
 def delete_task(request: HttpRequest, pk: int) -> HttpResponse:
     from tasks.service import TaskService
 
-    item = get_object_or_404(TaskItem, pk=pk)
+    item = get_object_or_404(TaskItem.objects.select_related("user"), pk=pk)
+    denied = _require_bot_user_access(request, item.user)
+    if denied:
+        return denied
     uid = item.user_id
     TaskService().delete(pk)
     messages.success(request, "Задача удалена")
-    return redirect(request.POST.get("next") or f"/panel/users/{uid}/tasks/")
+    return redirect_after_post(request, fallback=f"/panel/users/{uid}/tasks/")
 
 
 @login_required
@@ -979,24 +985,31 @@ def delete_task(request: HttpRequest, pk: int) -> HttpResponse:
 def delete_reminder(request: HttpRequest, pk: int) -> HttpResponse:
     from reminders.service import ReminderService
 
-    item = get_object_or_404(Reminder, pk=pk)
+    item = get_object_or_404(Reminder.objects.select_related("user"), pk=pk)
+    denied = _require_bot_user_access(request, item.user)
+    if denied:
+        return denied
     uid = item.user_id
     ReminderService().delete(pk)
     messages.success(request, "Напоминание удалено")
-    return redirect(request.POST.get("next") or f"/panel/users/{uid}/reminders/")
+    return redirect_after_post(request, fallback=f"/panel/users/{uid}/reminders/")
 
 
 @login_required
 @require_POST
 def delete_message(request: HttpRequest, pk: int) -> HttpResponse:
-    item = get_object_or_404(ChatMessage, pk=pk)
+    item = get_object_or_404(ChatMessage.objects.select_related("user"), pk=pk)
+    denied = _require_bot_user_access(request, item.user)
+    if denied:
+        return denied
     uid = item.user_id
     item.delete()
     messages.success(request, "Сообщение удалено")
-    return redirect(request.POST.get("next") or f"/panel/users/{uid}/messages/")
+    return redirect_after_post(request, fallback=f"/panel/users/{uid}/messages/")
 
 
 @login_required
+@admin_required
 @require_POST
 def dump_now(request: HttpRequest) -> HttpResponse:
     path = create_db_dump()
@@ -1376,7 +1389,7 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
     member_ids = set(group.members.values_list("id", flat=True))
     # Админ видит всех для набора состава; менеджер — тоже всех (чтобы добавлять жителей).
-    users = BotUser.objects.all().order_by("real_name", "display_name")
+    users = scoped_bot_users_qs(request.user) if not is_panel_admin(request.user) else BotUser.objects.all().order_by("real_name", "display_name")
     members = list(group.members.all().order_by("real_name", "display_name"))
     from database.models import NeighborhoodWish
     from services.service import group_accumulated_budget
@@ -1739,6 +1752,7 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
+@admin_required
 @require_http_methods(["GET", "POST"])
 def contractors_list(request: HttpRequest) -> HttpResponse:
     from database.models import ContractorProfile, ContractorStatus, ExecutorRole
@@ -1877,8 +1891,7 @@ def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
             messages.warning(request, tax_warn)
     except ValueError as exc:
         messages.error(request, str(exc))
-    next_url = request.POST.get("next") or f"/panel/services/campaigns/{receipt.campaign_id}/"
-    return redirect(next_url)
+    return redirect_after_post(request, fallback=f"/panel/services/campaigns/{receipt.campaign_id}/")
 
 
 @login_required
@@ -1899,8 +1912,7 @@ def service_receipt_reject(request: HttpRequest, pk: int) -> HttpResponse:
     reject_service_receipt(receipt, comment=comment)
     _notify_user(receipt.user, rejected_service_message(receipt))
     messages.success(request, f"Сервис-чек #{pk} отклонён.")
-    next_url = request.POST.get("next") or f"/panel/services/campaigns/{receipt.campaign_id}/"
-    return redirect(next_url)
+    return redirect_after_post(request, fallback=f"/panel/services/campaigns/{receipt.campaign_id}/")
 
 
 @login_required
@@ -1968,6 +1980,7 @@ def clients_map(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@admin_required
 def earnings_forecast(request: HttpRequest) -> HttpResponse:
     from subscriptions.forecast import build_earnings_forecast
 
@@ -2054,9 +2067,10 @@ def admin_task_done(request: HttpRequest, pk: int) -> HttpResponse:
     from subscriptions.family import confirm_family_from_task
 
     task = get_object_or_404(AdminTask, pk=pk)
-    if task.user_id and not can_access_bot_user(request.user, task.user):
-        messages.error(request, "Нет доступа к этой задаче.")
-        return redirect("panel:admin_tasks_today")
+    if not is_panel_admin(request.user):
+        if not task.user_id or not can_access_bot_user(request.user, task.user):
+            messages.error(request, "Нет доступа к этой задаче.")
+            return redirect("panel:admin_tasks_today")
     family_note = ""
     if task.kind == AdminTaskKind.FAMILY_CLAIM:
         try:

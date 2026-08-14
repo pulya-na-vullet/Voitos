@@ -380,3 +380,33 @@ def extract_role_from_call_phrase(text: str) -> ExecutorRole | None:
     if _is_generic_executor_phrase(chunk):
         return None
     return match_role_from_text(chunk)
+
+
+def looks_like_work_request_call(text: str) -> bool:
+    """
+    True для «вызвать мастера», «нужен <роль из каталога>» и т.п.
+    Роли из панели подхватываются через match_role_from_text.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    lower = raw.lower().replace("ё", "е")
+    # Явные общие фразы
+    if re.match(
+        r"^\s*(/)?("
+        r"вызвать\s+исполнителя|вызови\s+исполнителя|нужен\s+исполнитель|"
+        r"заказать\s+мастера|вызвать\s+мастера|нужен\s+мастер|нужна\s+мастер"
+        r")\s*[.!]?\s*$",
+        lower,
+    ):
+        return True
+    m = re.search(
+        r"(?:нужен|нужна|нужно|вызвать|вызови|позови|требуется|ищу|заказать)\s+(.+)$",
+        lower,
+    )
+    if not m:
+        return False
+    chunk = m.group(1).strip(" .,!")
+    if _is_generic_executor_phrase(chunk):
+        return True
+    return match_role_from_text(chunk) is not None

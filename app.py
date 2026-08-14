@@ -136,9 +136,15 @@ def sync_env_into_settings() -> None:
     if cfg.allowed_max_user_id:
         cfg.allowed_max_user_id = ""
         cfg.save(update_fields=["allowed_max_user_id", "updated_at"])
-    if not cfg.payment_phone:
-        cfg.payment_phone = "89625507832"
+    # Реквизиты оплаты — только из панели / env, без хардкода получателя
+    env_phone = (os.environ.get("PAYMENT_PHONE") or "").strip()
+    env_name = (os.environ.get("PAYMENT_NAME") or "").strip()
+    if env_phone and not cfg.payment_phone:
+        cfg.payment_phone = env_phone
         cfg.save(update_fields=["payment_phone", "updated_at"])
+    if env_name and not cfg.payment_name:
+        cfg.payment_name = env_name
+        cfg.save(update_fields=["payment_name", "updated_at"])
     # Safety net: never leave unpaid users on a gifted full subscription
     try:
         from subscriptions.service import (
@@ -290,7 +296,7 @@ def main() -> int:
             )
     else:
         logger.info("Public stand URL mode (PANEL_PUBLIC_URL set)")
-    logger.info("Login: %s / %s", settings.ADMIN_USERNAME, settings.ADMIN_PASSWORD)
+    logger.info("Login user: %s (password not logged)", settings.ADMIN_USERNAME)
     logger.info("Configure Yandex AI + MAX token in the panel, then chat in MAX")
     logger.info("=" * 60)
 

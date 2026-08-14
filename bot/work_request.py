@@ -131,7 +131,7 @@ def handle_work_request_photo(
             user=user,
             role=role,
             description=payload.get("description") or "—",
-            status=WorkRequestStatus.PENDING,
+            status=WorkRequestStatus.DRAFT,
             client_locality=(user.locality or "").strip()[:255],
         )
         payload["draft_id"] = req.id
@@ -166,7 +166,9 @@ def _finish_if_possible(user: BotUser, pending: PendingAction, payload: dict) ->
         return "Заявка не найдена — начните снова."
     if payload.get("description"):
         req.description = payload["description"]
-        req.save(update_fields=["description", "updated_at"])
+    # Черновик → новая заявка только после «готово»
+    req.status = WorkRequestStatus.PENDING
+    req.save(update_fields=["description", "status", "updated_at"] if payload.get("description") else ["status", "updated_at"])
     pending.clear_pending()
     ActivityLog.objects.create(
         user=user,

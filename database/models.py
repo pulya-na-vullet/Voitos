@@ -168,6 +168,7 @@ class AdminTaskKind(models.TextChoices):
 
 
 class WorkRequestStatus(models.TextChoices):
+    DRAFT = "draft", "Черновик"
     PENDING = "pending", "Новая"
     OFFERING = "offering", "Ищем исполнителя"
     SCHEDULING = "scheduling", "Согласование времени"
@@ -245,12 +246,14 @@ class AppSettings(models.Model):
     payment_phone = models.CharField(
         "Телефон для оплаты",
         max_length=32,
-        default="89625507832",
+        blank=True,
+        default="",
     )
     payment_name = models.CharField(
         "Получатель оплаты",
         max_length=255,
-        default="Григорьев Дмитрий Вячеславович",
+        blank=True,
+        default="",
     )
     subscription_price_rub = models.PositiveIntegerField("Цена подписки, ₽/мес", default=100)
     grace_days = models.PositiveIntegerField(
@@ -262,12 +265,14 @@ class AppSettings(models.Model):
     service_payee_name = models.CharField(
         "Сервис: получатель",
         max_length=255,
-        default="Григорьев Д.В.",
+        blank=True,
+        default="",
     )
     service_payee_phone = models.CharField(
         "Сервис: телефон",
         max_length=32,
-        default="89625507832",
+        blank=True,
+        default="",
     )
     service_payee_status = models.CharField(
         "Сервис: статус",
@@ -588,7 +593,7 @@ class PanelProfile(models.Model):
         "Роль",
         max_length=16,
         choices=PanelRole.choices,
-        default=PanelRole.ADMIN,
+        default=PanelRole.MANAGER,
         db_index=True,
     )
     bot_user = models.OneToOneField(

@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.utils import timezone
 
 from database.models import (
@@ -521,6 +522,16 @@ def handle_commission_text(user: BotUser, text: str, pending: PendingAction) -> 
 
 
 def approve_commission(req: WorkRequest, *, note: str = "") -> None:
+    if req.commission_status not in {
+        WorkRequestCommissionStatus.PENDING_REVIEW,
+        WorkRequestCommissionStatus.AWAITING,
+        WorkRequestCommissionStatus.REJECTED,
+    }:
+        raise ValueError(
+            f"Комиссию нельзя принять в статусе «{req.get_commission_status_display()}»."
+        )
+    if not req.commission_amount:
+        raise ValueError("У заявки нет суммы комиссии.")
     req.commission_status = WorkRequestCommissionStatus.APPROVED
     req.commission_reviewed_at = timezone.now()
     req.commission_admin_note = (note or "").strip()
@@ -590,24 +601,34 @@ def process_due_scheduled_messages(*, send_fn=None) -> int:
 
     send_fn = send_fn or _default_send_fn()
     now = timezone.now()
-    due = (
+    ids = list(
         ScheduledBotMessage.objects.filter(
             sent_at__isnull=True,
             cancelled_at__isnull=True,
             send_at__lte=now,
         )
-        .select_related("user")
-        .order_by("send_at", "id")[:100]
+        .order_by("send_at", "id")
+        .values_list("id", flat=True)[:100]
     )
     n = 0
-    for msg in due:
+    for msg_id in ids:
         try:
-            send_fn(msg.user, msg.text)
-            msg.sent_at = timezone.now()
-            msg.save(update_fields=["sent_at"])
+            with transaction.atomic():
+                msg = (
+                    ScheduledBotMessage.objects.select_for_update()
+                    .select_related("user")
+                    .filter(pk=msg_id)
+                    .first()
+                )
+                if not msg or msg.sent_at or msg.cancelled_at:
+                    continue
+                send_fn(msg.user, msg.text)
+                msg.sent_at = timezone.now()
+                msg.save(update_fields=["sent_at"])
+                claimed = msg
             n += 1
-            if msg.kind == SCHEDULED_KIND_CLIENT_CONFIRM:
-                on_client_confirm_message_sent(msg)
+            if claimed.kind == SCHEDULED_KIND_CLIENT_CONFIRM:
+                on_client_confirm_message_sent(claimed)
         except Exception:
-            logger.exception("Failed scheduled message %s", msg.id)
+            logger.exception("Failed scheduled message %s", msg_id)
     return n

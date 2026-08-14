@@ -143,7 +143,7 @@ class UpdateHandler:
                     logger.exception("Failed to notify denied user")
             return
 
-        # Receipt image/PDF first — unless ждём фото заявки / документ исполнителя
+        # Receipt image/PDF — только если нет другого активного сценария
         receipt_url, filename = _find_receipt_file(message)
         if receipt_url:
             pending_early, _ = PendingAction.objects.get_or_create(user=user)
@@ -167,6 +167,20 @@ class UpdateHandler:
             if pending_early.pending_kind == "work_request_commission":
                 self._handle_work_commission_receipt(
                     user, pending_early, receipt_url, filename
+                )
+                return
+            # Не перехватывать фото в чужих диалогах (регистрация, слоты, оценка…)
+            _receipt_ok_pending = {
+                "",
+                None,
+                "service_invite_pick",  # чек после выбора сбора
+            }
+            kind = pending_early.pending_kind or ""
+            if kind and kind not in _receipt_ok_pending:
+                self._reply(
+                    user,
+                    "Сейчас у вас другой незавершённый диалог. "
+                    "Завершите его или напишите «отмена», затем пришлите чек оплаты.",
                 )
                 return
             self._handle_receipt(user, receipt_url, filename)
@@ -219,6 +233,8 @@ class UpdateHandler:
             "wish_group_pick",
             "contractor_offer_reply",
             "contractor_registration",
+            "registration",
+            "volunteer_help_reply",
             "work_request",
             "work_request_offer_reply",
             "work_request_complete",

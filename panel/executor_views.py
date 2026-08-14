@@ -128,6 +128,12 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
         if action == "set_status":
             status = (request.POST.get("status") or "").strip()
             if status in WorkRequestStatus.values:
+                if status == WorkRequestStatus.DONE and not is_panel_admin(request.user):
+                    messages.error(
+                        request,
+                        "Перевести заявку в «Выполнена» может только администратор.",
+                    )
+                    return redirect("panel:work_requests")
                 req.status = status
                 req.admin_note = (request.POST.get("note") or req.admin_note).strip()
                 req.save(update_fields=["status", "admin_note", "updated_at"])
@@ -148,7 +154,11 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
     if raw is None or raw == "":
         status_filter = "active"
         qs = qs.exclude(
-            status__in=[WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED]
+            status__in=[
+                WorkRequestStatus.DONE,
+                WorkRequestStatus.CANCELLED,
+                WorkRequestStatus.DRAFT,
+            ]
         )
         status = ""
     elif raw == "all":
@@ -162,7 +172,11 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
         status_filter = "active"
         status = ""
         qs = qs.exclude(
-            status__in=[WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED]
+            status__in=[
+                WorkRequestStatus.DONE,
+                WorkRequestStatus.CANCELLED,
+                WorkRequestStatus.DRAFT,
+            ]
         )
     return render(
         request,
@@ -237,12 +251,35 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 )
             return redirect("panel:work_request_detail", pk=pk)
         if action == "approve_commission":
+            if not is_panel_admin(request.user):
+                messages.error(
+                    request,
+                    "Принять комиссию может только администратор.",
+                )
+                return redirect("panel:work_request_detail", pk=pk)
             from services.work_request_completion import approve_commission
 
-            approve_commission(req, note=(request.POST.get("note") or "").strip())
+            try:
+                approve_commission(req, note=(request.POST.get("note") or "").strip())
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect("panel:work_request_detail", pk=pk)
+            log_manager_action(
+                request.user,
+                action="commission_approve",
+                title=f"Комиссия принята по заявке #{req.id}",
+                detail=(request.POST.get("note") or "").strip(),
+                meta={"work_request_id": req.id},
+            )
             messages.success(request, f"Комиссия по заявке #{req.id} принята.")
             return redirect("panel:work_request_detail", pk=pk)
         if action == "reject_commission":
+            if not is_panel_admin(request.user):
+                messages.error(
+                    request,
+                    "Отклонить комиссию может только администратор.",
+                )
+                return redirect("panel:work_request_detail", pk=pk)
             from services.work_request_completion import reject_commission
 
             reject_commission(req, note=(request.POST.get("note") or "").strip())
@@ -250,6 +287,12 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             return redirect("panel:work_request_detail", pk=pk)
         status = (request.POST.get("status") or "").strip()
         if status in WorkRequestStatus.values:
+            if status == WorkRequestStatus.DONE and not is_panel_admin(request.user):
+                messages.error(
+                    request,
+                    "Перевести заявку в «Выполнена» может только администратор.",
+                )
+                return redirect("panel:work_request_detail", pk=pk)
             req.status = status
             req.admin_note = (request.POST.get("note") or "").strip()
             req.client_locality = (
@@ -293,6 +336,8 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "assigned_phone": assigned_phone,
             "assigned_max_link": assigned_max_link,
             "can_delete": is_panel_admin(request.user) or is_panel_manager(request.user),
+            "can_manage_commission": is_panel_admin(request.user),
+            "can_mark_done": is_panel_admin(request.user),
         },
     )
 

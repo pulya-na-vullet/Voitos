@@ -49,7 +49,8 @@ class EarningsForecastTests(TestCase):
         group.members.add(self.dmitry, self.elena, self.later)
         link_family_members([self.elena, self.dmitry], payer=self.dmitry)
 
-        self.admin = User.objects.create_user("fcadm", password="pass")
+        self.admin = User.objects.create_superuser("fcadm", "f@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
         PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="fcadm", password="pass")

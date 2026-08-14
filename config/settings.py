@@ -178,3 +178,39 @@ CSRF_TRUSTED_ORIGINS = env.list(
     "CSRF_TRUSTED_ORIGINS",
     default=[f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"],
 )
+
+# Waitress без nginx: раздавать media/static самим Django (отключить за reverse-proxy).
+SERVE_MEDIA = env.bool("SERVE_MEDIA", default=True)
+SERVE_STATIC = env.bool("SERVE_STATIC", default=True)
+
+# Prod hardening when DEBUG=False (включайте HTTPS-флаги через env за TLS-прокси).
+if not DEBUG:
+    SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=False)
+    CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=False)
+    SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
+    SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0)
+    if SECURE_HSTS_SECONDS:
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool(
+            "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True
+        )
+        SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=False)
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
+    X_FRAME_OPTIONS = "DENY"
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    if SECRET_KEY == "voitos-dev-secret-change-me":
+        import warnings
+
+        warnings.warn(
+            "DEBUG=False with default SECRET_KEY — set a strong SECRET_KEY in .env",
+            RuntimeWarning,
+            stacklevel=1,
+        )
+    if ADMIN_PASSWORD in {"admin", "password", "123456", ""}:
+        import warnings
+
+        warnings.warn(
+            "DEBUG=False with weak ADMIN_PASSWORD — change ADMIN_PASSWORD in .env",
+            RuntimeWarning,
+            stacklevel=1,
+        )

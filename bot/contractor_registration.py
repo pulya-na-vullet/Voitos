@@ -127,8 +127,11 @@ def handle_contractor_registration_step(
         return _ask_phone_or_locality(user, payload, pending)
 
     if step == "plate":
-        if raw.lower() in _YES | {"нет", "no", "n", "-", "нету", "без номера"}:
+        # «да» ≠ отказ: только явный отказ / «без номера»
+        if raw.lower() in _SKIP | {"нет", "no", "n", "-", "нету", "без номера"}:
             payload["plate_number"] = ""
+        elif raw.lower() in _YES:
+            return "Укажите госномер цифрами и буквами (или «нет», если без номера)."
         else:
             payload["plate_number"] = raw[:32]
         return _ask_phone_or_locality(user, payload, pending)

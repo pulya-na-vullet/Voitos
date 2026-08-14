@@ -205,7 +205,7 @@ class PipelineTests(TestCase):
         self.user.save()
         reply = self.pipeline.handle(self.user, "помощь")
         self.assertIn("Что умеет бот", reply)
-        self.assertIn("придомовой", reply.lower())
+        self.assertIn("двор", reply.lower())
         self.assertIn("подписка", reply.lower())
         self.assertIn("дн", reply)
 

@@ -599,6 +599,13 @@ class IntentAnalyzer:
             return IntentResult(intent="work_request_done", confidence=1.0)
         if WORK_REQUEST_RE.match(text):
             return IntentResult(intent="work_request", confidence=1.0)
+        try:
+            from services.executor_roles import looks_like_work_request_call
+
+            if looks_like_work_request_call(text):
+                return IntentResult(intent="work_request", confidence=1.0)
+        except Exception:
+            pass
         if FORCE_REMEMBER_RE.match(text) or text.lower().startswith("запомни это"):
             return IntentResult(intent="force_remember", confidence=1.0)
         if FORCE_FORGET_RE.match(text):

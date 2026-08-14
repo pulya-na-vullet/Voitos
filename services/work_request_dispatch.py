@@ -8,6 +8,7 @@ import re
 from datetime import timedelta
 
 from django.db.models import Q
+from django.db import transaction
 from django.utils import timezone
 
 from database.models import (
@@ -328,6 +329,7 @@ def try_dispatch_request(req: WorkRequest, *, send_fn=None, use_ai: bool = True)
         pk=req.pk
     )
     if req.status in {
+        WorkRequestStatus.DRAFT,
         WorkRequestStatus.DONE,
         WorkRequestStatus.CANCELLED,
         WorkRequestStatus.SCHEDULING,
@@ -489,23 +491,46 @@ def expire_stale_work_offers(*, send_fn=None) -> int:
 
 def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
     send_fn = send_fn or _default_send_fn()
-    req = offer.work_request
     now = timezone.now()
-    offer.status = WorkRequestOfferStatus.ACCEPTED
-    offer.responded_at = now
-    offer.save(update_fields=["status", "responded_at"])
+    with transaction.atomic():
+        offer = WorkRequestOffer.objects.select_for_update().select_related(
+            "work_request",
+            "work_request__role",
+            "work_request__user",
+            "contractor",
+            "contractor__user",
+        ).get(pk=offer.pk)
+        if offer.status != WorkRequestOfferStatus.OFFERED:
+            return "Это предложение уже обработано."
+        req = WorkRequest.objects.select_for_update().select_related(
+            "user", "role"
+        ).get(pk=offer.work_request_id)
+        if req.status not in {
+            WorkRequestStatus.PENDING,
+            WorkRequestStatus.OFFERING,
+        }:
+            return "Заявка уже не доступна для принятия."
+        offer.status = WorkRequestOfferStatus.ACCEPTED
+        offer.responded_at = now
+        offer.save(update_fields=["status", "responded_at"])
 
-    # Отменить прочие активные офферы
-    for other in req.offers.filter(status=WorkRequestOfferStatus.OFFERED).exclude(
-        pk=offer.id
-    ):
-        other.status = WorkRequestOfferStatus.CANCELLED
-        other.responded_at = now
-        other.save(update_fields=["status", "responded_at"])
+        # Отменить прочие активные офферы
+        for other in req.offers.filter(status=WorkRequestOfferStatus.OFFERED).exclude(
+            pk=offer.id
+        ):
+            other.status = WorkRequestOfferStatus.CANCELLED
+            other.responded_at = now
+            other.save(update_fields=["status", "responded_at"])
 
-    req.assigned_contractor = offer.contractor
-    contractor = offer.contractor
-    c_user = contractor.user
+        contractor = offer.contractor
+        c_user = contractor.user
+        req.assigned_contractor = contractor
+        home = getattr(req.role, "accepts_at_home", False)
+        req.status = (
+            WorkRequestStatus.SCHEDULING if home else WorkRequestStatus.IN_PROGRESS
+        )
+        req.save(update_fields=["status", "assigned_contractor", "updated_at"])
+
     phone = (contractor.phone or c_user.phone or "").strip()
     address = (req.user.address or "").strip() or "—"
 
@@ -517,8 +542,6 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
     if getattr(req.role, "accepts_at_home", False):
         from services.work_request_schedule import start_master_scheduling
 
-        req.status = WorkRequestStatus.SCHEDULING
-        req.save(update_fields=["status", "assigned_contractor", "updated_at"])
         client_text = (
             f"По заявке #{req.id} найден мастер: {c_user}.\n"
             f"Роль: {req.role.name}\n"
@@ -535,8 +558,6 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
             "сообщение с инструкцией уже в чате."
         )
 
-    req.status = WorkRequestStatus.IN_PROGRESS
-    req.save(update_fields=["status", "assigned_contractor", "updated_at"])
     client_text = (
         f"По заявке #{req.id} найден исполнитель: {c_user}.\n"
         f"Роль: {req.role.name}\n"

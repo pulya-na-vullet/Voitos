@@ -87,12 +87,16 @@
       <p><a href="{{ item.commission_receipt.url }}" target="_blank">Чек комиссии</a></p>
     {% endif %}
     {% if item.commission_status == "pending_review" or item.commission_status == "awaiting" or item.commission_status == "rejected" %}
+      {% if can_manage_commission %}
       <form method="post" style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0;">
         {% csrf_token %}
         <input type="text" name="note" placeholder="Комментарий" style="flex:1; min-width:160px;">
         <button class="btn small" type="submit" name="action" value="approve_commission">Принять комиссию</button>
         <button class="btn danger small" type="submit" name="action" value="reject_commission">Отклонить</button>
       </form>
+      {% else %}
+      <p class="muted">Принять или отклонить комиссию может только администратор.</p>
+      {% endif %}
     {% endif %}
   {% endif %}
   {% if item.dispatch_note %}
@@ -157,7 +161,10 @@
       <label>Статус</label>
       <select name="status">
         {% for v,l in statuses %}
+          {% if v == "done" and not can_mark_done %}
+          {% else %}
           <option value="{{ v }}" {% if item.status == v %}selected{% endif %}>{{ l }}</option>
+          {% endif %}
         {% endfor %}
       </select>
     </div>

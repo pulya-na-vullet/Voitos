@@ -15,7 +15,9 @@ from subscriptions.service import approve_receipt, delete_receipt, submit_receip
 class DeleteReceiptTests(TestCase):
     def setUp(self) -> None:
         self.user = BotUser.objects.create(max_user_id="del1", display_name="Евген")
-        self.admin = User.objects.create_user("adm", password="pass")
+        self.admin = User.objects.create_superuser("adm", "adm@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="adm", password="pass")
         self.pdf_a = b"%PDF-1.4 cheque A unique bytes"

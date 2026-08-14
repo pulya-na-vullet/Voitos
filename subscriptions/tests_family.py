@@ -35,7 +35,9 @@ class FamilySubscriptionTests(TestCase):
             locality="Посёлок",
             profile_status=ProfileStatus.VERIFIED,
         )
-        self.admin = User.objects.create_user("adm", password="pass")
+        self.admin = User.objects.create_superuser("adm", "adm@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="adm", password="pass")
 

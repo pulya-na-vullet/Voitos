@@ -72,7 +72,7 @@ class RolePickAndCancelTests(TestCase):
             self.user, self.pending, image_bytes=b"x", filename="a.jpg"
         )
         req = WorkRequest.objects.get(user=self.user)
-        self.assertEqual(req.status, WorkRequestStatus.PENDING)
+        self.assertEqual(req.status, WorkRequestStatus.DRAFT)
         reply = handle_work_request_step(self.user, "отмена", self.pending)
         self.assertIn("отменил", reply.lower())
         req.refresh_from_db()
