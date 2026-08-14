@@ -6,12 +6,36 @@
   <a class="btn secondary small" href="{% url 'panel:work_requests' %}">← К заявкам</a>
 </div>
 <div class="card" style="max-width:900px;">
-  <p><strong>Житель:</strong> <a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></p>
+  <p><strong>Житель:</strong>
+    <a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a>
+    {% if client_max_link %}
+      · <a href="{{ client_max_link }}" target="_blank" rel="noopener">написать в MAX</a>
+    {% endif %}
+  </p>
+  <p><strong>Телефон жителя:</strong>
+    {% if client_phone %}
+      <a class="mono" href="tel:{{ client_phone }}">{{ client_phone }}</a>
+    {% else %}—{% endif %}
+  </p>
   <p><strong>Роль:</strong> {{ item.role.name }}</p>
   <p><strong>НП жителя:</strong> {{ item.client_locality|default:item.user.locality|default:"—" }}</p>
+  <p><strong>Адрес жителя:</strong> {{ item.user.address|default:"—" }}</p>
   <p><strong>Статус:</strong> {{ item.get_status_display }}</p>
   {% if item.assigned_contractor %}
-    <p><strong>Исполнитель:</strong> {{ item.assigned_contractor }} ({{ item.assigned_contractor.locality|default:"—" }})</p>
+    <p><strong>Исполнитель:</strong>
+      <a href="{% url 'panel:user_dashboard' item.assigned_contractor.user_id %}">{{ item.assigned_contractor }}</a>
+      {% if item.assigned_contractor.locality %}
+        <span class="muted">({{ item.assigned_contractor.locality }})</span>
+      {% endif %}
+      {% if assigned_max_link %}
+        · <a class="btn small" href="{{ assigned_max_link }}" target="_blank" rel="noopener">Написать в MAX</a>
+      {% endif %}
+    </p>
+    <p><strong>Телефон исполнителя:</strong>
+      {% if assigned_phone %}
+        <a class="mono" href="tel:{{ assigned_phone }}">{{ assigned_phone }}</a>
+      {% else %}—{% endif %}
+    </p>
   {% endif %}
   {% if item.reported_amount or item.confirmed_amount %}
     <p><strong>Оплата работы:</strong>
@@ -58,18 +82,28 @@
     <p><span class="badge ok">Активно</span> {{ active_offer.contractor }} — до {{ active_offer.respond_deadline }}</p>
   {% endif %}
   <table>
-    <thead><tr><th>Исполнитель</th><th>НП</th><th>Статус</th><th>Когда</th><th>Причина</th></tr></thead>
+    <thead><tr><th>Исполнитель</th><th>Телефон</th><th>НП</th><th>Статус</th><th>Когда</th><th>Причина</th></tr></thead>
     <tbody>
     {% for o in offers %}
       <tr>
-        <td>{{ o.contractor }}</td>
+        <td>
+          <a href="{% url 'panel:user_dashboard' o.contractor.user_id %}">{{ o.contractor }}</a>
+          {% if o.contractor.user.username %}
+            · <a href="https://max.ru/{{ o.contractor.user.username|cut:'@' }}" target="_blank" rel="noopener">MAX</a>
+          {% endif %}
+        </td>
+        <td class="mono">
+          {% with ph=o.contractor.phone|default:o.contractor.user.phone %}
+            {% if ph %}<a href="tel:{{ ph }}">{{ ph }}</a>{% else %}—{% endif %}
+          {% endwith %}
+        </td>
         <td>{{ o.contractor.locality|default:"—" }}</td>
         <td>{{ o.get_status_display }}</td>
         <td class="muted">{{ o.offered_at }}</td>
         <td class="muted">{{ o.rank_reason|default:"—" }}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="5" class="muted">Ещё не предлагалось</td></tr>
+      <tr><td colspan="6" class="muted">Ещё не предлагалось</td></tr>
     {% endfor %}
     </tbody>
   </table>

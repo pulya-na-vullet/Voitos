@@ -188,6 +188,19 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 close_task_for_source(AdminTaskKind.WORK_REQUEST, "WorkRequest", req.id)
             messages.success(request, "Заявка обновлена.")
             return redirect("panel:work_request_detail", pk=pk)
+    from services.contractors import max_profile_link
+
+    assigned = req.assigned_contractor
+    assigned_phone = ""
+    assigned_max_link = ""
+    if assigned:
+        assigned_phone = (
+            (assigned.phone or getattr(assigned.user, "phone", "") or "")
+        ).strip()
+        assigned_max_link = max_profile_link(assigned.user)
+    client_phone = (req.user.phone or "").strip()
+    client_max_link = max_profile_link(req.user)
+
     return render(
         request,
         "panel/work_request_detail.html",
@@ -196,6 +209,10 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "statuses": WorkRequestStatus.choices,
             "offers": req.offers.select_related("contractor", "contractor__user").all(),
             "active_offer": req.offers.filter(status="offered").first(),
+            "client_phone": client_phone,
+            "client_max_link": client_max_link,
+            "assigned_phone": assigned_phone,
+            "assigned_max_link": assigned_max_link,
         },
     )
 
