@@ -488,12 +488,37 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
         payer_choices[bot_user.family_payer_id] = bot_user.family_payer
     for u in family_dependents:
         payer_choices[u.id] = u
-    executor_profile = getattr(bot_user, "contractor_profile", None)
+    executor_profiles = list(
+        bot_user.contractor_profiles.select_related("role").order_by("id")
+    )
+    executor_profile = executor_profiles[0] if executor_profiles else None
     executor_ratings = None
-    if executor_profile is not None:
+    executor_role_stats: list[dict] = []
+    if executor_profiles:
         from services.work_request_rating import contractor_rating_stats
 
-        executor_ratings = contractor_rating_stats(executor_profile)
+        for profile in executor_profiles:
+            stats = contractor_rating_stats(profile)
+            executor_role_stats.append({"profile": profile, "ratings": stats})
+        # Сводный блок для совместимости шаблона
+        executor_ratings = contractor_rating_stats(executor_profiles[0])
+        if len(executor_profiles) > 1:
+            # объединить отзывы всех ролей для таблицы
+            all_ratings = []
+            total_score = 0
+            count = 0
+            for item in executor_role_stats:
+                st = item["ratings"]
+                all_ratings.extend(st.get("ratings") or [])
+                if st.get("count"):
+                    total_score += (st.get("avg") or 0) * st["count"]
+                    count += st["count"]
+            all_ratings.sort(key=lambda r: r.created_at, reverse=True)
+            executor_ratings = {
+                "avg": round(total_score / count, 2) if count else None,
+                "count": count,
+                "ratings": all_ratings[:20],
+            }
 
     return render(
         request,
@@ -510,6 +535,8 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
             "missing_fields": missing_fields,
             "citizen": citizen_stats(bot_user),
             "executor_profile": executor_profile,
+            "executor_profiles": executor_profiles,
+            "executor_role_stats": executor_role_stats,
             "executor_ratings": executor_ratings,
             "stats": {
                 "messages": ChatMessage.objects.filter(user=bot_user).count(),

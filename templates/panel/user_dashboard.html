@@ -46,6 +46,14 @@
       оплаты {{ citizen.paid }}/{{ citizen.offered }}
     </span>
   </p>
+  {% if executor_profiles %}
+  <p style="margin:8px 0 0;">Роли исполнителя:
+    {% for p in executor_profiles %}
+      <strong>{{ p.role_label }}</strong>
+      <span class="muted">({{ p.get_status_display }})</span>{% if not forloop.last %}, {% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
   {% if executor_profile and executor_ratings %}
   <p style="margin:8px 0 0;">Рейтинг исполнителя:
     {% if executor_ratings.avg %}

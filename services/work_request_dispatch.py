@@ -531,7 +531,9 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         )
         req.save(update_fields=["status", "assigned_contractor", "updated_at"])
 
-    phone = (contractor.phone or c_user.phone or "").strip()
+    from services.contractors import format_executor_contacts_block
+
+    contacts = format_executor_contacts_block(contractor)
     address = (req.user.address or "").strip() or "—"
 
     pending = PendingAction.objects.filter(user=c_user).first()
@@ -545,8 +547,8 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         client_text = (
             f"По заявке #{req.id} найден мастер: {c_user}.\n"
             f"Роль: {req.role.name}\n"
-            + (f"Телефон: {phone}\n" if phone else "")
-            + "Сейчас мастер укажет, когда сможет вас принять — пришлём варианты времени."
+            f"{contacts}\n"
+            "Сейчас мастер укажет, когда сможет вас принять — пришлём варианты времени."
         )
         try:
             send_fn(req.user, client_text)
@@ -561,8 +563,8 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
     client_text = (
         f"По заявке #{req.id} найден исполнитель: {c_user}.\n"
         f"Роль: {req.role.name}\n"
-        + (f"Телефон: {phone}\n" if phone else "")
-        + "Он свяжется с вами для выполнения работ."
+        f"{contacts}\n"
+        "Он свяжется с вами для выполнения работ."
     )
     exec_text = (
         f"Вы приняли заявку #{req.id}.\n"

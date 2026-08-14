@@ -428,6 +428,14 @@ class BotUser(models.Model):
     def __str__(self) -> str:
         return self.real_name or self.display_name or self.username or self.max_user_id
 
+    @property
+    def contractor_profile(self):
+        """Совместимость: «основной» профиль = последний обновлённый."""
+        qs = getattr(self, "contractor_profiles", None)
+        if qs is None:
+            return None
+        return qs.select_related("role").order_by("-updated_at", "-id").first()
+
     def profile_complete(self) -> bool:
         return bool(self.real_name.strip() and self.phone.strip() and self.address.strip())
 
@@ -922,12 +930,12 @@ class CampaignResidentHelper(models.Model):
 
 
 class ContractorProfile(models.Model):
-    """Исполнитель: техника или специалист по роли из каталога ExecutorRole."""
+    """Исполнитель: одна роль/техника на запись; у пользователя может быть несколько ролей."""
 
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         BotUser,
         on_delete=models.CASCADE,
-        related_name="contractor_profile",
+        related_name="contractor_profiles",
     )
     role = models.ForeignKey(
         "ExecutorRole",
@@ -988,6 +996,12 @@ class ContractorProfile(models.Model):
         verbose_name = "Исполнитель"
         verbose_name_plural = "Исполнители"
         ordering = ["equipment_type", "user_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "equipment_type"],
+                name="uniq_contractor_user_equipment_type",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.role_label}: {self.user}"

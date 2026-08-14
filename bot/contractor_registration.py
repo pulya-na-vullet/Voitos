@@ -52,8 +52,18 @@ def start_contractor_registration(
 
     pending.pending_payload = {"step": "role"}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    existing = list(
+        ContractorProfile.objects.filter(user=user)
+        .select_related("role")
+        .order_by("id")
+    )
+    have = ""
+    if existing:
+        names = ", ".join(p.role_label for p in existing)
+        have = f"\nУже в анкете: {names}. Можно добавить ещё одну роль.\n"
     return (
         "Регистрация исполнителя.\n"
+        f"{have}"
         "Кем вы работаете? Выберите номер из списка:\n\n"
         + format_roles_list(roles)
         + "\n\nНапишите цифру (например: 1)."
@@ -258,11 +268,13 @@ def _finish(
 ) -> str:
     contact = (payload.get("phone") or user.phone or "")[:32]
     payout = (payload.get("payout_phone") or contact)[:32]
+    # Одна роль = одна запись; повторная регистрация той же роли обновляет анкету,
+    # другие роли того же пользователя сохраняются.
     profile, _created = ContractorProfile.objects.update_or_create(
         user=user,
+        equipment_type=role.code,
         defaults={
             "role": role,
-            "equipment_type": role.code,
             "equipment_label": (payload.get("equipment_label") or "")[:255],
             "plate_number": (payload.get("plate_number") or "")[:32],
             "phone": contact,
@@ -318,12 +330,18 @@ def _finish(
     doc_line = ""
     if role.requires_qualification_docs:
         doc_line = f"\nДокумент: {'получен' if profile.qualification_doc else 'не приложен'}"
+    all_roles = list(
+        ContractorProfile.objects.filter(user=user).select_related("role").order_by("id")
+    )
+    roles_line = ""
+    if len(all_roles) > 1:
+        roles_line = "\nВсе ваши роли: " + ", ".join(p.role_label for p in all_roles)
     return (
         "Анкета исполнителя отправлена администратору.\n"
         f"Роль: {role.name}\n"
         f"Описание: {profile.equipment_label or '—'}\n"
         f"Банк: {profile.bank_name or '—'}\n"
         f"Тел. для перевода: {profile.payout_phone or profile.phone or '—'}"
-        f"{doc_line}\n"
+        f"{doc_line}{roles_line}\n"
         "После проверки вы сможете получать заказы."
     )

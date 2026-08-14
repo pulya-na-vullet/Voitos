@@ -157,6 +157,28 @@ def max_profile_link(user: BotUser) -> str:
     return f"https://max.ru/{uname}"
 
 
+def work_request_executor_contact_lines(contractor: ContractorProfile) -> list[str]:
+    """Контакты исполнителя для клиента по заявке (телефон + MAX)."""
+    user = contractor.user
+    phone = (contractor.phone or user.phone or "").strip()
+    uname = (user.username or "").strip().lstrip("@")
+    link = max_profile_link(user)
+    lines: list[str] = []
+    if phone:
+        lines.append(f"Телефон: {phone}")
+    if uname:
+        lines.append(f"MAX: @{uname}")
+    if link:
+        lines.append(f"Профиль MAX: {link}")
+    if not lines:
+        lines.append("Контакты в анкете не указаны — уточните у администратора.")
+    return lines
+
+
+def format_executor_contacts_block(contractor: ContractorProfile) -> str:
+    return "\n".join(work_request_executor_contact_lines(contractor))
+
+
 def contractor_contact_lines(assignment: CampaignAssignment) -> list[str]:
     contractor = assignment.contractor
     user = contractor.user

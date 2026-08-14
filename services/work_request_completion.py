@@ -107,17 +107,31 @@ def active_job_for_contractor(contractor: ContractorProfile) -> WorkRequest | No
     )
 
 
+def active_job_for_user(user: BotUser) -> WorkRequest | None:
+    """Любая активная заявка по любому профилю исполнителя этого пользователя."""
+    return (
+        WorkRequest.objects.filter(
+            assigned_contractor__user=user,
+            status__in=[WorkRequestStatus.SCHEDULING, WorkRequestStatus.IN_PROGRESS],
+        )
+        .select_related("user", "role", "assigned_contractor", "assigned_contractor__user")
+        .order_by("-updated_at")
+        .first()
+    )
+
+
 def contractor_blocked_for_new_offers(contractor: ContractorProfile) -> bool:
-    """Новые заявки закрыты, пока не закрыта комиссия 10% по прошлым работам."""
+    """Новые заявки закрыты, пока не закрыта комиссия / активная работа (по всем ролям УЗ)."""
+    user_id = contractor.user_id
     return WorkRequest.objects.filter(
-        assigned_contractor=contractor,
+        assigned_contractor__user_id=user_id,
         commission_status__in=[
             WorkRequestCommissionStatus.AWAITING,
             WorkRequestCommissionStatus.PENDING_REVIEW,
             WorkRequestCommissionStatus.REJECTED,
         ],
     ).exists() or WorkRequest.objects.filter(
-        assigned_contractor=contractor,
+        assigned_contractor__user_id=user_id,
         status__in=[
             WorkRequestStatus.SCHEDULING,
             WorkRequestStatus.IN_PROGRESS,
@@ -157,14 +171,10 @@ def cancel_scheduled_for_request(req: WorkRequest, kind: str = SCHEDULED_KIND_CL
 
 
 def start_completion(user: BotUser, pending: PendingAction) -> str:
-    profile = getattr(user, "contractor_profile", None)
-    if profile is None:
-        try:
-            profile = ContractorProfile.objects.get(user=user)
-        except ContractorProfile.DoesNotExist:
-            return "Вы не зарегистрированы как исполнитель."
-    req = active_job_for_contractor(profile)
+    req = active_job_for_user(user)
     if not req:
+        if not ContractorProfile.objects.filter(user=user).exists():
+            return "Вы не зарегистрированы как исполнитель."
         return (
             "Нет заявки в статусе «в работе». "
             "Сначала примите предложение и выполните заказ."

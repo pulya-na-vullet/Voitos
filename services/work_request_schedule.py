@@ -192,10 +192,14 @@ def _publish_slots_to_client(req: WorkRequest, slots: list[str], pending: Pendin
 
     addr = master_visit_address(req) or "адрес уточнит мастер"
     master_name = str(req.assigned_contractor.user)
+    from services.contractors import format_executor_contacts_block
+
+    contacts = format_executor_contacts_block(req.assigned_contractor)
     lines = "\n".join(f"{i}. {s}" for i, s in enumerate(slots, 1))
     client_msg = (
         f"Мастер {master_name} готов принять вас по заявке #{req.id}.\n"
-        f"Адрес: {addr}\n\n"
+        f"Адрес: {addr}\n"
+        f"{contacts}\n\n"
         f"Доступные промежутки:\n{lines}\n\n"
         "Пожалуйста, укажите мастеру, в какой временной промежуток вы придёте — "
         "напишите номер пункта или текст окна."
@@ -276,11 +280,15 @@ def _confirm_agreed_slot(req: WorkRequest, slot: str, pending: PendingAction) ->
     addr = master_visit_address(req) or "—"
     master = req.assigned_contractor.user
     client = req.user
+    from services.contractors import format_executor_contacts_block
+
+    contacts = format_executor_contacts_block(req.assigned_contractor)
     common = (
         f"Согласовано по заявке #{req.id}.\n"
         f"Время: {slot}\n"
         f"Адрес: {addr}\n"
         f"Мастер: {master}\n"
+        f"{contacts}\n"
         f"Клиент: {client}"
     )
     try:
