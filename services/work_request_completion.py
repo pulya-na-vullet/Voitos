@@ -170,8 +170,11 @@ def cancel_scheduled_for_request(req: WorkRequest, kind: str = SCHEDULED_KIND_CL
     return n
 
 
-def start_completion(user: BotUser, pending: PendingAction) -> str:
-    req = active_job_for_user(user)
+def start_completion(
+    user: BotUser, pending: PendingAction, *, req: WorkRequest | None = None
+) -> str:
+    """Старт финализации: способ оплаты → сумма/чек → через 20 мин опрос клиента."""
+    req = req or active_job_for_user(user)
     if not req:
         if not ContractorProfile.objects.filter(user=user).exists():
             return "Вы не зарегистрированы как исполнитель."
@@ -179,6 +182,26 @@ def start_completion(user: BotUser, pending: PendingAction) -> str:
             "Нет заявки в статусе «в работе». "
             "Сначала примите предложение и выполните заказ."
         )
+    if not req.assigned_contractor or req.assigned_contractor.user_id != user.id:
+        return "Эта заявка назначена другому мастеру."
+    if req.status not in (WorkRequestStatus.SCHEDULING, WorkRequestStatus.IN_PROGRESS):
+        return f"Заявка #{req.id} уже не в работе (статус: {req.get_status_display()})."
+
+    # Не дублируем опрос «услуга оказана?» после ручного/авто старта финализации.
+    from services.work_request_schedule import (
+        SCHEDULED_KIND_SERVICE_DONE,
+        SERVICE_DONE_PENDING,
+    )
+
+    cancel_scheduled_for_request(req, kind=SCHEDULED_KIND_SERVICE_DONE)
+    client_pending = PendingAction.objects.filter(user=req.user).first()
+    if (
+        client_pending
+        and client_pending.pending_kind == SERVICE_DONE_PENDING
+        and (client_pending.pending_payload or {}).get("work_request_id") == req.id
+    ):
+        client_pending.clear_pending()
+
     pending.pending_kind = COMPLETE_PENDING
     pending.pending_payload = {"step": "method", "work_request_id": req.id}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
@@ -296,6 +319,14 @@ def _finalize_executor_report(
             save=False,
         )
     req.save()
+
+    # На всякий случай снять опрос «услуга оказана?»
+    try:
+        from services.work_request_schedule import SCHEDULED_KIND_SERVICE_DONE
+
+        cancel_scheduled_for_request(req, kind=SCHEDULED_KIND_SERVICE_DONE)
+    except Exception:
+        logger.exception("cancel service_done ask for WR %s", req.id)
 
     client_text = _client_confirm_message(req)
     schedule_message(
@@ -630,6 +661,10 @@ def process_due_scheduled_messages(*, send_fn=None) -> int:
             n += 1
             if claimed.kind == SCHEDULED_KIND_CLIENT_CONFIRM:
                 on_client_confirm_message_sent(claimed)
+            elif claimed.kind == "work_request_service_done_ask":
+                from services.work_request_schedule import on_service_done_ask_sent
+
+                on_service_done_ask_sent(claimed)
         except Exception:
             logger.exception("Failed scheduled message %s", msg_id)
     return n

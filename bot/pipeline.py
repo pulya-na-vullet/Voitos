@@ -91,6 +91,7 @@ class MessagePipeline:
             "work_request_rating",
             "work_request_schedule_master",
             "work_request_schedule_client",
+            "work_request_service_done",
         }:
             from services.work_request_cancel import maybe_cancel_work_flow
 
@@ -162,6 +163,13 @@ class MessagePipeline:
 
             reply = handle_client_schedule_step(user, text, pending)
             self._store_out(user, reply, "work_request_schedule_client")
+            return reply
+
+        if pending.pending_kind == "work_request_service_done":
+            from services.work_request_schedule import handle_service_done_step
+
+            reply = handle_service_done_step(user, text, pending)
+            self._store_out(user, reply, "work_request_service_done")
             return reply
 
         if pending.pending_kind == "volunteer_help_reply":

@@ -26,6 +26,7 @@ WORK_FLOW_PENDING_KINDS = frozenset(
         "work_request_rating",
         "work_request_schedule_master",
         "work_request_schedule_client",
+        "work_request_service_done",
     }
 )
 
@@ -187,8 +188,10 @@ def cancel_work_flow(user: BotUser, pending: PendingAction) -> str:
         ).update(status=WorkRequestOfferStatus.CANCELLED)
         try:
             from services.work_request_completion import cancel_scheduled_for_request
+            from services.work_request_schedule import SCHEDULED_KIND_SERVICE_DONE
 
             cancel_scheduled_for_request(req)
+            cancel_scheduled_for_request(req, kind=SCHEDULED_KIND_SERVICE_DONE)
         except Exception:
             logger.exception("cancel scheduled for WR %s", req.id)
         cancelled_request = True
