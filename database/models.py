@@ -1214,6 +1214,23 @@ class WorkRequest(models.Model):
         default="",
     )
     schedule_agreed_at = models.DateTimeField(null=True, blank=True)
+    agreed_slot_end_at = models.DateTimeField(
+        "Конец согласованного окна",
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Когда опросить клиента: оказана ли услуга.",
+    )
+    service_done_asked_at = models.DateTimeField(
+        "Спросили клиента об оказании услуги",
+        null=True,
+        blank=True,
+    )
+    service_provided_at = models.DateTimeField(
+        "Клиент подтвердил оказание услуги",
+        null=True,
+        blank=True,
+    )
     rating_asked_at = models.DateTimeField(
         "Запрошена оценка работы",
         null=True,
