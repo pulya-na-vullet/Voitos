@@ -6,15 +6,19 @@
   <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
 </div>
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
-  Создавайте группы и управляйте составом. Запуск сбора — на странице сервисных мероприятий.
+  {% if can_manage_groups %}
+  Создавайте группы, назначайте менеджера (один на группу) и управляйте составом. Запуск сбора — на странице сервисных мероприятий.
+  {% else %}
+  Группы, закреплённые за вами как за менеджером. Запуск сбора — на странице сервисных мероприятий.
+  {% endif %}
 </p>
 
-<div class="grid two" style="margin-bottom:16px;">
+<div class="grid {% if can_manage_groups %}two{% endif %}" style="margin-bottom:16px;">
   <div class="card">
     <h3 style="margin-top:0;">Список групп</h3>
     <p class="muted">Бюджет — остатки сверх цели после закрытых сборов.</p>
     <table>
-      <thead><tr><th>Группа</th><th>Участников</th><th>Бюджет</th><th>Пожелания</th><th></th></tr></thead>
+      <thead><tr><th>Группа</th><th>Участников</th><th>Менеджер</th><th>Бюджет</th><th>Пожелания</th><th></th></tr></thead>
       <tbody>
       {% for g in groups %}
         <tr>
@@ -23,25 +27,38 @@
             {% if g.description %}<div class="muted">{{ g.description|truncatechars:60 }}</div>{% endif %}
           </td>
           <td class="mono">{{ g.member_count }}</td>
+          <td>
+            {% if g.manager %}
+              <span class="mono">{{ g.manager.username }}</span>
+              {% if g.manager.panel_profile and g.manager.panel_profile.bot_user %}
+                <div class="muted">{{ g.manager.panel_profile.bot_user }}</div>
+              {% endif %}
+            {% else %}
+              <span class="muted">не назначен</span>
+            {% endif %}
+          </td>
           <td class="mono">{% if g.budget %}<strong>{{ g.budget }} ₽</strong>{% else %}0 ₽{% endif %}</td>
           <td class="mono">{% if g.wish_count %}<span class="badge">{{ g.wish_count }}</span>{% else %}0{% endif %}</td>
           <td style="white-space:nowrap; display:flex; gap:6px; flex-wrap:wrap;">
             <a class="btn small" href="{% url 'panel:service_group_edit' g.id %}">Состав</a>
+            {% if can_manage_groups %}
             <form method="post" onsubmit="return confirm('Удалить группу «{{ g.name|escapejs }}»? Сборы группы останутся без привязки к группе.');">
               {% csrf_token %}
               <input type="hidden" name="action" value="delete_group">
               <input type="hidden" name="group_id" value="{{ g.id }}">
               <button class="btn danger small" type="submit">Удалить</button>
             </form>
+            {% endif %}
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="5" class="muted">Групп пока нет — создайте первую справа</td></tr>
+        <tr><td colspan="6" class="muted">{% if can_manage_groups %}Групп пока нет — создайте первую справа{% else %}Нет закреплённых групп{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 
+  {% if can_manage_groups %}
   <div class="card">
     <h3 style="margin-top:0;">Новая группа</h3>
     <form method="post">
@@ -58,5 +75,6 @@
       <button class="btn" type="submit">Создать группу</button>
     </form>
   </div>
+  {% endif %}
 </div>
 {% endblock %}

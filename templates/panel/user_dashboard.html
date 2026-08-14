@@ -46,7 +46,41 @@
       оплаты {{ citizen.paid }}/{{ citizen.offered }}
     </span>
   </p>
+  {% if executor_profile and executor_ratings %}
+  <p style="margin:8px 0 0;">Рейтинг исполнителя:
+    {% if executor_ratings.avg %}
+      <strong>{{ executor_ratings.avg }} / 5</strong>
+      <span class="muted">({{ executor_ratings.count }} оценок)</span>
+    {% else %}
+      <span class="muted">пока нет оценок</span>
+    {% endif %}
+  </p>
+  {% endif %}
 </div>
+
+{% if executor_ratings and executor_ratings.ratings %}
+<div class="card" style="margin-bottom:16px;">
+  <h2 style="margin-top:0; font-size:1.1rem;">Отзывы по заявкам</h2>
+  <table>
+    <thead>
+      <tr><th>Когда</th><th>Заявка</th><th>Клиент</th><th>Оценка</th><th>Комментарий</th></tr>
+    </thead>
+    <tbody>
+    {% for r in executor_ratings.ratings %}
+      <tr>
+        <td class="mono">{{ r.created_at|date:"d.m.Y H:i" }}</td>
+        <td><a href="{% url 'panel:work_request_detail' r.work_request_id %}">#{{ r.work_request_id }}</a>
+          {% if r.work_request.role %} · {{ r.work_request.role.name }}{% endif %}
+        </td>
+        <td><a href="{% url 'panel:user_dashboard' r.client_id %}">{{ r.client }}</a></td>
+        <td class="mono"><strong>{{ r.score }}/5</strong></td>
+        <td>{{ r.comment|default:"—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <div class="card" style="margin-bottom:16px;">
   <h3 style="margin-top:0;">Семья / общая подписка</h3>

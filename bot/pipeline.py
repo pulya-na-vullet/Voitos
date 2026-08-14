@@ -11,6 +11,7 @@ from database.models import (
     ActivityLog,
     BotUser,
     ChatMessage,
+    MemoryItem,
     MessageRole,
     PendingAction,
     ReminderRepeat,
@@ -80,6 +81,31 @@ class MessagePipeline:
             self._store_out(user, reply, "contractor_registration")
             return reply
 
+        # Отмена оформления / шагов заявки на мастера («отмена», «я ошибся», …)
+        if pending.pending_kind in {
+            "work_request",
+            "work_request_offer_reply",
+            "work_request_complete",
+            "work_request_client_confirm",
+            "work_request_commission",
+            "work_request_rating",
+            "work_request_schedule_master",
+            "work_request_schedule_client",
+        }:
+            from services.work_request_cancel import maybe_cancel_work_flow
+
+            cancelled = maybe_cancel_work_flow(user, text, pending)
+            if cancelled is not None:
+                self._store_out(user, cancelled, "work_request_cancel")
+                return cancelled
+
+        from bot.work_request import WORK_REQUEST_KIND, handle_work_request_step
+
+        if pending.pending_kind == WORK_REQUEST_KIND:
+            reply = handle_work_request_step(user, text, pending)
+            self._store_out(user, reply, "work_request")
+            return reply
+
         if pending.pending_kind == "contractor_offer_reply":
             from services.contractors import handle_offer_reply
 
@@ -87,6 +113,56 @@ class MessagePipeline:
             if reply is not None:
                 self._store_out(user, reply, "contractor_offer")
                 return reply
+
+        if pending.pending_kind == "work_request_offer_reply":
+            from services.work_request_dispatch import handle_work_offer_reply
+
+            reply = handle_work_offer_reply(user, text, pending)
+            if reply is not None:
+                self._store_out(user, reply, "work_request_offer")
+                return reply
+
+        if pending.pending_kind == "work_request_complete":
+            from services.work_request_completion import handle_completion_step
+
+            reply = handle_completion_step(user, text, pending)
+            self._store_out(user, reply, "work_request_complete")
+            return reply
+
+        if pending.pending_kind == "work_request_client_confirm":
+            from services.work_request_completion import handle_client_confirm_step
+
+            reply = handle_client_confirm_step(user, text, pending)
+            self._store_out(user, reply, "work_request_client_confirm")
+            return reply
+
+        if pending.pending_kind == "work_request_commission":
+            from services.work_request_completion import handle_commission_text
+
+            reply = handle_commission_text(user, text, pending)
+            self._store_out(user, reply, "work_request_commission")
+            return reply
+
+        if pending.pending_kind == "work_request_rating":
+            from services.work_request_rating import handle_rating_step
+
+            reply = handle_rating_step(user, text, pending)
+            self._store_out(user, reply, "work_request_rating")
+            return reply
+
+        if pending.pending_kind == "work_request_schedule_master":
+            from services.work_request_schedule import handle_master_schedule_step
+
+            reply = handle_master_schedule_step(user, text, pending)
+            self._store_out(user, reply, "work_request_schedule_master")
+            return reply
+
+        if pending.pending_kind == "work_request_schedule_client":
+            from services.work_request_schedule import handle_client_schedule_step
+
+            reply = handle_client_schedule_step(user, text, pending)
+            self._store_out(user, reply, "work_request_schedule_client")
+            return reply
 
         if pending.pending_kind == "volunteer_help_reply":
             from services.volunteer import handle_volunteer_help_reply
@@ -203,15 +279,20 @@ class MessagePipeline:
 
         if intent.intent == "contractor_registration":
             from bot.contractor_registration import start_contractor_registration
-            from database.models import EquipmentType
 
-            low = text.lower()
-            eq = None
-            if "камаз" in low or "груз" in low:
-                eq = EquipmentType.TRUCK
-            elif "трактор" in low or "погруз" in low:
-                eq = EquipmentType.TRACTOR
-            return start_contractor_registration(user, pending, equipment_type=eq)
+            # Команда «стать исполнителем» — всегда показываем полный список ролей.
+            # Роль по номеру/названию человек выбирает следующим сообщением.
+            return start_contractor_registration(user, pending)
+
+        if intent.intent == "work_request":
+            from bot.work_request import start_work_request
+
+            return start_work_request(user, pending, text=text)
+
+        if intent.intent == "work_request_done":
+            from services.work_request_completion import start_completion
+
+            return start_completion(user, pending)
 
         if intent.intent == "force_remember":
             source = pending.last_user_text.strip()
@@ -230,6 +311,10 @@ class MessagePipeline:
         if intent.intent == "force_forget":
             pending.last_user_text = ""
             pending.save(update_fields=["last_user_text", "updated_at"])
+            deleted = MemoryItem.objects.filter(user=user).count()
+            MemoryItem.objects.filter(user=user).delete()
+            if deleted:
+                return f"Хорошо, не запоминаю. Удалил записей из памяти: {deleted}."
             return "Хорошо, не запоминаю."
 
         if intent.intent == "save_memory" or (intent.should_save and intent.memory_text):

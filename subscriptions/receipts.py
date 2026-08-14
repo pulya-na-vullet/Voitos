@@ -211,8 +211,8 @@ def analyze_receipt_text(
     expected_name: str | None = None,
 ) -> ReceiptParseResult:
     cfg = get_runtime_settings()
-    expected_phone = normalize_phone(expected_phone or cfg.payment_phone or "89625507832")
-    expected_name = expected_name or cfg.payment_name or "Григорьев Дмитрий Вячеславович"
+    expected_phone = normalize_phone(expected_phone or cfg.payment_phone or "")
+    expected_name = (expected_name or cfg.payment_name or "").strip()
 
     system = (
         "Ты извлекаешь данные из текста банковского чека/перевода. "
@@ -224,8 +224,8 @@ def analyze_receipt_text(
         '  "recipient_name": "строка или null",\n'
         '  "notes": "кратко"\n'
         "}\n"
-        f"Ожидаемый телефон получателя: {expected_phone}. "
-        f"Ожидаемое ФИО: {expected_name}."
+        f"Ожидаемый телефон получателя: {expected_phone or 'не задан'}. "
+        f"Ожидаемое ФИО: {expected_name or 'не задано'}."
     )
     amount = None
     transfer_date = None
@@ -247,10 +247,18 @@ def analyze_receipt_text(
         notes = "heuristic"
 
     phone_norm = normalize_phone(phone) or _find_phone_in_text(ocr_text)
-    if not name:
+    if not name and expected_name:
         name = expected_name if names_match(expected_name, ocr_text) else ""
-    phone_ok = phone_norm == expected_phone or expected_phone in normalize_phone(ocr_text)
-    name_ok = names_match(expected_name, name) or names_match(expected_name, ocr_text)
+    if expected_phone:
+        phone_ok = phone_norm == expected_phone or expected_phone in normalize_phone(
+            ocr_text
+        )
+    else:
+        phone_ok = True  # реквизиты не заданы — не валидируем телефон
+    if expected_name:
+        name_ok = names_match(expected_name, name) or names_match(expected_name, ocr_text)
+    else:
+        name_ok = True
     # «даты совпадают» — перевод не старше 14 дней и не из будущего
     today = date.today()
     date_ok = True
@@ -327,5 +335,11 @@ def _heuristic_parse(text: str) -> tuple[Decimal | None, date | None, str, str]:
     if m:
         transfer_date = _to_date(m.group(1))
     phone = _find_phone_in_text(text)
-    name = "Григорьев" if "григорьев" in text.lower() else ""
+    # ФИО только из настроек: если ожидаемое имя встречается в тексте OCR
+    name = ""
+    cfg = get_runtime_settings()
+    expected = (cfg.payment_name or "").strip()
+    if expected and names_match(expected, text):
+        # Берём первую «фамилию» из настроек как якорь для LLM/UI
+        name = expected.split()[0] if expected.split() else expected
     return amount, transfer_date, phone, name

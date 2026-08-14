@@ -72,7 +72,10 @@ class ContractorFlowTests(TestCase):
             verified_at=timezone.now(),
             phone=self.driver.phone,
         )
-        self.admin = User.objects.create_user("ctradm", password="pass")
+        self.admin = User.objects.create_superuser("ctradm", "c@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="ctradm", password="pass")
         self.sent: list[tuple[int, str]] = []

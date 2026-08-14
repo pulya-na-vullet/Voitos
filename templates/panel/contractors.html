@@ -3,18 +3,21 @@
 {% block content %}
 <div class="topbar">
   <h1>Исполнители</h1>
-  <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn secondary small" href="{% url 'panel:executor_roles' %}">Роли</a>
+    <a class="btn secondary small" href="{% url 'panel:work_requests' %}">Заявки жителей</a>
+    <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
+  </div>
 </div>
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
-  Трактористы и водители камаза, зарегистрированные в MAX-боте («регистрация техники»).
-  Проверенных можно назначать на чистку снега и ремонт дороги.
-  Колонка «Заработано» — сумма выплат по закрытым заказам с чеками перевода.
+  Исполнители, зарегистрированные в MAX («стать исполнителем»). Роли настраиваются администратором.
+  Для части ролей требуется фото документа о квалификации.
 </p>
 
 <div class="card" style="margin-bottom:16px;">
   <form method="get" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
     <div class="form-row" style="margin:0; min-width:200px;">
-      <label>Тип техники</label>
+      <label>Роль</label>
       <select name="type" onchange="this.form.submit()">
         <option value="">Все</option>
         {% for value, label in equipment_choices %}
@@ -30,12 +33,14 @@
     <thead>
       <tr>
         <th>Исполнитель</th>
-        <th>Тип</th>
-        <th>Техника</th>
+        <th>Роль</th>
+        <th>Описание</th>
+        <th>Документ</th>
         <th>Связь</th>
         <th>Перевод</th>
         <th>Банк</th>
         <th>НП</th>
+        <th>Рейтинг</th>
         <th>Заработано</th>
         <th>Статус</th>
         <th></th>
@@ -45,14 +50,16 @@
     {% for c in contractors %}
       <tr>
         <td><a href="{% url 'panel:user_dashboard' c.user_id %}">{{ c.user }}</a></td>
-        <td>{{ c.get_equipment_type_display }}</td>
+        <td>{{ c.role_label }}</td>
         <td>{{ c.equipment_label|default:"—" }}
           <div class="muted mono">{{ c.plate_number|default:"" }}</div>
         </td>
+        <td>{% if c.qualification_doc %}<a href="{{ c.qualification_doc.url }}" target="_blank">файл</a>{% else %}—{% endif %}</td>
         <td class="mono">{{ c.phone|default:c.user.phone|default:"—" }}</td>
         <td class="mono">{{ c.payout_phone|default:c.phone|default:"—" }}</td>
         <td>{{ c.bank_name|default:"—" }}</td>
         <td>{{ c.locality|default:"—" }}</td>
+        <td class="mono">{% if c.rating_avg %}{{ c.rating_avg|floatformat:1 }}/5 <span class="muted">({{ c.rating_count }})</span>{% else %}—{% endif %}</td>
         <td class="mono"><strong>{{ c.total_earned|default:0 }} ₽</strong></td>
         <td>
           <span class="badge {% if c.status == status_verified %}ok{% elif c.status == 'rejected' or c.status == 'disabled' %}bad{% endif %}">

@@ -9,13 +9,16 @@ from database.models import (
     ContractorProfile,
     ContractorStatus,
     EquipmentType,
+    PanelProfile,
+    PanelRole,
     ServiceGroup,
 )
 
 
 class PanelDeleteTests(TestCase):
     def setUp(self) -> None:
-        self.admin = User.objects.create_user("deladm", password="pass")
+        self.admin = User.objects.create_superuser("deladm", "d@t.com", "pass")
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="deladm", password="pass")
 

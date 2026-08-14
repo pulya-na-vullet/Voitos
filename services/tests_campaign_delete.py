@@ -29,7 +29,9 @@ class CampaignDeleteTests(TestCase):
         )
         self.group = ServiceGroup.objects.create(name="Группа А")
         self.group.members.add(self.user)
-        self.admin = User.objects.create_user("adm", password="pass")
+        self.admin = User.objects.create_superuser("adm", "adm@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="adm", password="pass")
 
@@ -58,11 +60,11 @@ class CampaignDeleteTests(TestCase):
             amount_per_user=Decimal("500"),
             event_at=timezone.now(),
         )
+        # Удаление с карточки кампании / архива (на главной сборов кнопки уже нет)
         resp = self.client.post(
-            "/panel/services/",
+            f"/panel/services/campaigns/{campaign.id}/",
             {
                 "action": "delete_campaign",
-                "campaign_id": str(campaign.id),
                 "reason": "Ошибочно запущен",
             },
         )

@@ -5,12 +5,14 @@
   <h1>Пользователи бота</h1>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <span class="badge {% if bot_status.state == 'polling' or bot_status.state == 'connected' %}ok{% elif bot_status.state == 'error' %}bad{% endif %}">{{ bot_status.state }}</span>
-    {% if pending_receipts %}<span class="badge bad">Чеков подписки: {{ pending_receipts }}</span>{% endif %}
+    {% if panel_is_admin and pending_receipts %}<span class="badge bad">Чеков подписки: {{ pending_receipts }}</span>{% endif %}
     {% if pending_service %}<span class="badge bad">Сервис-чеков: {{ pending_service }}</span>{% endif %}
     {% if pending_profiles %}<span class="badge">Анкет на проверку: {{ pending_profiles }}</span>{% endif %}
     {% if open_admin_tasks %}<a class="badge bad" href="{% url 'panel:admin_tasks_today' %}">Задач: {{ open_admin_tasks }}</a>{% endif %}
+    {% if panel_is_admin %}
     <form method="post" action="{% url 'panel:check_max' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Проверить MAX</button></form>
     <form method="post" action="{% url 'panel:dump_now' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Дамп БД</button></form>
+    {% endif %}
   </div>
 </div>
 
@@ -53,6 +55,7 @@
   <form method="post" id="users-bulk-form">
     {% csrf_token %}
     <input type="hidden" name="action" value="delete_users_bulk">
+    {% if can_delete_users %}
     <div style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       <button class="btn danger small" type="submit"
               onclick="return confirm('Удалить выбранных пользователей безвозвратно? Чеки, сборы и история тоже удалятся.');">
@@ -60,10 +63,11 @@
       </button>
       <span class="muted">После тестов можно очистить список и начать с чистого листа.</span>
     </div>
+    {% endif %}
   <table>
     <thead>
       <tr>
-        <th style="width:36px;"><input type="checkbox" id="users-check-all" title="Выбрать всех"></th>
+        {% if can_delete_users %}<th style="width:36px;"><input type="checkbox" id="users-check-all" title="Выбрать всех"></th>{% endif %}
         <th>Имя</th>
         <th>Нас. пункт</th>
         <th>Соц. рейтинг</th>
@@ -79,7 +83,7 @@
     {% for row in rows %}
       {% with u=row.user %}
       <tr>
-        <td><input type="checkbox" name="user_ids" value="{{ u.id }}" class="user-check"></td>
+        {% if can_delete_users %}<td><input type="checkbox" name="user_ids" value="{{ u.id }}" class="user-check"></td>{% endif %}
         <td>{{ u.real_name|default:u.display_name|default:u.username|default:"—" }}
           <div class="muted mono">{{ u.max_user_id }}</div>
         </td>
@@ -108,8 +112,10 @@
         <td class="mono">{{ u.last_seen_at|date:"d.m.Y H:i" }}</td>
         <td style="white-space:nowrap; display:flex; gap:6px; flex-wrap:wrap;">
           <a class="btn small" href="{% url 'panel:user_dashboard' u.id %}">Открыть</a>
+          {% if can_delete_users %}
           <button class="btn danger small" type="submit" form="del-user-{{ u.id }}"
                   onclick="return confirm('Удалить пользователя «{{ u|escapejs }}» безвозвратно?');">Удалить</button>
+          {% endif %}
         </td>
       </tr>
       {% endwith %}
@@ -119,6 +125,7 @@
     </tbody>
   </table>
   </form>
+  {% if can_delete_users %}
   {% for row in rows %}
   <form method="post" id="del-user-{{ row.user.id }}" style="display:none;">
     {% csrf_token %}
@@ -126,6 +133,7 @@
     <input type="hidden" name="user_id" value="{{ row.user.id }}">
   </form>
   {% endfor %}
+  {% endif %}
 </div>
 <script>
 (function () {

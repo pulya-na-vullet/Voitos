@@ -1,0 +1,178 @@
+{% extends "panel/base.html" %}
+{% block title %}Заявка #{{ item.id }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Заявка #{{ item.id }}: {{ item.role.name }}</h1>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn secondary small" href="{% url 'panel:work_requests' %}">← К заявкам</a>
+    {% if can_delete %}
+    <form method="post" onsubmit="return confirm('Удалить заявку #{{ item.id }} безвозвратно?');">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete">
+      <button class="btn danger small" type="submit">Удалить заявку</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+<div class="card" style="max-width:900px;">
+  <p><strong>Житель:</strong>
+    <a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a>
+    {% if client_max_link %}
+      · <a href="{{ client_max_link }}" target="_blank" rel="noopener">написать в MAX</a>
+    {% endif %}
+  </p>
+  <p><strong>Телефон жителя:</strong>
+    {% if client_phone %}
+      <a class="mono" href="tel:{{ client_phone }}">{{ client_phone }}</a>
+    {% else %}—{% endif %}
+  </p>
+  <p><strong>Роль:</strong> {{ item.role.name }}</p>
+  <p><strong>НП жителя:</strong> {{ item.client_locality|default:item.user.locality|default:"—" }}</p>
+  <p><strong>Адрес жителя:</strong> {{ item.user.address|default:"—" }}</p>
+  <p><strong>Статус:</strong> {{ item.get_status_display }}</p>
+  {% if item.assigned_contractor %}
+    <p><strong>Исполнитель:</strong>
+      <a href="{% url 'panel:user_dashboard' item.assigned_contractor.user_id %}">{{ item.assigned_contractor }}</a>
+      {% if item.assigned_contractor.locality %}
+        <span class="muted">({{ item.assigned_contractor.locality }})</span>
+      {% endif %}
+      {% if assigned_max_link %}
+        · <a class="btn small" href="{{ assigned_max_link }}" target="_blank" rel="noopener">Написать в MAX</a>
+      {% endif %}
+    </p>
+    <p><strong>Телефон исполнителя:</strong>
+      {% if assigned_phone %}
+        <a class="mono" href="tel:{{ assigned_phone }}">{{ assigned_phone }}</a>
+      {% else %}—{% endif %}
+    </p>
+  {% endif %}
+  {% if item.reported_amount or item.confirmed_amount %}
+    <p><strong>Оплата работы:</strong>
+      {{ item.get_pay_method_display|default:"—" }}
+      {% if item.reported_amount %} · отчёт {{ item.reported_amount }} ₽{% endif %}
+      {% if item.confirmed_amount %} · клиент {{ item.confirmed_amount }} ₽{% endif %}
+    </p>
+    {% if item.job_receipt %}
+      <p><a href="{{ item.job_receipt.url }}" target="_blank">Чек оплаты работы</a></p>
+    {% endif %}
+  {% endif %}
+  {% if item.proposed_slots or item.agreed_slot or item.master_address %}
+    <p><strong>Приём на дому:</strong>
+      {% if item.master_address %}{{ item.master_address }}{% else %}—{% endif %}
+      {% if item.agreed_slot %} · согласовано: <strong>{{ item.agreed_slot }}</strong>{% endif %}
+    </p>
+    {% if item.proposed_slots and not item.agreed_slot %}
+      <p class="muted">Предложенные окна:
+        {% for s in item.proposed_slots %}
+          {% if s.label %}{{ s.label }}{% else %}{{ s }}{% endif %}{% if not forloop.last %}; {% endif %}
+        {% endfor %}
+      </p>
+    {% endif %}
+  {% endif %}
+  {% if item.rating %}
+    <p><strong>Оценка клиента:</strong> {{ item.rating.score }}/5
+      {% if item.rating.comment %} — {{ item.rating.comment }}{% endif %}
+    </p>
+  {% elif item.rating_asked_at %}
+    <p class="muted">Оценка запрошена {{ item.rating_asked_at|date:"d.m.Y H:i" }}, ответа пока нет.</p>
+  {% endif %}
+  {% if item.commission_amount %}
+    <p><strong>Комиссия 10%:</strong> {{ item.commission_amount }} ₽ —
+      {{ item.get_commission_status_display }}</p>
+    {% if item.executor_earned_amount is not None %}
+      <p><strong>Заработок исполнителя:</strong> {{ item.executor_earned_amount }} ₽
+        <span class="muted">(клиент − комиссия)</span></p>
+    {% endif %}
+    {% if item.commission_receipt %}
+      <p><a href="{{ item.commission_receipt.url }}" target="_blank">Чек комиссии</a></p>
+    {% endif %}
+    {% if item.commission_status == "pending_review" or item.commission_status == "awaiting" or item.commission_status == "rejected" %}
+      {% if can_manage_commission %}
+      <form method="post" style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0;">
+        {% csrf_token %}
+        <input type="text" name="note" placeholder="Комментарий" style="flex:1; min-width:160px;">
+        <button class="btn small" type="submit" name="action" value="approve_commission">Принять комиссию</button>
+        <button class="btn danger small" type="submit" name="action" value="reject_commission">Отклонить</button>
+      </form>
+      {% else %}
+      <p class="muted">Принять или отклонить комиссию может только администратор.</p>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+  {% if item.dispatch_note %}
+    <p class="muted"><strong>Подбор:</strong> {{ item.dispatch_note }}</p>
+  {% endif %}
+  <p><strong>Описание:</strong></p>
+  <p>{{ item.description }}</p>
+  <h3>Фото</h3>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    {% for p in item.photos.all %}
+      <a href="{{ p.image.url }}" target="_blank"><img src="{{ p.image.url }}" alt="" style="max-width:220px; max-height:180px; border-radius:8px;"></a>
+    {% empty %}
+      <span class="muted">Нет фото</span>
+    {% endfor %}
+  </div>
+
+  <h3 style="margin-top:20px;">Предложения исполнителям</h3>
+  <p class="muted" style="margin-top:-6px;">Ответ 20 минут → иначе следующему. Подбор по роли и населённому пункту (+ ИИ).</p>
+  {% if active_offer %}
+    <p><span class="badge ok">Активно</span> {{ active_offer.contractor }} — до {{ active_offer.respond_deadline }}</p>
+  {% endif %}
+  <table>
+    <thead><tr><th>Исполнитель</th><th>Телефон</th><th>НП</th><th>Статус</th><th>Когда</th><th>Причина</th></tr></thead>
+    <tbody>
+    {% for o in offers %}
+      <tr>
+        <td>
+          <a href="{% url 'panel:user_dashboard' o.contractor.user_id %}">{{ o.contractor }}</a>
+          {% if o.contractor.user.username %}
+            · <a href="https://max.ru/{{ o.contractor.user.username|cut:'@' }}" target="_blank" rel="noopener">MAX</a>
+          {% endif %}
+        </td>
+        <td class="mono">
+          {% with ph=o.contractor.phone|default:o.contractor.user.phone %}
+            {% if ph %}<a href="tel:{{ ph }}">{{ ph }}</a>{% else %}—{% endif %}
+          {% endwith %}
+        </td>
+        <td>{{ o.contractor.locality|default:"—" }}</td>
+        <td>{{ o.get_status_display }}</td>
+        <td class="muted">{{ o.offered_at }}</td>
+        <td class="muted">{{ o.rank_reason|default:"—" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="muted">Ещё не предлагалось</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" style="margin-top:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="dispatch">
+    <button class="btn secondary" type="submit">Подобрать / предложить исполнителя</button>
+  </form>
+
+  <form method="post" style="margin-top:16px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="save">
+    <div class="form-row">
+      <label>НП жителя (для подбора)</label>
+      <input name="client_locality" value="{{ item.client_locality }}">
+    </div>
+    <div class="form-row">
+      <label>Статус</label>
+      <select name="status">
+        {% for v,l in statuses %}
+          {% if v == "done" and not can_mark_done %}
+          {% else %}
+          <option value="{{ v }}" {% if item.status == v %}selected{% endif %}>{{ l }}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Заметка</label>
+      <textarea name="note" rows="3">{{ item.admin_note }}</textarea>
+    </div>
+    <button class="btn" type="submit">Сохранить</button>
+  </form>
+</div>
+{% endblock %}

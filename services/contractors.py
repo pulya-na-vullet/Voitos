@@ -42,6 +42,65 @@ _OTHER_TIME = {
 }
 
 
+
+
+def annotate_contractor_total_earned(qs):
+    """
+    Счётчик «Заработано»: выплаты по сервисным кампаниям
+    + чистый заработок по заявкам (сумма клиента − комиссия 10%).
+    """
+    from django.db.models import (
+        DecimalField,
+        ExpressionWrapper,
+        F,
+        OuterRef,
+        Subquery,
+        Sum,
+        Value,
+    )
+    from django.db.models.functions import Coalesce
+
+    from database.models import WorkRequest
+
+    money = DecimalField(max_digits=14, decimal_places=2)
+    zero = Value(Decimal("0.00"), output_field=money)
+
+    payout_sq = (
+        ContractorPayout.objects.filter(contractor_id=OuterRef("pk"))
+        .values("contractor_id")
+        .annotate(total=Sum("amount"))
+        .values("total")[:1]
+    )
+    work_sq = (
+        WorkRequest.objects.filter(
+            assigned_contractor_id=OuterRef("pk"),
+            executor_earned_amount__isnull=False,
+        )
+        .exclude(status="cancelled")
+        .values("assigned_contractor_id")
+        .annotate(total=Sum("executor_earned_amount"))
+        .values("total")[:1]
+    )
+    return qs.annotate(
+        payout_earned=Coalesce(Subquery(payout_sq, output_field=money), zero),
+        work_earned=Coalesce(Subquery(work_sq, output_field=money), zero),
+    ).annotate(
+        total_earned=ExpressionWrapper(
+            F("payout_earned") + F("work_earned"),
+            output_field=money,
+        )
+    )
+
+
+def contractor_total_earned(contractor: ContractorProfile) -> Decimal:
+    row = annotate_contractor_total_earned(
+        ContractorProfile.objects.filter(pk=contractor.pk)
+    ).first()
+    if not row:
+        return Decimal("0.00")
+    return Decimal(row.total_earned or 0).quantize(Decimal("0.01"))
+
+
 def verified_contractors(*, equipment_type: str | None = None):
     qs = ContractorProfile.objects.filter(
         status=ContractorStatus.VERIFIED
@@ -52,16 +111,10 @@ def verified_contractors(*, equipment_type: str | None = None):
 
 
 def suggested_equipment_for_campaign(campaign: ServiceCampaign) -> list[str]:
-    """Типы техники, которые нужны для кампании."""
-    if campaign.category == ServiceCategory.SNOW:
-        types = [EquipmentType.TRACTOR]
-        if campaign.needs_snow_haul:
-            types.append(EquipmentType.TRUCK)
-        return types
-    if campaign.category == ServiceCategory.ROAD:
-        return [EquipmentType.TRACTOR, EquipmentType.TRUCK]
-    # Площадка / освещение — исполнители из жителей группы, не техника.
-    return []
+    """Типы техники / коды ролей, которые нужны для кампании."""
+    from services.executor_roles import suggested_role_codes_for_campaign
+
+    return suggested_role_codes_for_campaign(campaign)
 
 
 def _fmt_dt(dt) -> str:
