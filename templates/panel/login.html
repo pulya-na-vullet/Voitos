@@ -6,21 +6,21 @@
     <div class="login-brand">
       <img src="/static/panel/voitos_logo_04_mono.png" alt="Voitos" class="login-logo">
       <div>
-        <h1>Voitos</h1>
-        <p class="brand-sub" style="margin:0;">Вход в панель</p>
+        <h1>Voi<span>tos</span></h1>
+        <p class="brand-sub">Панель управления</p>
       </div>
     </div>
-    <p class="muted">Для администратора и менеджера группы</p>
+    <p class="muted">Вход для администратора и менеджера группы</p>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post">
       {% csrf_token %}
       <div class="form-row">
         <label>Логин</label>
-        <input type="text" name="username" autofocus required autocomplete="username">
+        <input type="text" name="username" autofocus required autocomplete="username" placeholder="Ваш логин">
       </div>
       <div class="form-row">
         <label>Пароль</label>
-        <input type="password" name="password" required autocomplete="current-password">
+        <input type="password" name="password" required autocomplete="current-password" placeholder="••••••••">
       </div>
       <button class="btn" type="submit">Войти</button>
     </form>

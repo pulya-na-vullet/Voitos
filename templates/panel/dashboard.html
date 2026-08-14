@@ -3,7 +3,7 @@
 {% block content %}
 <div class="topbar">
   <h1>Обзор</h1>
-  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+  <div class="topbar-actions">
     <span class="badge {% if ai_ok %}ok{% else %}bad{% endif %}">ИИ {% if ai_ok %}настроен{% else %}не настроен{% endif %}</span>
     <span class="badge {% if bot_ok %}ok{% else %}bad{% endif %}">MAX {% if bot_ok %}токен есть{% else %}нет токена{% endif %}</span>
     <form method="post" action="{% url 'panel:check_max' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Проверить MAX</button></form>
@@ -12,7 +12,7 @@
 </div>
 
 {% if model_warning %}
-<div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ model_warning }}</div>
+<div class="flash warn">{{ model_warning }}</div>
 {% endif %}
 
 <div class="card" style="margin-bottom:16px;">
@@ -36,11 +36,11 @@
 </div>
 
 <div class="grid stats">
-  <div class="card"><div class="stat-label">Сообщения</div><div class="stat-value">{{ stats.messages }}</div></div>
-  <div class="card"><div class="stat-label">Память</div><div class="stat-value">{{ stats.memories }}</div></div>
-  <div class="card"><div class="stat-label">Задачи</div><div class="stat-value">{{ stats.tasks }}</div></div>
-  <div class="card"><div class="stat-label">Напоминания</div><div class="stat-value">{{ stats.reminders }}</div></div>
-  <div class="card"><div class="stat-label">Пользователи</div><div class="stat-value">{{ stats.users }}</div></div>
+  <div class="card stat-card"><div class="stat-label">Сообщения</div><div class="stat-value">{{ stats.messages }}</div></div>
+  <div class="card stat-card"><div class="stat-label">Память</div><div class="stat-value">{{ stats.memories }}</div></div>
+  <div class="card stat-card"><div class="stat-label">Задачи</div><div class="stat-value">{{ stats.tasks }}</div></div>
+  <div class="card stat-card"><div class="stat-label">Напоминания</div><div class="stat-value">{{ stats.reminders }}</div></div>
+  <div class="card stat-card"><div class="stat-label">Пользователи</div><div class="stat-value">{{ stats.users }}</div></div>
 </div>
 
 <div class="grid two" style="margin-top:16px;">
@@ -95,18 +95,20 @@ new Chart(ctx, {
     datasets: [{
       label: 'События',
       data: values,
-      borderColor: '#3d9cfd',
-      backgroundColor: 'rgba(61,156,253,0.18)',
+      borderColor: '#2ec4b6',
+      backgroundColor: 'rgba(46,196,182,0.16)',
       fill: true,
       tension: 0.35,
       pointRadius: 3,
+      pointBackgroundColor: '#5eead4',
+      borderWidth: 2.5,
     }]
   },
   options: {
     plugins: { legend: { display: false } },
     scales: {
-      x: { ticks: { color: '#8b9bb0' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-      y: { beginAtZero: true, ticks: { color: '#8b9bb0', precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } }
+      x: { ticks: { color: '#8496ab' }, grid: { color: 'rgba(186,214,240,0.06)' } },
+      y: { beginAtZero: true, ticks: { color: '#8496ab', precision: 0 }, grid: { color: 'rgba(186,214,240,0.06)' } }
     }
   }
 });
