@@ -3,7 +3,7 @@
 {% block content %}
 <div class="topbar">
   <h1>{{ bot_user.display_name|default:bot_user.max_user_id }}</h1>
-  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+  <div class="topbar-actions">
     <span class="badge {% if access_state == 'active' %}ok{% elif access_state == 'blocked' %}bad{% endif %}">{{ access_state }}</span>
     <a class="btn secondary small" href="{% url 'panel:users' %}">← Все пользователи</a>
     <form method="post" onsubmit="return confirm('Удалить пользователя безвозвратно вместе с чеками и историей?');">
@@ -239,14 +239,14 @@ const labels = {{ chart_labels_json|safe }};
 const values = {{ chart_values_json|safe }};
 new Chart(document.getElementById('activityChart'), {
   type: 'line',
-  data: { labels, datasets: [{ label: 'События', data: values, borderColor: '#3d9cfd', backgroundColor: 'rgba(61,156,253,0.18)', fill: true, tension: 0.35 }] },
+  data: { labels, datasets: [{ label: 'События', data: values, borderColor: '#2ec4b6', backgroundColor: 'rgba(46,196,182,0.16)', fill: true, tension: 0.35, pointBackgroundColor: '#5eead4', borderWidth: 2.5 }] },
   options: {
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
     scales: {
-      x: { ticks: { color: '#8b9bb0' } },
-      y: { beginAtZero: true, ticks: { color: '#8b9bb0', precision: 0 } }
+      x: { ticks: { color: '#8496ab' }, grid: { color: 'rgba(186,214,240,0.06)' } },
+      y: { beginAtZero: true, ticks: { color: '#8496ab', precision: 0 }, grid: { color: 'rgba(186,214,240,0.06)' } }
     }
   }
 });
