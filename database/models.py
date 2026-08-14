@@ -60,6 +60,7 @@ class ActivityKind(models.TextChoices):
     CONTRACTOR_OFFER = "contractor_offer", "Предложение исполнителю"
     CONTRACTOR_REPLY = "contractor_reply", "Ответ исполнителя"
     CONTRACTOR_PAYOUT = "contractor_payout", "Оплата исполнителю"
+    WORK_REQUEST = "work_request", "Заявка на исполнителя"
     ERROR = "error", "Ошибка"
     SETTINGS = "settings", "Настройки"
     OTHER = "other", "Прочее"
@@ -162,6 +163,14 @@ class AdminTaskKind(models.TextChoices):
     ADDRESS_OVERLAP = "address_overlap", "Совпадение адреса"
     CONTRACTOR_REVIEW = "contractor_review", "Проверка исполнителя"
     CONTRACTOR_COUNTER = "contractor_counter", "Другое время исполнителя"
+    WORK_REQUEST = "work_request", "Заявка на исполнителя"
+
+
+class WorkRequestStatus(models.TextChoices):
+    PENDING = "pending", "Новая"
+    IN_PROGRESS = "in_progress", "В работе"
+    DONE = "done", "Выполнена"
+    CANCELLED = "cancelled", "Отменена"
 
 
 class EquipmentType(models.TextChoices):
@@ -882,20 +891,31 @@ class CampaignResidentHelper(models.Model):
 
 
 class ContractorProfile(models.Model):
-    """Владелец техники: тракторист / водитель камаза."""
+    """Исполнитель: техника или специалист по роли из каталога ExecutorRole."""
 
     user = models.OneToOneField(
         BotUser,
         on_delete=models.CASCADE,
         related_name="contractor_profile",
     )
+    role = models.ForeignKey(
+        "ExecutorRole",
+        on_delete=models.PROTECT,
+        related_name="contractors",
+        null=True,
+        blank=True,
+        verbose_name="Роль",
+    )
     equipment_type = models.CharField(
-        "Тип техники",
-        max_length=32,
-        choices=EquipmentType.choices,
+        "Код роли / тип техники",
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Совпадает с ExecutorRole.code (tractor/truck/…).",
     )
     equipment_label = models.CharField(
-        "Модель / описание",
+        "Модель / описание / специализация",
         max_length=255,
         blank=True,
         default="",
@@ -917,6 +937,11 @@ class ContractorProfile(models.Model):
         help_text="Например: Сбер, Тинькофф, Альфа.",
     )
     locality = models.CharField("Населённый пункт", max_length=255, blank=True, default="")
+    qualification_doc = models.FileField(
+        "Документ о квалификации",
+        upload_to="contractor_docs/%Y/%m/",
+        blank=True,
+    )
     status = models.CharField(
         max_length=32,
         choices=ContractorStatus.choices,
@@ -934,11 +959,134 @@ class ContractorProfile(models.Model):
         ordering = ["equipment_type", "user_id"]
 
     def __str__(self) -> str:
-        return f"{self.get_equipment_type_display()}: {self.user}"
+        return f"{self.role_label}: {self.user}"
 
     @property
     def display_name(self) -> str:
         return str(self.user)
+
+    @property
+    def role_label(self) -> str:
+        if self.role_id:
+            return self.role.name
+        if self.equipment_type in EquipmentType.values:
+            return dict(EquipmentType.choices).get(self.equipment_type, self.equipment_type)
+        return self.equipment_type or "Исполнитель"
+
+    def get_equipment_type_display(self) -> str:
+        """Совместимость со старыми шаблонами."""
+        return self.role_label
+
+
+class ExecutorRole(models.Model):
+    """Каталог ролей исполнителей (редактируется администратором)."""
+
+    code = models.SlugField("Код", max_length=64, unique=True)
+    name = models.CharField("Название", max_length=128)
+    requires_qualification_docs = models.BooleanField(
+        "Нужны подтверждающие документы о квалификации",
+        default=False,
+    )
+    is_equipment = models.BooleanField(
+        "Техника (госномер / модель)",
+        default=False,
+        help_text="Трактор, камаз и т.п. — при регистрации спрашиваем технику.",
+    )
+    for_snow = models.BooleanField("Для уборки снега", default=False)
+    for_road = models.BooleanField("Для дорожных работ", default=False)
+    for_snow_haul = models.BooleanField(
+        "Нужен при вывозе снега",
+        default=False,
+        help_text="Например камаз — только если в сборе включён вывоз.",
+    )
+    is_active = models.BooleanField("Активна", default=True)
+    sort_order = models.PositiveIntegerField("Порядок", default=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Роль исполнителя"
+        verbose_name_plural = "Роли исполнителей"
+        ordering = ["sort_order", "name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class WorkRequest(models.Model):
+    """Заявка жителя: вызвать исполнителя (электрик, грузчик, …)."""
+
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="work_requests",
+    )
+    role = models.ForeignKey(
+        ExecutorRole,
+        on_delete=models.PROTECT,
+        related_name="work_requests",
+        verbose_name="Нужная роль",
+    )
+    description = models.TextField("Описание работ")
+    status = models.CharField(
+        max_length=16,
+        choices=WorkRequestStatus.choices,
+        default=WorkRequestStatus.PENDING,
+        db_index=True,
+    )
+    admin_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Заявка на исполнителя"
+        verbose_name_plural = "Заявки на исполнителей"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"#{self.pk} {self.role} — {self.user}"
+
+
+class WorkRequestPhoto(models.Model):
+    request = models.ForeignKey(
+        WorkRequest,
+        on_delete=models.CASCADE,
+        related_name="photos",
+    )
+    image = models.FileField(upload_to="work_requests/%Y/%m/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Фото заявки"
+        verbose_name_plural = "Фото заявок"
+        ordering = ["id"]
+
+
+class PanelActionLog(models.Model):
+    """Действия менеджеров панели — видно только администратору."""
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="panel_action_logs",
+        verbose_name="Менеджер",
+    )
+    action = models.CharField("Действие", max_length=64, db_index=True)
+    title = models.CharField(max_length=255)
+    detail = models.TextField(blank=True, default="")
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Лог действия менеджера"
+        verbose_name_plural = "Логи действий менеджеров"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["actor", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.actor_id}: {self.title}"
 
 
 class CampaignAssignment(models.Model):
@@ -955,8 +1103,9 @@ class CampaignAssignment(models.Model):
         related_name="assignments",
     )
     equipment_type = models.CharField(
-        max_length=32,
-        choices=EquipmentType.choices,
+        max_length=64,
+        blank=True,
+        default="",
     )
     status = models.CharField(
         max_length=32,
@@ -1000,6 +1149,12 @@ class CampaignAssignment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.contractor} → {self.campaign_id} ({self.status})"
+
+    def get_equipment_type_display(self) -> str:
+        if self.equipment_type in EquipmentType.values:
+            return dict(EquipmentType.choices)[self.equipment_type]
+        role = ExecutorRole.objects.filter(code=self.equipment_type).first()
+        return role.name if role else (self.equipment_type or "—")
 
 
 class ContractorPayout(models.Model):

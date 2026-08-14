@@ -80,6 +80,13 @@ class MessagePipeline:
             self._store_out(user, reply, "contractor_registration")
             return reply
 
+        from bot.work_request import WORK_REQUEST_KIND, handle_work_request_step
+
+        if pending.pending_kind == WORK_REQUEST_KIND:
+            reply = handle_work_request_step(user, text, pending)
+            self._store_out(user, reply, "work_request")
+            return reply
+
         if pending.pending_kind == "contractor_offer_reply":
             from services.contractors import handle_offer_reply
 
@@ -203,15 +210,18 @@ class MessagePipeline:
 
         if intent.intent == "contractor_registration":
             from bot.contractor_registration import start_contractor_registration
-            from database.models import EquipmentType
+            from services.executor_roles import match_role_from_text
 
-            low = text.lower()
-            eq = None
-            if "камаз" in low or "груз" in low:
-                eq = EquipmentType.TRUCK
-            elif "трактор" in low or "погруз" in low:
-                eq = EquipmentType.TRACTOR
-            return start_contractor_registration(user, pending, equipment_type=eq)
+            role = match_role_from_text(text)
+            eq = role.code if role else None
+            return start_contractor_registration(
+                user, pending, equipment_type=eq, role=role
+            )
+
+        if intent.intent == "work_request":
+            from bot.work_request import start_work_request
+
+            return start_work_request(user, pending, text=text)
 
         if intent.intent == "force_remember":
             source = pending.last_user_text.strip()

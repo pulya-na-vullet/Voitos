@@ -1,6 +1,7 @@
-"""Регистрация исполнителей (трактор-погрузчик / камаз) в MAX-боте."""
+"""Регистрация исполнителей (роли из каталога ExecutorRole) в MAX-боте."""
 from __future__ import annotations
 
+from django.core.files.base import ContentFile
 from django.utils import timezone
 
 from database.models import (
@@ -10,10 +11,16 @@ from database.models import (
     BotUser,
     ContractorProfile,
     ContractorStatus,
-    EquipmentType,
+    ExecutorRole,
     PendingAction,
 )
 from panel.admin_tasks import upsert_task
+from services.executor_roles import (
+    active_roles,
+    format_roles_list,
+    match_role_from_text,
+    role_by_code,
+)
 from subscriptions.receipts import normalize_phone
 
 CONTRACTOR_REG_KIND = "contractor_registration"
@@ -21,59 +28,45 @@ CONTRACTOR_REG_KIND = "contractor_registration"
 _YES = {"да", "yes", "y", "+", "ага", "угу"}
 _SKIP = {"нет", "no", "n", "-", "нету", "тот же", "тотже", "как для связи", "как связь"}
 
-_TYPE_PROMPTS = (
-    "Выберите тип техники:\n"
-    "1 — трактор-погрузчик (чистка снега)\n"
-    "2 — камаз / грузовой (вывоз снега)\n"
-    "Напишите номер или название."
-)
-
 
 def start_contractor_registration(
     user: BotUser,
     pending: PendingAction,
     *,
     equipment_type: str | None = None,
+    role: ExecutorRole | None = None,
 ) -> str:
     pending.pending_kind = CONTRACTOR_REG_KIND
-    if equipment_type in EquipmentType.values:
-        pending.pending_payload = {"step": "label", "equipment_type": equipment_type}
-        pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
-        label = dict(EquipmentType.choices)[equipment_type]
-        return (
-            f"Регистрация исполнителя: {label}.\n"
-            "Укажите модель / описание техники "
-            "(например: МТЗ-82 погрузчик или Камаз 55111)."
-        )
-    pending.pending_payload = {"step": "type"}
+    if role is None and equipment_type:
+        role = role_by_code(equipment_type)
+    if role is not None:
+        return _after_role_chosen(user, pending, role)
+    pending.pending_payload = {"step": "role"}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     return (
-        "Регистрация владельца техники для заказов "
-        "(чистка снега / вывоз / дорожные работы).\n\n"
-        + _TYPE_PROMPTS
+        "Регистрация исполнителя.\n"
+        "Выберите роль:\n"
+        + format_roles_list()
+        + "\n\n📄 — для роли нужны подтверждающие документы.\n"
+        "Напишите номер или название."
     )
 
 
-def _parse_type(text: str) -> str | None:
-    low = (text or "").strip().lower()
-    if low in {"1", "трактор", "трактор-погрузчик", "погрузчик", "тракторист"}:
-        return EquipmentType.TRACTOR
-    if low in {"2", "камаз", "грузовой", "грузовик", "водитель", "самосвал"}:
-        return EquipmentType.TRUCK
-    if "трактор" in low or "погруз" in low:
-        return EquipmentType.TRACTOR
-    if "камаз" in low or "груз" in low:
-        return EquipmentType.TRUCK
-    return None
-
-
-def _ask_locality(user: BotUser, payload: dict, pending: PendingAction) -> str:
-    payload["step"] = "locality"
+def _after_role_chosen(user: BotUser, pending: PendingAction, role: ExecutorRole) -> str:
+    payload = {"step": "label", "role_id": role.id, "equipment_type": role.code}
+    pending.pending_kind = CONTRACTOR_REG_KIND
     pending.pending_payload = payload
-    pending.save(update_fields=["pending_payload", "updated_at"])
-    hint = (user.locality or "").strip()
-    extra = f"\nСейчас в анкете: {hint}" if hint else ""
-    return "Укажите населённый пункт, где работаете." + extra
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    if role.is_equipment:
+        return (
+            f"Регистрация: {role.name}.\n"
+            "Укажите модель / описание техники "
+            "(например: МТЗ-82 погрузчик или Камаз 55111)."
+        )
+    return (
+        f"Регистрация: {role.name}.\n"
+        "Кратко опишите опыт / специализацию (или «нет»)."
+    )
 
 
 def handle_contractor_registration_step(
@@ -82,40 +75,42 @@ def handle_contractor_registration_step(
     pending: PendingAction,
 ) -> str:
     payload = dict(pending.pending_payload or {})
-    step = payload.get("step") or "type"
+    step = payload.get("step") or "role"
     raw = (text or "").strip()
+    role = None
+    if payload.get("role_id"):
+        role = ExecutorRole.objects.filter(pk=payload["role_id"]).first()
 
-    if step == "type":
-        eq = _parse_type(raw)
-        if not eq:
-            return "Не понял тип.\n\n" + _TYPE_PROMPTS
-        payload["equipment_type"] = eq
-        payload["step"] = "label"
-        pending.pending_payload = payload
-        pending.save(update_fields=["pending_payload", "updated_at"])
-        return "Укажите модель / описание техники."
+    if step == "role":
+        role = match_role_from_text(raw)
+        if not role:
+            return "Не понял роль.\n\n" + format_roles_list()
+        return _after_role_chosen(user, pending, role)
+
+    if not role:
+        pending.clear_pending()
+        return "Ошибка роли — начните снова: «стать исполнителем»."
 
     if step == "label":
-        if len(raw) < 2:
+        if role.is_equipment and len(raw) < 2:
             return "Напишите модель или краткое описание техники."
-        payload["equipment_label"] = raw[:255]
-        payload["step"] = "plate"
-        pending.pending_payload = payload
-        pending.save(update_fields=["pending_payload", "updated_at"])
-        return "Укажите госномер (или «нет», если пока без номера)."
+        if raw.lower() in _SKIP | {"нет", "no", "n", "-", "нету"}:
+            payload["equipment_label"] = ""
+        else:
+            payload["equipment_label"] = raw[:255]
+        if role.is_equipment:
+            payload["step"] = "plate"
+            pending.pending_payload = payload
+            pending.save(update_fields=["pending_payload", "updated_at"])
+            return "Укажите госномер (или «нет», если пока без номера)."
+        return _ask_phone_or_locality(user, payload, pending)
 
     if step == "plate":
         if raw.lower() in _YES | {"нет", "no", "n", "-", "нету", "без номера"}:
             payload["plate_number"] = ""
         else:
             payload["plate_number"] = raw[:32]
-        if (user.phone or "").strip():
-            payload["phone"] = user.phone.strip()
-            return _ask_locality(user, payload, pending)
-        payload["step"] = "phone"
-        pending.pending_payload = payload
-        pending.save(update_fields=["pending_payload", "updated_at"])
-        return "Отправьте телефон для связи (например 89625507832)."
+        return _ask_phone_or_locality(user, payload, pending)
 
     if step == "phone":
         phone = normalize_phone(raw)
@@ -164,23 +159,86 @@ def handle_contractor_registration_step(
                     "если совпадает с телефоном для связи."
                 )
             payload["payout_phone"] = phone
-        return _finish(user, pending, payload)
+        if role.requires_qualification_docs:
+            payload["step"] = "qual_doc"
+            pending.pending_payload = payload
+            pending.save(update_fields=["pending_payload", "updated_at"])
+            return (
+                "Для этой роли нужны подтверждающие документы о квалификации.\n"
+                "Пришлите фото документа (диплом, удостоверение, сертификат)."
+            )
+        return _finish(user, pending, payload, role)
+
+    if step == "qual_doc":
+        return (
+            "Жду фото документа о квалификации. "
+            "Пришлите изображение в чат."
+        )
 
     return start_contractor_registration(user, pending)
 
 
-def _finish(user: BotUser, pending: PendingAction, payload: dict) -> str:
-    eq = payload.get("equipment_type")
-    if eq not in EquipmentType.values:
+def handle_contractor_qual_doc_photo(
+    user: BotUser,
+    pending: PendingAction,
+    *,
+    image_bytes: bytes,
+    filename: str = "doc.jpg",
+) -> str:
+    payload = dict(pending.pending_payload or {})
+    if payload.get("step") != "qual_doc":
+        return handle_contractor_registration_step(user, "", pending)
+    role = ExecutorRole.objects.filter(pk=payload.get("role_id")).first()
+    if not role:
         pending.clear_pending()
-        return "Ошибка типа техники — начните снова: «регистрация техники»."
+        return "Ошибка — начните регистрацию снова."
+    payload["_qual_bytes"] = True  # marker; actual bytes saved in finish via temp
+    # Store file immediately on a draft profile field after finish — keep in pending as b64? 
+    # Better: save to profile now via _finish with ContentFile
+    import base64
 
+    payload["qual_b64"] = base64.b64encode(image_bytes).decode("ascii")
+    payload["qual_filename"] = (filename or "doc.jpg")[:120]
+    pending.pending_payload = {k: v for k, v in payload.items() if k != "_qual_bytes"}
+    # remove huge from being double - actually we need b64 in payload which can be large
+    # Alternative: write temp file. For MVP use ContentFile in _finish from b64.
+    pending.pending_payload = payload
+    pending.save(update_fields=["pending_payload", "updated_at"])
+    return _finish(user, pending, payload, role)
+
+
+def _ask_phone_or_locality(user: BotUser, payload: dict, pending: PendingAction) -> str:
+    if (user.phone or "").strip():
+        payload["phone"] = user.phone.strip()
+        return _ask_locality(user, payload, pending)
+    payload["step"] = "phone"
+    pending.pending_payload = payload
+    pending.save(update_fields=["pending_payload", "updated_at"])
+    return "Отправьте телефон для связи (например 89625507832)."
+
+
+def _ask_locality(user: BotUser, payload: dict, pending: PendingAction) -> str:
+    payload["step"] = "locality"
+    pending.pending_payload = payload
+    pending.save(update_fields=["pending_payload", "updated_at"])
+    hint = (user.locality or "").strip()
+    extra = f"\nСейчас в анкете: {hint}" if hint else ""
+    return "Укажите населённый пункт, где работаете." + extra
+
+
+def _finish(
+    user: BotUser,
+    pending: PendingAction,
+    payload: dict,
+    role: ExecutorRole,
+) -> str:
     contact = (payload.get("phone") or user.phone or "")[:32]
     payout = (payload.get("payout_phone") or contact)[:32]
     profile, _created = ContractorProfile.objects.update_or_create(
         user=user,
         defaults={
-            "equipment_type": eq,
+            "role": role,
+            "equipment_type": role.code,
             "equipment_label": (payload.get("equipment_label") or "")[:255],
             "plate_number": (payload.get("plate_number") or "")[:32],
             "phone": contact,
@@ -192,6 +250,14 @@ def _finish(user: BotUser, pending: PendingAction, payload: dict) -> str:
             "verified_at": None,
         },
     )
+    qual_b64 = payload.get("qual_b64")
+    if qual_b64:
+        import base64
+
+        raw = base64.b64decode(qual_b64)
+        fname = payload.get("qual_filename") or "doc.jpg"
+        profile.qualification_doc.save(fname, ContentFile(raw), save=True)
+
     if not (user.locality or "").strip() and profile.locality:
         user.locality = profile.locality
         user.save(update_fields=["locality", "last_seen_at"])
@@ -201,20 +267,21 @@ def _finish(user: BotUser, pending: PendingAction, payload: dict) -> str:
         user=user,
         kind=ActivityKind.CONTRACTOR_REGISTER,
         title="Анкета исполнителя отправлена",
-        detail=f"{profile.get_equipment_type_display()}: {profile.equipment_label}",
-        meta={"contractor_id": profile.id, "equipment_type": eq},
+        detail=f"{role.name}: {profile.equipment_label}",
+        meta={"contractor_id": profile.id, "role": role.code},
     )
     try:
         upsert_task(
             kind=AdminTaskKind.CONTRACTOR_REVIEW,
             title=f"Проверить исполнителя: {user}",
             description=(
-                f"{profile.get_equipment_type_display()}\n"
+                f"{role.name}\n"
                 f"{profile.equipment_label}\n"
                 f"Госномер: {profile.plate_number or '—'}\n"
                 f"Связь: {profile.phone or '—'}\n"
                 f"Перевод: {profile.payout_phone or '—'} / {profile.bank_name or '—'}\n"
-                f"НП: {profile.locality or '—'}"
+                f"НП: {profile.locality or '—'}\n"
+                f"Документ: {'есть' if profile.qualification_doc else 'нет'}"
             ),
             user=user,
             action_url="/panel/contractors/",
@@ -224,11 +291,15 @@ def _finish(user: BotUser, pending: PendingAction, payload: dict) -> str:
         )
     except Exception:
         pass
+    doc_line = ""
+    if role.requires_qualification_docs:
+        doc_line = f"\nДокумент: {'получен' if profile.qualification_doc else 'не приложен'}"
     return (
         "Анкета исполнителя отправлена администратору.\n"
-        f"Тип: {profile.get_equipment_type_display()}\n"
-        f"Техника: {profile.equipment_label or '—'}\n"
+        f"Роль: {role.name}\n"
+        f"Описание: {profile.equipment_label or '—'}\n"
         f"Банк: {profile.bank_name or '—'}\n"
-        f"Тел. для перевода: {profile.payout_phone or profile.phone or '—'}\n"
+        f"Тел. для перевода: {profile.payout_phone or profile.phone or '—'}"
+        f"{doc_line}\n"
         "После проверки вы сможете получать заказы."
     )

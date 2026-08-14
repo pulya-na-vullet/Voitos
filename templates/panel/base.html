@@ -30,11 +30,16 @@
       <a href="{% url 'panel:services_groups' %}" class="nav-sub {% if request.resolver_match.url_name == 'services_groups' or request.resolver_match.url_name == 'service_group_edit' %}active{% endif %}">Группы жителей</a>
       <a href="{% url 'panel:services_archive' %}" class="nav-sub {% if request.resolver_match.url_name == 'services_archive' or request.resolver_match.url_name == 'services_category' %}active{% endif %}">Архив мероприятий</a>
       <a href="{% url 'panel:services_wishes' %}" class="nav-sub {% if request.resolver_match.url_name == 'services_wishes' %}active{% endif %}">Пожелания жителей</a>
-      <a href="{% url 'panel:contractors' %}" class="{% if request.resolver_match.url_name == 'contractors' %}active{% endif %}">Исполнители</a>
+      {% if panel_is_admin %}
+      <a href="{% url 'panel:contractors' %}" class="{% if request.resolver_match.url_name == 'contractors' or request.resolver_match.url_name == 'executor_roles' or request.resolver_match.url_name == 'work_requests' or request.resolver_match.url_name == 'work_request_detail' %}active{% endif %}">Исполнители</a>
+      <a href="{% url 'panel:executor_roles' %}" class="nav-sub {% if request.resolver_match.url_name == 'executor_roles' %}active{% endif %}">Роли исполнителей</a>
+      <a href="{% url 'panel:work_requests' %}" class="nav-sub {% if request.resolver_match.url_name == 'work_requests' or request.resolver_match.url_name == 'work_request_detail' %}active{% endif %}">Заявки жителей</a>
+      {% endif %}
       <a href="{% url 'panel:services_ranking' %}" class="{% if request.resolver_match.url_name == 'services_ranking' %}active{% endif %}">Рейтинг граждан</a>
       <a href="{% url 'panel:clients_map' %}" class="{% if request.resolver_match.url_name == 'clients_map' %}active{% endif %}">Карта клиентов</a>
       {% if panel_is_admin %}
       <a href="{% url 'panel:earnings_forecast' %}" class="{% if request.resolver_match.url_name == 'earnings_forecast' %}active{% endif %}">Прогноз заработка</a>
+      <a href="{% url 'panel:manager_logs' %}" class="{% if request.resolver_match.url_name == 'manager_logs' or request.resolver_match.url_name == 'manager_log_detail' %}active{% endif %}">Лог менеджеров</a>
       <a href="{% url 'panel:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">Настройки</a>
       {% endif %}
       {% if bot_user %}

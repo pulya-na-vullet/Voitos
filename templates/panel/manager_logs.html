@@ -1,0 +1,26 @@
+{% extends "panel/base.html" %}
+{% block title %}Лог менеджеров — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Лог действий менеджеров</h1>
+</div>
+<p class="muted" style="margin-top:-6px;">Видно только администратору. Выберите менеджера, чтобы открыть его историю.</p>
+<div class="card">
+  <table>
+    <thead><tr><th>Менеджер</th><th>Житель</th><th>Действий</th><th>Последнее</th><th></th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td class="mono">{{ row.profile.user.username }}</td>
+        <td>{% if row.profile.bot_user %}{{ row.profile.bot_user }}{% else %}—{% endif %}</td>
+        <td class="mono">{{ row.count }}</td>
+        <td>{% if row.last %}{{ row.last.created_at|date:"d.m.Y H:i" }} — {{ row.last.title }}{% else %}<span class="muted">пусто</span>{% endif %}</td>
+        <td><a class="btn small" href="{% url 'panel:manager_log_detail' row.profile.user_id %}">Открыть</a></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="muted">Менеджеров пока нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

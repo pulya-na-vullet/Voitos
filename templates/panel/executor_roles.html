@@ -1,0 +1,74 @@
+{% extends "panel/base.html" %}
+{% block title %}Роли исполнителей — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Роли исполнителей</h1>
+  <a class="btn secondary small" href="{% url 'panel:contractors' %}">← Исполнители</a>
+</div>
+<p class="muted" style="margin-top:-6px;">Каталог ролей для регистрации и заявок «вызвать исполнителя». Чекбокс документов — при регистрации бот попросит фото квалификации.</p>
+
+<div class="grid two">
+  <div class="card">
+    <h3 style="margin-top:0;">Список</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Код</th><th>Название</th><th>Документы</th><th>Техника</th><th>Активна</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in roles %}
+        <tr>
+          <td class="mono">{{ r.code }}</td>
+          <td>
+            <form method="post" style="display:flex; flex-direction:column; gap:6px;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="save">
+              <input type="hidden" name="role_id" value="{{ r.id }}">
+              <input type="text" name="name" value="{{ r.name }}" required>
+              <label class="muted"><input type="checkbox" name="requires_qualification_docs" {% if r.requires_qualification_docs %}checked{% endif %}> нужны подтверждающие документы</label>
+              <label class="muted"><input type="checkbox" name="is_equipment" {% if r.is_equipment %}checked{% endif %}> техника (госномер)</label>
+              <label class="muted"><input type="checkbox" name="for_snow" {% if r.for_snow %}checked{% endif %}> снег</label>
+              <label class="muted"><input type="checkbox" name="for_road" {% if r.for_road %}checked{% endif %}> дорога</label>
+              <label class="muted"><input type="checkbox" name="for_snow_haul" {% if r.for_snow_haul %}checked{% endif %}> вывоз снега</label>
+              <label class="muted"><input type="checkbox" name="is_active" {% if r.is_active %}checked{% endif %}> активна</label>
+              <input type="number" name="sort_order" value="{{ r.sort_order }}" style="width:80px;" title="Порядок">
+              <button class="btn small" type="submit">Сохранить</button>
+            </form>
+          </td>
+          <td>{% if r.requires_qualification_docs %}да{% else %}нет{% endif %}</td>
+          <td>{% if r.is_equipment %}да{% else %}—{% endif %}</td>
+          <td>{% if r.is_active %}<span class="badge ok">да</span>{% else %}<span class="badge">нет</span>{% endif %}</td>
+          <td>
+            <form method="post" onsubmit="return confirm('Удалить / скрыть роль?');">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="role_id" value="{{ r.id }}">
+              <button class="btn danger small" type="submit">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">Ролей нет</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Новая роль</h3>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="create">
+      <div class="form-row"><label>Код (латиница)</label><input name="code" required placeholder="plumber"></div>
+      <div class="form-row"><label>Название</label><input name="name" required placeholder="Сантехник"></div>
+      <div class="form-row"><label>Порядок</label><input type="number" name="sort_order" value="200"></div>
+      <label class="muted"><input type="checkbox" name="requires_qualification_docs"> нужны подтверждающие документы о квалификации</label><br>
+      <label class="muted"><input type="checkbox" name="is_equipment"> техника (госномер / модель)</label><br>
+      <label class="muted"><input type="checkbox" name="for_snow"> для уборки снега</label><br>
+      <label class="muted"><input type="checkbox" name="for_road"> для дорожных работ</label><br>
+      <label class="muted"><input type="checkbox" name="for_snow_haul"> нужен при вывозе снега</label>
+      <div style="margin-top:12px;"><button class="btn" type="submit">Добавить</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}

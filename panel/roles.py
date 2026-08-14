@@ -52,11 +52,12 @@ MANAGER_ALLOWED_URL_NAMES = frozenset(
         "service_campaign_detail",
         "service_receipt_approve",
         "service_receipt_reject",
-        "contractors",
         "services_ranking",
         "clients_map",
     }
 )
+
+# Исполнители / заявки / роли / лог менеджеров — только администратор.
 
 
 def ensure_panel_profile(user: AbstractBaseUser) -> PanelProfile | None:

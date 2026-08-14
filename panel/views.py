@@ -44,6 +44,7 @@ from database.models import (
     YandexBillingEntry,
 )
 from logs.service import log_activity
+from panel.manager_log import log_manager_action
 from panel.roles import (
     assign_group_manager,
     can_access_bot_user,
@@ -206,6 +207,11 @@ def login_view(request: HttpRequest) -> HttpResponse:
         user = authenticate(request, username=username, password=password)
         if user is not None:
             login(request, user)
+            log_manager_action(
+                user,
+                action="login",
+                title="Вход в панель",
+            )
             return redirect(panel_home_url_name(user))
         error = "Неверный логин или пароль"
     return render(request, "panel/login.html", {"error": error})
@@ -432,6 +438,13 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
         task_profile_review(bot_user)
     except Exception:
         pass
+    log_manager_action(
+        request,
+        action="profile_" + (action or "edit"),
+        title=f"Анкета пользователя #{bot_user.id}",
+        detail=f"{action}: {bot_user}",
+        meta={"bot_user_id": bot_user.id},
+    )
     return redirect("panel:user_dashboard", user_id=user_id)
 
 
@@ -1343,6 +1356,12 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         if campaign_notices:
             parts.append(f"отправленных сборов: {campaign_notices}")
         messages.success(request, ". ".join(parts) + ".")
+        log_manager_action(
+            request,
+            action="group_edit",
+            title=f"Группа сохранена: {group.name}",
+            meta={"group_id": group.id},
+        )
         return redirect("panel:service_group_edit", pk=pk)
 
     member_ids = set(group.members.values_list("id", flat=True))
@@ -1712,9 +1731,13 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_http_methods(["GET", "POST"])
 def contractors_list(request: HttpRequest) -> HttpResponse:
-    from database.models import ContractorProfile, ContractorStatus, EquipmentType
+    from database.models import ContractorProfile, ContractorStatus, ExecutorRole
     from panel.admin_tasks import close_task_for_source
     from database.models import AdminTaskKind
+
+    if not is_panel_admin(request.user):
+        messages.error(request, "Раздел исполнителей доступен только администратору.")
+        return redirect(panel_home_url_name(request.user))
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -1779,7 +1802,7 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
 
     eq_filter = (request.GET.get("type") or "").strip()
     qs = (
-        ContractorProfile.objects.select_related("user")
+        ContractorProfile.objects.select_related("user", "role")
         .annotate(
             total_earned=Coalesce(
                 Sum("payouts__amount"),
@@ -1789,14 +1812,19 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
         )
         .order_by("status", "equipment_type", "-submitted_at")
     )
-    if eq_filter in EquipmentType.values:
+    if eq_filter:
         qs = qs.filter(equipment_type=eq_filter)
+    role_choices = list(
+        ExecutorRole.objects.filter(is_active=True)
+        .order_by("sort_order", "name")
+        .values_list("code", "name")
+    )
     return render(
         request,
         "panel/contractors.html",
         {
             "contractors": qs,
-            "equipment_choices": EquipmentType.choices,
+            "equipment_choices": role_choices,
             "type_filter": eq_filter,
             "status_verified": ContractorStatus.VERIFIED,
             "status_pending": ContractorStatus.PENDING_REVIEW,
@@ -2032,6 +2060,13 @@ def admin_task_done(request: HttpRequest, pk: int) -> HttpResponse:
             logger.exception("Family confirm failed for task #%s", pk)
             messages.error(request, "Не удалось объединить семью — проверьте карточку пользователя.")
     task.mark_done()
+    log_manager_action(
+        request,
+        action="task_done",
+        title=f"Задача выполнена: {task.title}",
+        detail=family_note.strip(),
+        meta={"task_id": task.id, "kind": task.kind},
+    )
     messages.success(request, f"Задача «{task.title}» выполнена.{family_note}")
     return redirect("panel:admin_tasks_today")
 

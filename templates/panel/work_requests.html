@@ -1,0 +1,37 @@
+{% extends "panel/base.html" %}
+{% block title %}Заявки на исполнителей — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Заявки на исполнителей</h1>
+  <a class="btn secondary small" href="{% url 'panel:contractors' %}">← Исполнители</a>
+</div>
+<form method="get" style="margin-bottom:12px;">
+  <select name="status" onchange="this.form.submit()">
+    <option value="">Все статусы</option>
+    {% for v,l in statuses %}
+      <option value="{{ v }}" {% if status == v %}selected{% endif %}>{{ l }}</option>
+    {% endfor %}
+  </select>
+</form>
+<div class="card">
+  <table>
+    <thead><tr><th>#</th><th>Когда</th><th>Кто</th><th>Роль</th><th>Описание</th><th>Фото</th><th>Статус</th><th></th></tr></thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.id }}</td>
+        <td class="mono">{{ item.created_at|date:"d.m H:i" }}</td>
+        <td><a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></td>
+        <td>{{ item.role.name }}</td>
+        <td>{{ item.description|truncatechars:80 }}</td>
+        <td class="mono">{{ item.photos.count }}</td>
+        <td><span class="badge">{{ item.get_status_display }}</span></td>
+        <td><a class="btn small" href="{% url 'panel:work_request_detail' item.id %}">Открыть</a></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8" class="muted">Заявок пока нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

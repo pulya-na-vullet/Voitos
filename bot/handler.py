@@ -143,9 +143,22 @@ class UpdateHandler:
                     logger.exception("Failed to notify denied user")
             return
 
-        # Receipt image/PDF first — allowed even when blocked
+        # Receipt image/PDF first — unless ждём фото заявки / документ исполнителя
         receipt_url, filename = _find_receipt_file(message)
         if receipt_url:
+            pending_early, _ = PendingAction.objects.get_or_create(user=user)
+            payload = dict(pending_early.pending_payload or {})
+            if pending_early.pending_kind == "work_request" and payload.get("step") == "photo":
+                self._handle_work_request_photo(user, pending_early, receipt_url, filename)
+                return
+            if (
+                pending_early.pending_kind == "contractor_registration"
+                and payload.get("step") == "qual_doc"
+            ):
+                self._handle_contractor_qual_photo(
+                    user, pending_early, receipt_url, filename
+                )
+                return
             self._handle_receipt(user, receipt_url, filename)
             return
 
@@ -196,6 +209,7 @@ class UpdateHandler:
             "wish_group_pick",
             "contractor_offer_reply",
             "contractor_registration",
+            "work_request",
         }:
             try:
                 reply = self.pipeline.handle(
@@ -268,6 +282,34 @@ class UpdateHandler:
         user.last_payment_notice_at = now
         user.save(update_fields=["last_payment_notice_at"])
         return True
+
+    def _handle_work_request_photo(self, user, pending, image_url: str, filename: str) -> None:
+        from bot.work_request import handle_work_request_photo
+
+        try:
+            raw = self.client.download(image_url)
+        except Exception:
+            logger.exception("Work request photo download failed")
+            self._reply(user, "Не удалось скачать фото. Пришлите ещё раз.")
+            return
+        reply = handle_work_request_photo(
+            user, pending, image_bytes=raw, filename=filename or "photo.jpg"
+        )
+        self._reply(user, reply)
+
+    def _handle_contractor_qual_photo(self, user, pending, image_url: str, filename: str) -> None:
+        from bot.contractor_registration import handle_contractor_qual_doc_photo
+
+        try:
+            raw = self.client.download(image_url)
+        except Exception:
+            logger.exception("Qualification doc download failed")
+            self._reply(user, "Не удалось скачать фото документа. Пришлите ещё раз.")
+            return
+        reply = handle_contractor_qual_doc_photo(
+            user, pending, image_bytes=raw, filename=filename or "doc.jpg"
+        )
+        self._reply(user, reply)
 
     def _handle_receipt(self, user, image_url: str, filename: str) -> None:
         pending, _ = PendingAction.objects.get_or_create(user=user)

@@ -172,7 +172,22 @@ CONTRACTOR_REG_RE = re.compile(
     r"регистрация\s+техники|я\s+тракторист|я\s+водитель|"
     r"я\s+владелец\s+техники|зарегистрировать\s+технику|"
     r"стать\s+исполнителем|исполнитель|трактор-погрузчик|"
-    r"я\s+на\s+камазе|регистрация\s+камаза|регистрация\s+трактора"
+    r"я\s+на\s+камазе|регистрация\s+камаза|регистрация\s+трактора|"
+    r"регистрация\s+исполнителя"
+    r")\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+WORK_REQUEST_RE = re.compile(
+    r"^\s*(/)?("
+    r"вызвать\s+исполнителя|вызови\s+исполнителя|нужен\s+исполнитель|"
+    r"заказать\s+мастера|вызвать\s+мастера|"
+    r"нужен\s+(разнорабочий|каменщик|плиточник|электрик|сварщик|грузчик|"
+    r"компьютерный\s+мастер|мастер\s+по\s+маникюру|репетитор\s+\w+)|"
+    r"нужна\s+(няня|домработница)|"
+    r"вызови\s+(разнорабочего|каменщика|плиточника|электрика|сварщика|грузчика|"
+    r"репетитора)|"
+    r"вызвать\s+(разнорабочего|каменщика|плиточника|электрика|сварщика|грузчика|"
+    r"репетитора)"
     r")\s*[.!]?\s*$",
     re.IGNORECASE,
 )
@@ -574,6 +589,8 @@ class IntentAnalyzer:
             return IntentResult(intent="registration", confidence=1.0)
         if CONTRACTOR_REG_RE.match(text):
             return IntentResult(intent="contractor_registration", confidence=1.0)
+        if WORK_REQUEST_RE.match(text):
+            return IntentResult(intent="work_request", confidence=1.0)
         if FORCE_REMEMBER_RE.match(text) or text.lower().startswith("запомни это"):
             return IntentResult(intent="force_remember", confidence=1.0)
         if FORCE_FORGET_RE.match(text):

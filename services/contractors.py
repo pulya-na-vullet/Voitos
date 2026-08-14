@@ -52,16 +52,10 @@ def verified_contractors(*, equipment_type: str | None = None):
 
 
 def suggested_equipment_for_campaign(campaign: ServiceCampaign) -> list[str]:
-    """Типы техники, которые нужны для кампании."""
-    if campaign.category == ServiceCategory.SNOW:
-        types = [EquipmentType.TRACTOR]
-        if campaign.needs_snow_haul:
-            types.append(EquipmentType.TRUCK)
-        return types
-    if campaign.category == ServiceCategory.ROAD:
-        return [EquipmentType.TRACTOR, EquipmentType.TRUCK]
-    # Площадка / освещение — исполнители из жителей группы, не техника.
-    return []
+    """Типы техники / коды ролей, которые нужны для кампании."""
+    from services.executor_roles import suggested_role_codes_for_campaign
+
+    return suggested_role_codes_for_campaign(campaign)
 
 
 def _fmt_dt(dt) -> str:

@@ -79,15 +79,22 @@ class PanelRolesTests(TestCase):
             "panel:services_groups",
             "panel:services_archive",
             "panel:services_wishes",
-            "panel:contractors",
             "panel:services_ranking",
             "panel:clients_map",
         ):
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 200, msg=name)
 
-        # Админ-only → редирект
-        for name in ("panel:receipts", "panel:settings", "panel:earnings_forecast"):
+        # Админ-only → редирект (в т.ч. исполнители)
+        for name in (
+            "panel:receipts",
+            "panel:settings",
+            "panel:earnings_forecast",
+            "panel:contractors",
+            "panel:executor_roles",
+            "panel:work_requests",
+            "panel:manager_logs",
+        ):
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 302, msg=name)
 

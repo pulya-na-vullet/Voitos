@@ -1,6 +1,6 @@
 from django.urls import path
 
-from panel import views
+from panel import executor_views, views
 
 app_name = "panel"
 
@@ -35,6 +35,19 @@ urlpatterns = [
     path("clients-map/", views.clients_map, name="clients_map"),
     path("earnings-forecast/", views.earnings_forecast, name="earnings_forecast"),
     path("contractors/", views.contractors_list, name="contractors"),
+    path("executor-roles/", executor_views.executor_roles, name="executor_roles"),
+    path("work-requests/", executor_views.work_requests_list, name="work_requests"),
+    path(
+        "work-requests/<int:pk>/",
+        executor_views.work_request_detail,
+        name="work_request_detail",
+    ),
+    path("manager-logs/", executor_views.manager_logs_list, name="manager_logs"),
+    path(
+        "manager-logs/<int:user_id>/",
+        executor_views.manager_log_detail,
+        name="manager_log_detail",
+    ),
     path("services/groups/<int:pk>/", views.service_group_edit, name="service_group_edit"),
     path(
         "services/campaigns/<int:pk>/",

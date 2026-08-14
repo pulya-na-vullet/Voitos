@@ -29,7 +29,10 @@ from services.service import create_campaign
 
 class ResidentHelperTests(TestCase):
     def setUp(self) -> None:
-        self.admin = User.objects.create_user("helpadm", password="pass")
+        self.admin = User.objects.create_superuser("helpadm", "h@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="helpadm", password="pass")
         self.a = BotUser.objects.create(max_user_id="rh-a", real_name="Анна", phone="89001110001")
@@ -97,7 +100,10 @@ class ResidentHelperTests(TestCase):
 
 class ContractorEarningsTests(TestCase):
     def setUp(self) -> None:
-        self.admin = User.objects.create_user("earnadm", password="pass")
+        self.admin = User.objects.create_superuser("earnadm", "e@t.com", "pass")
+        from database.models import PanelProfile, PanelRole
+
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="earnadm", password="pass")
         self.driver = BotUser.objects.create(max_user_id="earn-1", real_name="Иван")
