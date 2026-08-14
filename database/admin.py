@@ -10,8 +10,10 @@ from database.models import (
     ChatMessage,
     ContractorPayout,
     ContractorProfile,
+    ExecutorRole,
     MemoryItem,
     NeighborhoodWish,
+    PanelActionLog,
     PanelProfile,
     PaymentReceipt,
     PendingAction,
@@ -21,6 +23,7 @@ from database.models import (
     ServiceInvite,
     ServiceReceipt,
     TaskItem,
+    WorkRequest,
 )
 
 
