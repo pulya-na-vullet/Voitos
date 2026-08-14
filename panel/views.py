@@ -1765,6 +1765,17 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
                 profile.user,
                 "Анкета исполнителя проверена. Теперь вы можете получать заказы.",
             )
+            try:
+                from services.work_request_dispatch import dispatch_for_new_contractor
+
+                n = dispatch_for_new_contractor(profile, send_fn=_notify_user)
+                if n:
+                    messages.info(
+                        request,
+                        f"Исполнителю предложено открытых заявок: {n}.",
+                    )
+            except Exception:
+                pass
             messages.success(request, f"Исполнитель «{profile}» подтверждён.")
         elif action == "reject":
             profile.status = ContractorStatus.REJECTED

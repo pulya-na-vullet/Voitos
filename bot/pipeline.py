@@ -95,6 +95,14 @@ class MessagePipeline:
                 self._store_out(user, reply, "contractor_offer")
                 return reply
 
+        if pending.pending_kind == "work_request_offer_reply":
+            from services.work_request_dispatch import handle_work_offer_reply
+
+            reply = handle_work_offer_reply(user, text, pending)
+            if reply is not None:
+                self._store_out(user, reply, "work_request_offer")
+                return reply
+
         if pending.pending_kind == "volunteer_help_reply":
             from services.volunteer import handle_volunteer_help_reply
 

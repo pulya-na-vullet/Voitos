@@ -11,6 +11,10 @@ from ai.factory import get_runtime_settings
 from bot.client import MaxClient
 from services.contractors import expire_stale_counter_offers
 from services.service import process_unpaid_reminders
+from services.work_request_dispatch import (
+    dispatch_open_requests,
+    expire_stale_work_offers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +51,16 @@ def run_service_campaign_scheduler(stop_event=None, interval_seconds: int = 60) 
                 expired = expire_stale_counter_offers(send_fn=send_fn)
                 if expired:
                     logger.info("Expired %s contractor counter-offer(s)", expired)
+                wr_expired = expire_stale_work_offers(send_fn=send_fn)
+                if wr_expired:
+                    logger.info("Expired %s work-request offer(s)", wr_expired)
+                wr_dispatched = dispatch_open_requests(send_fn=send_fn)
+                if wr_dispatched:
+                    logger.info("Dispatched %s open work request(s)", wr_dispatched)
             else:
                 expire_stale_counter_offers()
+                expire_stale_work_offers()
+                dispatch_open_requests()
         except Exception:
             logger.exception("Service campaign scheduler loop error")
         time.sleep(interval_seconds)

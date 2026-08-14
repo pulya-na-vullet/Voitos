@@ -168,9 +168,18 @@ class AdminTaskKind(models.TextChoices):
 
 class WorkRequestStatus(models.TextChoices):
     PENDING = "pending", "Новая"
+    OFFERING = "offering", "Ищем исполнителя"
     IN_PROGRESS = "in_progress", "В работе"
     DONE = "done", "Выполнена"
     CANCELLED = "cancelled", "Отменена"
+
+
+class WorkRequestOfferStatus(models.TextChoices):
+    OFFERED = "offered", "Предложено"
+    ACCEPTED = "accepted", "Принято"
+    DECLINED = "declined", "Отказ"
+    EXPIRED = "expired", "Истекло"
+    CANCELLED = "cancelled", "Отменено"
 
 
 class EquipmentType(models.TextChoices):
@@ -1052,6 +1061,31 @@ class WorkRequest(models.Model):
         default=WorkRequestStatus.PENDING,
         db_index=True,
     )
+    # Снимок НП жителя на момент заявки (для подбора исполнителя).
+    client_locality = models.CharField(
+        "НП жителя",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    assigned_contractor = models.ForeignKey(
+        "ContractorProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="accepted_work_requests",
+        verbose_name="Назначенный исполнитель",
+    )
+    no_executor_notified_at = models.DateTimeField(
+        "Клиенту сообщили, что нет исполнителя",
+        null=True,
+        blank=True,
+    )
+    dispatch_note = models.TextField(
+        "Заметка подбора (ИИ / система)",
+        blank=True,
+        default="",
+    )
     admin_note = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1063,6 +1097,51 @@ class WorkRequest(models.Model):
 
     def __str__(self) -> str:
         return f"#{self.pk} {self.role} — {self.user}"
+
+
+class WorkRequestOffer(models.Model):
+    """Предложение заявки конкретному исполнителю (ответ за 20 минут)."""
+
+    work_request = models.ForeignKey(
+        WorkRequest,
+        on_delete=models.CASCADE,
+        related_name="offers",
+    )
+    contractor = models.ForeignKey(
+        ContractorProfile,
+        on_delete=models.CASCADE,
+        related_name="work_offers",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=WorkRequestOfferStatus.choices,
+        default=WorkRequestOfferStatus.OFFERED,
+        db_index=True,
+    )
+    offered_at = models.DateTimeField(auto_now_add=True)
+    respond_deadline = models.DateTimeField(
+        "Ответить до",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    responded_at = models.DateTimeField(null=True, blank=True)
+    rank_score = models.FloatField(default=0)
+    rank_reason = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        verbose_name = "Предложение по заявке"
+        verbose_name_plural = "Предложения по заявкам"
+        ordering = ["-offered_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["work_request", "contractor"],
+                name="uniq_work_request_contractor_offer",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"WR#{self.work_request_id} → {self.contractor_id} ({self.status})"
 
 
 class WorkRequestPhoto(models.Model):

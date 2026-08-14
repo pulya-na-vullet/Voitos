@@ -127,15 +127,51 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
 @admin_required
 def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(
-        WorkRequest.objects.select_related("user", "role").prefetch_related("photos"),
+        WorkRequest.objects.select_related(
+            "user", "role", "assigned_contractor", "assigned_contractor__user"
+        ).prefetch_related("photos", "offers__contractor__user"),
         pk=pk,
     )
     if request.method == "POST":
+        action = (request.POST.get("action") or "save").strip()
+        if action == "dispatch":
+            from services.work_request_dispatch import try_dispatch_request
+
+            # Разрешить повторный поиск: сбросить «нет исполнителя»
+            if req.no_executor_notified_at and req.status in {
+                WorkRequestStatus.PENDING,
+                WorkRequestStatus.OFFERING,
+            }:
+                req.no_executor_notified_at = None
+                req.save(update_fields=["no_executor_notified_at", "updated_at"])
+            offer = try_dispatch_request(req)
+            if offer:
+                messages.success(
+                    request,
+                    f"Предложение отправлено: {offer.contractor}.",
+                )
+            else:
+                messages.info(
+                    request,
+                    "Подходящего свободного исполнителя не найдено "
+                    "(или уже есть активное предложение).",
+                )
+            return redirect("panel:work_request_detail", pk=pk)
         status = (request.POST.get("status") or "").strip()
         if status in WorkRequestStatus.values:
             req.status = status
             req.admin_note = (request.POST.get("note") or "").strip()
-            req.save(update_fields=["status", "admin_note", "updated_at"])
+            req.client_locality = (
+                request.POST.get("client_locality") or req.client_locality
+            ).strip()[:255]
+            req.save(
+                update_fields=[
+                    "status",
+                    "admin_note",
+                    "client_locality",
+                    "updated_at",
+                ]
+            )
             if status in {WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED}:
                 close_task_for_source(AdminTaskKind.WORK_REQUEST, "WorkRequest", req.id)
             messages.success(request, "Заявка обновлена.")
@@ -143,7 +179,12 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(
         request,
         "panel/work_request_detail.html",
-        {"item": req, "statuses": WorkRequestStatus.choices},
+        {
+            "item": req,
+            "statuses": WorkRequestStatus.choices,
+            "offers": req.offers.select_related("contractor", "contractor__user").all(),
+            "active_offer": req.offers.filter(status="offered").first(),
+        },
     )
 
 

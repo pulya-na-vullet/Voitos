@@ -24,6 +24,7 @@ from database.models import (
     ServiceReceipt,
     TaskItem,
     WorkRequest,
+    WorkRequestOffer,
 )
 
 
@@ -148,10 +149,17 @@ class ExecutorRoleAdmin(admin.ModelAdmin):
 
 @admin.register(WorkRequest)
 class WorkRequestAdmin(admin.ModelAdmin):
-    list_display = ("id", "role", "user", "status", "created_at")
+    list_display = ("id", "role", "user", "status", "client_locality", "assigned_contractor", "created_at")
     list_filter = ("status", "role")
-    search_fields = ("description", "user__real_name")
-    raw_id_fields = ("user", "role")
+    search_fields = ("description", "user__real_name", "client_locality")
+    raw_id_fields = ("user", "role", "assigned_contractor")
+
+
+@admin.register(WorkRequestOffer)
+class WorkRequestOfferAdmin(admin.ModelAdmin):
+    list_display = ("id", "work_request", "contractor", "status", "offered_at", "respond_deadline")
+    list_filter = ("status",)
+    raw_id_fields = ("work_request", "contractor")
 
 
 @admin.register(PanelActionLog)

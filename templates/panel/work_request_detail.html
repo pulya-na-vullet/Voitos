@@ -8,7 +8,14 @@
 <div class="card" style="max-width:900px;">
   <p><strong>Житель:</strong> <a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></p>
   <p><strong>Роль:</strong> {{ item.role.name }}</p>
+  <p><strong>НП жителя:</strong> {{ item.client_locality|default:item.user.locality|default:"—" }}</p>
   <p><strong>Статус:</strong> {{ item.get_status_display }}</p>
+  {% if item.assigned_contractor %}
+    <p><strong>Исполнитель:</strong> {{ item.assigned_contractor }} ({{ item.assigned_contractor.locality|default:"—" }})</p>
+  {% endif %}
+  {% if item.dispatch_note %}
+    <p class="muted"><strong>Подбор:</strong> {{ item.dispatch_note }}</p>
+  {% endif %}
   <p><strong>Описание:</strong></p>
   <p>{{ item.description }}</p>
   <h3>Фото</h3>
@@ -19,8 +26,41 @@
       <span class="muted">Нет фото</span>
     {% endfor %}
   </div>
+
+  <h3 style="margin-top:20px;">Предложения исполнителям</h3>
+  <p class="muted" style="margin-top:-6px;">Ответ 20 минут → иначе следующему. Подбор по роли и населённому пункту (+ ИИ).</p>
+  {% if active_offer %}
+    <p><span class="badge ok">Активно</span> {{ active_offer.contractor }} — до {{ active_offer.respond_deadline }}</p>
+  {% endif %}
+  <table>
+    <thead><tr><th>Исполнитель</th><th>НП</th><th>Статус</th><th>Когда</th><th>Причина</th></tr></thead>
+    <tbody>
+    {% for o in offers %}
+      <tr>
+        <td>{{ o.contractor }}</td>
+        <td>{{ o.contractor.locality|default:"—" }}</td>
+        <td>{{ o.get_status_display }}</td>
+        <td class="muted">{{ o.offered_at }}</td>
+        <td class="muted">{{ o.rank_reason|default:"—" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="muted">Ещё не предлагалось</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" style="margin-top:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="dispatch">
+    <button class="btn secondary" type="submit">Подобрать / предложить исполнителя</button>
+  </form>
+
   <form method="post" style="margin-top:16px;">
     {% csrf_token %}
+    <input type="hidden" name="action" value="save">
+    <div class="form-row">
+      <label>НП жителя (для подбора)</label>
+      <input name="client_locality" value="{{ item.client_locality }}">
+    </div>
     <div class="form-row">
       <label>Статус</label>
       <select name="status">

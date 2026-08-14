@@ -126,6 +126,7 @@ def handle_work_request_photo(
             role=role,
             description=payload.get("description") or "—",
             status=WorkRequestStatus.PENDING,
+            client_locality=(user.locality or "").strip()[:255],
         )
         payload["draft_id"] = req.id
         request_id = req.id
@@ -179,6 +180,23 @@ def _finish_if_possible(user: BotUser, pending: PendingAction, payload: dict) ->
             source_id=req.id,
             priority=25,
         )
+    except Exception:
+        pass
+    # Автоподбор исполнителя по роли и НП
+    try:
+        from services.work_request_dispatch import try_dispatch_request
+
+        if not (req.client_locality or "").strip() and (user.locality or "").strip():
+            req.client_locality = user.locality.strip()[:255]
+            req.save(update_fields=["client_locality", "updated_at"])
+        offer = try_dispatch_request(req)
+        if offer:
+            return (
+                f"Заявка отправлена.\n"
+                f"Роль: {req.role.name}\n"
+                f"Фото: {len(photos)}\n"
+                "Ищем исполнителя в вашем районе — сообщим, как подтвердит заказ."
+            )
     except Exception:
         pass
     return (
