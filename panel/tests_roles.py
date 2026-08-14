@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -13,6 +15,7 @@ from panel.roles import (
     can_access_group,
     is_panel_admin,
     is_panel_manager,
+    manager_credentials_max_message,
     manager_group_ids,
 )
 
@@ -23,8 +26,12 @@ class PanelRolesTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser("admin", "a@t.com", "adminpass")
         PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
-        self.u1 = BotUser.objects.create(max_user_id="1001", real_name="Иван", phone="89001112233")
-        self.u2 = BotUser.objects.create(max_user_id="1002", real_name="Пётр", phone="89004445566")
+        self.u1 = BotUser.objects.create(
+            max_user_id="1001", real_name="Иван", phone="89001112233", chat_id="c1"
+        )
+        self.u2 = BotUser.objects.create(
+            max_user_id="1002", real_name="Пётр", phone="89004445566", chat_id="c2"
+        )
         self.u3 = BotUser.objects.create(max_user_id="1003", real_name="Чужой")
         self.g1 = ServiceGroup.objects.create(name="Двор 1")
         self.g2 = ServiceGroup.objects.create(name="Двор 2")
@@ -94,7 +101,8 @@ class PanelRolesTests(TestCase):
         resp = self.client.get(reverse("panel:service_group_edit", args=[self.g2.id]))
         self.assertEqual(resp.status_code, 302)
 
-    def test_admin_assigns_via_post(self):
+    @patch("panel.views._notify_user")
+    def test_admin_assigns_sends_creds_to_max(self, notify_mock):
         self.client.login(username="admin", password="adminpass")
         url = reverse("panel:service_group_edit", args=[self.g1.id])
         resp = self.client.post(
@@ -114,3 +122,15 @@ class PanelRolesTests(TestCase):
         self.assertTrue(
             self.client.login(username=self.g1.manager.username, password="MgrPass99")
         )
+
+        notify_mock.assert_called_once()
+        called_user, called_text = notify_mock.call_args[0]
+        self.assertEqual(called_user.id, self.u2.id)
+        expected = manager_credentials_max_message(
+            username=self.g1.manager.username,
+            password="MgrPass99",
+            group_name=self.g1.name,
+        )
+        self.assertEqual(called_text, expected)
+        self.assertIn("Логин:", called_text)
+        self.assertIn("Пароль: MgrPass99", called_text)

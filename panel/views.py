@@ -51,6 +51,7 @@ from panel.roles import (
     clear_group_manager,
     filter_tasks_for_user,
     is_panel_admin,
+    manager_credentials_max_message,
     manager_group_ids,
     manager_groups_qs,
     panel_home_url_name,
@@ -1281,12 +1282,18 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             except ValueError as exc:
                 messages.error(request, str(exc))
                 return redirect("panel:service_group_edit", pk=pk)
-            msg = (
-                f"Менеджер группы: {bot_user}. Логин панели: {account.username}."
+            max_text = manager_credentials_max_message(
+                username=account.username,
+                password=plain,
+                group_name=group.name,
             )
-            if plain:
-                msg += f" Пароль: {plain}"
-            messages.success(request, msg)
+            _notify_user(bot_user, max_text)
+            messages.success(
+                request,
+                f"Менеджер группы: {bot_user}. "
+                f"Логин: {account.username}. "
+                f"Пароль и данные для входа отправлены пользователю в MAX.",
+            )
             return redirect("panel:service_group_edit", pk=pk)
         if action == "clear_manager":
             if not is_panel_admin(request.user):

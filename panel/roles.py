@@ -217,14 +217,44 @@ def assign_group_manager(
     bot_user: BotUser,
     *,
     password: str | None = None,
-) -> tuple[AbstractBaseUser, str | None]:
-    """Назначить менеджера группы из участника. Один менеджер на группу."""
+    ensure_password: bool = True,
+) -> tuple[AbstractBaseUser, str]:
+    """
+    Назначить менеджера группы из участника. Один менеджер на группу.
+
+    Всегда возвращает plaintext-пароль (для отправки в MAX): если пароль
+    не задали и учётка уже была — генерируем новый и сбрасываем.
+    """
     if not group.members.filter(pk=bot_user.pk).exists():
         raise ValueError("Менеджером можно назначить только участника этой группы")
     user, _profile, plain = get_or_create_manager_account(bot_user, password=password)
+    if not plain and ensure_password:
+        plain = generate_temp_password()
+        user.set_password(plain)
+        user.save(update_fields=["password"])
+    if not plain:
+        raise ValueError("Не удалось подготовить пароль менеджера")
     group.manager = user
     group.save(update_fields=["manager", "updated_at"])
     return user, plain
+
+
+def manager_credentials_max_message(
+    *,
+    username: str,
+    password: str,
+    group_name: str,
+) -> str:
+    """Текст для MAX: доступы к панели менеджера."""
+    return (
+        "Вам назначена роль менеджера в панели Voitos.\n"
+        f"Группа: {group_name}\n\n"
+        "Данные для входа в веб-панель:\n"
+        f"Логин: {username}\n"
+        f"Пароль: {password}\n\n"
+        "Войдите по адресу /panel/login/ и смените пароль после первого входа, "
+        "если передавали его другим людям."
+    )
 
 
 def clear_group_manager(group: ServiceGroup) -> None:

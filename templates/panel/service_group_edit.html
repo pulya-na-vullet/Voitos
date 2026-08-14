@@ -93,8 +93,11 @@
     </div>
     <div class="form-row">
       <label>Пароль для входа в панель</label>
-      <input type="text" name="manager_password" placeholder="оставьте пустым, чтобы не менять / сгенерировать">
-      <p class="muted" style="margin:6px 0 0;">Если у жителя ещё нет логина — пароль задаётся здесь (или будет сгенерирован).</p>
+      <input type="text" name="manager_password" placeholder="оставьте пустым — сгенерируем и отправим в MAX">
+      <p class="muted" style="margin:6px 0 0;">
+        Логин и пароль уйдут жителю сообщением в MAX. Если поле пустое — пароль сгенерируется
+        (для уже существующей учётки тоже будет новый пароль).
+      </p>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn" type="submit">Назначить менеджером</button>
