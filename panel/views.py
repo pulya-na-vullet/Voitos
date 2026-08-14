@@ -1816,7 +1816,7 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(equipment_type=eq_filter)
     role_choices = list(
         ExecutorRole.objects.filter(is_active=True)
-        .order_by("sort_order", "name")
+        .order_by("id")
         .values_list("code", "name")
     )
     return render(

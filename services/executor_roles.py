@@ -9,7 +9,7 @@ from typing import Any
 
 from database.models import EquipmentType, ExecutorRole, ServiceCampaign, ServiceCategory
 
-# Системные признаки: code → boolean-поле на ExecutorRole (логика бота/кампаний).
+# Системные признаки: если админ вводит совпадающую подпись — включаем boolean для бота.
 SYSTEM_FLAG_DEFS: list[tuple[str, str]] = [
     ("requires_qualification_docs", "нужны подтверждающие документы"),
     ("is_equipment", "техника (госномер)"),
@@ -19,10 +19,23 @@ SYSTEM_FLAG_DEFS: list[tuple[str, str]] = [
 ]
 SYSTEM_FLAG_CODES = {code for code, _ in SYSTEM_FLAG_DEFS}
 SYSTEM_FLAG_LABELS = dict(SYSTEM_FLAG_DEFS)
+_SYSTEM_LABEL_TO_CODE = {
+    label.lower(): code for code, label in SYSTEM_FLAG_DEFS
+}
+# Доп. алиасы подписей → системный code
+_SYSTEM_LABEL_TO_CODE.update(
+    {
+        "нужны подтверждающие документы о квалификации": "requires_qualification_docs",
+        "техника (госномер / модель)": "is_equipment",
+        "для уборки снега": "for_snow",
+        "для дорожных работ": "for_road",
+        "нужен при вывозе снега": "for_snow_haul",
+    }
+)
 
 
 def active_roles():
-    return ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "name")
+    return ExecutorRole.objects.filter(is_active=True).order_by("id")
 
 
 def role_by_code(code: str) -> ExecutorRole | None:
@@ -32,40 +45,45 @@ def role_by_code(code: str) -> ExecutorRole | None:
     return ExecutorRole.objects.filter(code=code, is_active=True).first()
 
 
+def generate_role_code() -> str:
+    """Служебный код роли (админ его не вводит)."""
+    for _ in range(32):
+        code = f"r_{uuid.uuid4().hex[:12]}"
+        if not ExecutorRole.objects.filter(code=code).exists():
+            return code
+    raise RuntimeError("Не удалось сгенерировать уникальный код роли")
+
+
 def _normalize_flag_item(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
-    code = str(raw.get("code") or "").strip().lower()[:64]
     label = str(raw.get("label") or "").strip()[:128]
+    code = str(raw.get("code") or "").strip().lower()[:64]
     if not label and code in SYSTEM_FLAG_LABELS:
         label = SYSTEM_FLAG_LABELS[code]
-    if not code or not label:
+    if not label:
         return None
+    # Подпись админа может включить системный признак
+    mapped = _SYSTEM_LABEL_TO_CODE.get(label.lower().replace("ё", "е"))
+    if mapped:
+        code = mapped
+        label = SYSTEM_FLAG_LABELS[mapped]
+    elif code in SYSTEM_FLAG_LABELS:
+        label = SYSTEM_FLAG_LABELS[code]
+    elif not code:
+        code = make_custom_flag_code(label)
     on = raw.get("on", True)
     if isinstance(on, str):
         on = on.strip().lower() in {"1", "true", "on", "yes"}
     else:
         on = bool(on)
-    if code in SYSTEM_FLAG_LABELS:
-        label = SYSTEM_FLAG_LABELS[code]
     return {"code": code, "label": label, "on": on}
 
 
-def flags_from_booleans(role: ExecutorRole) -> list[dict[str, Any]]:
-    """Собрать список признаков из boolean-полей (для миграции / fallback)."""
-    out: list[dict[str, Any]] = []
-    for code, label in SYSTEM_FLAG_DEFS:
-        if getattr(role, code, False):
-            out.append({"code": code, "label": label, "on": True})
-    return out
-
-
 def flags_from_role(role: ExecutorRole) -> list[dict[str, Any]]:
+    """Только то, что админ сохранил в flags (без автоподстановки)."""
     stored = role.flags if isinstance(role.flags, list) else []
-    normalized = [item for item in (_normalize_flag_item(x) for x in stored) if item]
-    if normalized:
-        return normalized
-    return flags_from_booleans(role)
+    return [item for item in (_normalize_flag_item(x) for x in stored) if item]
 
 
 def apply_flags_to_role(role: ExecutorRole, flags: list[dict[str, Any]]) -> None:
@@ -76,10 +94,12 @@ def apply_flags_to_role(role: ExecutorRole, flags: list[dict[str, Any]]) -> None
         norm = _normalize_flag_item(item)
         if not norm or norm["code"] in seen:
             continue
+        # Признак в списке = включён
+        norm["on"] = True
         seen.add(norm["code"])
         cleaned.append(norm)
     role.flags = cleaned
-    enabled = {f["code"] for f in cleaned if f.get("on")}
+    enabled = {f["code"] for f in cleaned}
     for code, _label in SYSTEM_FLAG_DEFS:
         setattr(role, code, code in enabled)
 
@@ -97,13 +117,10 @@ def parse_flags_from_post(post) -> list[dict[str, Any]]:
 
     codes = post.getlist("flag_code")
     labels = post.getlist("flag_label")
-    ons = set(post.getlist("flag_on"))
     out: list[dict[str, Any]] = []
     for i, code in enumerate(codes):
         label = labels[i] if i < len(labels) else ""
-        item = _normalize_flag_item(
-            {"code": code, "label": label, "on": code in ons or str(i) in ons}
-        )
+        item = _normalize_flag_item({"code": code, "label": label, "on": True})
         if item:
             out.append(item)
     return out
@@ -116,43 +133,11 @@ def make_custom_flag_code(label: str) -> str:
 
 
 def ensure_default_equipment_roles() -> None:
-    """Гарантирует tractor/truck в каталоге (на случай пустой БД в тестах)."""
-    defaults = [
-        ("tractor", "Трактор-погрузчик", True, True, True, False, 10),
-        ("truck", "Камаз / грузовой", True, True, True, True, 20),
-    ]
-    for code, name, equip, snow, road, haul, sort in defaults:
-        role, created = ExecutorRole.objects.get_or_create(
-            code=code,
-            defaults={
-                "name": name,
-                "is_equipment": equip,
-                "for_snow": snow,
-                "for_road": road,
-                "for_snow_haul": haul,
-                "sort_order": sort,
-                "is_active": True,
-            },
-        )
-        if created or not role.flags:
-            apply_flags_to_role(
-                role,
-                [
-                    {"code": c, "label": SYSTEM_FLAG_LABELS[c], "on": True}
-                    for c, on in [
-                        ("is_equipment", equip),
-                        ("for_snow", snow),
-                        ("for_road", road),
-                        ("for_snow_haul", haul),
-                    ]
-                    if on
-                ],
-            )
-            role.save()
+    """Больше не сидируем роли — каталог заполняет администратор вручную."""
+    return
 
 
 def suggested_role_codes_for_campaign(campaign: ServiceCampaign) -> list[str]:
-    ensure_default_equipment_roles()
     if campaign.category == ServiceCategory.SNOW:
         codes = list(
             ExecutorRole.objects.filter(is_active=True, for_snow=True)
@@ -203,7 +188,7 @@ def match_role_from_text(text: str, roles=None) -> ExecutorRole | None:
         idx = int(raw) - 1
         if 0 <= idx < len(roles):
             return roles[idx]
-    # прямые алиасы для техники
+    # прямые алиасы для техники / частых ролей (если такие роли есть в каталоге)
     aliases = {
         "трактор": "tractor",
         "тракторист": "tractor",
@@ -239,9 +224,14 @@ def match_role_from_text(text: str, roles=None) -> ExecutorRole | None:
         name = role.name.lower().replace("ё", "е")
         if name in raw or role.code in raw:
             return role
-        # отдельные слова названия
         if len(name) >= 4 and name in raw:
             return role
+    # совпадение по ключевому слову из названия роли («электрик» в «Электрик»)
+    for role in roles:
+        name = role.name.lower().replace("ё", "е")
+        for part in re.split(r"[\s/,\-]+", name):
+            if len(part) >= 4 and part in raw:
+                return role
     return None
 
 

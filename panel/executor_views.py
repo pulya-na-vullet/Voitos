@@ -23,9 +23,9 @@ from database.models import (
 from panel.admin_tasks import close_task_for_source
 from panel.roles import admin_required, is_panel_admin
 from services.executor_roles import (
-    SYSTEM_FLAG_DEFS,
     apply_flags_to_role,
     flags_from_role,
+    generate_role_code,
     parse_flags_from_post,
 )
 
@@ -39,18 +39,15 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "create":
-            code = (request.POST.get("code") or "").strip().lower().replace(" ", "_")
             name = (request.POST.get("name") or "").strip()
-            if not code or not name:
-                messages.error(request, "Укажите код и название роли.")
-            elif ExecutorRole.objects.filter(code=code).exists():
-                messages.error(request, f"Роль с кодом «{code}» уже есть.")
+            if not name:
+                messages.error(request, "Укажите название роли.")
             else:
                 role = ExecutorRole(
-                    code=code[:64],
+                    code=generate_role_code(),
                     name=name[:128],
                     is_active=True,
-                    sort_order=int(request.POST.get("sort_order") or 100),
+                    sort_order=0,
                 )
                 apply_flags_to_role(role, parse_flags_from_post(request.POST))
                 role.save()
@@ -60,10 +57,6 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
             role = get_object_or_404(ExecutorRole, pk=request.POST.get("role_id"))
             role.name = (request.POST.get("name") or role.name).strip()[:128]
             role.is_active = bool(request.POST.get("is_active"))
-            try:
-                role.sort_order = int(request.POST.get("sort_order") or role.sort_order)
-            except ValueError:
-                pass
             apply_flags_to_role(role, parse_flags_from_post(request.POST))
             role.save()
             messages.success(request, f"Роль «{role.name}» сохранена.")
@@ -84,7 +77,7 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
             return redirect("panel:executor_roles")
         return redirect("panel:executor_roles")
 
-    roles = list(ExecutorRole.objects.all().order_by("sort_order", "name"))
+    roles = list(ExecutorRole.objects.all().order_by("id"))
     roles_payload = [{"id": r.id, "flags": flags_from_role(r)} for r in roles]
     return render(
         request,
@@ -92,10 +85,6 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
         {
             "roles": roles,
             "roles_flags_json": json.dumps(roles_payload, ensure_ascii=False),
-            "system_flags_json": json.dumps(
-                [{"code": c, "label": lbl} for c, lbl in SYSTEM_FLAG_DEFS],
-                ensure_ascii=False,
-            ),
         },
     )
 

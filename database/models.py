@@ -1010,8 +1010,8 @@ class ExecutorRole(models.Model):
     is_active = models.BooleanField("Активна", default=True)
     sort_order = models.PositiveIntegerField(
         "Порядок в списке",
-        default=100,
-        help_text="Сортировка в боте и панели: меньше число — выше в списке (10, 20, 30…).",
+        default=0,
+        help_text="Служебное поле; в панели не редактируется — список по порядку создания.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1019,13 +1019,13 @@ class ExecutorRole(models.Model):
     class Meta:
         verbose_name = "Роль исполнителя"
         verbose_name_plural = "Роли исполнителей"
-        ordering = ["sort_order", "name"]
+        ordering = ["id"]
 
     def __str__(self) -> str:
         return self.name
 
     def flags_for_ui(self) -> list[dict]:
-        """Признаки для формы; если JSON пуст — собираем из boolean-полей."""
+        """Признаки для формы."""
         from services.executor_roles import flags_from_role
 
         return flags_from_role(self)

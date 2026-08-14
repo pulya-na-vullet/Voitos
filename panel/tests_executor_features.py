@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
-from django.core.files.base import ContentFile
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -20,49 +19,59 @@ from database.models import (
 from bot.work_request import handle_work_request_photo, handle_work_request_step, start_work_request
 from panel.manager_log import log_manager_action
 from panel.roles import assign_group_manager
-from services.executor_roles import ensure_default_equipment_roles
+from services.executor_roles import apply_flags_to_role
 
 User = get_user_model()
 
 
 class ExecutorRolesPanelTests(TestCase):
     def setUp(self):
-        ensure_default_equipment_roles()
         self.admin = User.objects.create_superuser("adm", "a@t.com", "pass")
         PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="adm", password="pass")
 
-    def test_roles_page_and_create(self):
+    def test_roles_page_empty_and_create_without_code(self):
         resp = self.client.get(reverse("panel:executor_roles"))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Трактор")
-        self.assertContains(resp, "Порядок в списке")
+        self.assertContains(resp, "Ролей пока нет")
+        self.assertNotContains(resp, "Порядок в списке")
+        self.assertNotContains(resp, "Код (латиница)")
         resp = self.client.post(
             reverse("panel:executor_roles"),
             {
                 "action": "create",
-                "code": "plumber",
                 "name": "Сантехник",
-                "sort_order": "50",
                 "flags_json": (
-                    '[{"code":"requires_qualification_docs",'
-                    '"label":"нужны подтверждающие документы","on":true},'
-                    '{"code":"custom_dopusk","label":"нужен допуск","on":true}]'
+                    '[{"code":"x1","label":"нужны подтверждающие документы","on":true},'
+                    '{"code":"x2","label":"нужен допуск","on":true}]'
                 ),
             },
         )
         self.assertEqual(resp.status_code, 302)
-        role = ExecutorRole.objects.get(code="plumber")
+        role = ExecutorRole.objects.get(name="Сантехник")
+        self.assertTrue(role.code.startswith("r_"))
         self.assertTrue(role.requires_qualification_docs)
         self.assertEqual(len(role.flags), 2)
-        codes = {f["code"] for f in role.flags}
-        self.assertIn("requires_qualification_docs", codes)
-        self.assertIn("custom_dopusk", codes)
+        labels = {f["label"] for f in role.flags}
+        self.assertIn("нужен допуск", labels)
 
-    def test_save_can_remove_flag(self):
-        role = ExecutorRole.objects.get(code="tractor")
-        self.assertTrue(role.for_snow)
+    def test_create_starts_without_flags_and_can_remove(self):
+        resp = self.client.post(
+            reverse("panel:executor_roles"),
+            {"action": "create", "name": "Грузчик", "flags_json": "[]"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        role = ExecutorRole.objects.get(name="Грузчик")
+        self.assertEqual(role.flags, [])
+        apply_flags_to_role(
+            role,
+            [
+                {"code": "is_equipment", "label": "техника (госномер)", "on": True},
+                {"code": "for_road", "label": "дорога", "on": True},
+            ],
+        )
+        role.save()
         resp = self.client.post(
             reverse("panel:executor_roles"),
             {
@@ -70,32 +79,34 @@ class ExecutorRolesPanelTests(TestCase):
                 "role_id": str(role.id),
                 "name": role.name,
                 "is_active": "on",
-                "sort_order": str(role.sort_order),
-                "flags_json": (
-                    '[{"code":"is_equipment","label":"техника (госномер)","on":true},'
-                    '{"code":"for_road","label":"дорога","on":true}]'
-                ),
+                "flags_json": '[{"code":"for_road","label":"дорога","on":true}]',
             },
         )
         self.assertEqual(resp.status_code, 302)
         role.refresh_from_db()
-        self.assertFalse(role.for_snow)
-        self.assertTrue(role.is_equipment)
+        self.assertFalse(role.is_equipment)
         self.assertTrue(role.for_road)
-        self.assertEqual([f["code"] for f in role.flags], ["is_equipment", "for_road"])
+        self.assertEqual([f["code"] for f in role.flags], ["for_road"])
 
 
 class WorkRequestBotTests(TestCase):
     def setUp(self):
-        ensure_default_equipment_roles()
-        ExecutorRole.objects.get_or_create(
+        role = ExecutorRole.objects.create(
             code="electrician",
-            defaults={
-                "name": "Электрик",
-                "requires_qualification_docs": True,
-                "sort_order": 60,
-            },
+            name="Электрик",
+            requires_qualification_docs=True,
         )
+        apply_flags_to_role(
+            role,
+            [
+                {
+                    "code": "requires_qualification_docs",
+                    "label": "нужны подтверждающие документы",
+                    "on": True,
+                }
+            ],
+        )
+        role.save()
         self.user = BotUser.objects.create(max_user_id="wr1", real_name="Аня")
         self.pending, _ = PendingAction.objects.get_or_create(user=self.user)
 
