@@ -47,7 +47,7 @@ class ClientsMapTests(TestCase):
         graphs = build_clients_map()
         alley = next(g for g in graphs if g["group_name"] == "9 аллея")
         nodes = [e for e in alley["elements"] if "source" not in e["data"]]
-        ivan_node = next(n for n in nodes if "Иван" in n["data"]["label"])
+        ivan_node = next(n for n in nodes if n["data"]["label"] == "Иван")
         self.assertIn("panel-role", ivan_node["classes"])
         self.assertTrue(ivan_node["data"]["is_panel_role"])
         self.assertGreaterEqual(alley["panel_role_count"], 1)
@@ -57,26 +57,74 @@ class ClientsMapTests(TestCase):
         self.dmitry.refresh_from_db()
         self.assertEqual(household_root_id(self.elena), self.dmitry.id)
         households = build_households([self.elena, self.dmitry, self.ivan])
-        # Семья Дмитрий+Елена + Иван = 2 вершины
+        # Семья Дмитрий+Елена + Иван = 2 домохозяйства
         self.assertEqual(len(households), 2)
         family = households[self.dmitry.id]
         self.assertTrue(family["has_family"])
         self.assertIn("Елена", family["label"])
         self.assertIn("Дмитрий", family["label"])
 
-    def test_build_clients_map_family_vertices_no_hub(self):
+    def test_family_spokes_and_payer_ring(self):
+        # Второй плательщик в той же группе — для кольца между платящими.
+        maria = BotUser.objects.create(
+            max_user_id="map-mr",
+            real_name="Мария",
+            subscription_until=timezone.now() + timedelta(days=40),
+        )
+        self.alley.members.add(maria)
+
         graphs = build_clients_map()
         alley = next(g for g in graphs if g["group_name"] == "9 аллея")
-        # Елена+Дмитрий и Иван — две семейные вершины, без хаба группы
-        self.assertEqual(alley["vertex_count"], 2)
-        self.assertEqual(alley["payer_count"], 1)
+        # Дмитрий, Елена, Иван, Мария — по одной вершине на человека
+        self.assertEqual(alley["vertex_count"], 4)
+        self.assertEqual(alley["user_count"], 4)
+        self.assertEqual(alley["payer_count"], 2)
+        self.assertEqual(alley["household_count"], 3)
+
         node_els = [e for e in alley["elements"] if "source" not in e["data"]]
-        self.assertEqual(len(node_els), 2)
-        self.assertTrue(all(e["data"]["kind"] == "household" for e in node_els))
-        labels = " ".join(e["data"]["label"] for e in node_els)
-        self.assertIn("Елена", labels)
-        self.assertIn("Дмитрий", labels)
-        self.assertIn("Иван", labels)
+        self.assertEqual(len(node_els), 4)
+        self.assertTrue(all(e["data"]["kind"] == "person" for e in node_els))
+        by_label = {e["data"]["label"]: e for e in node_els}
+        self.assertIn("Елена", by_label)
+        self.assertIn("Дмитрий", by_label)
+        self.assertIn("dependent", by_label["Елена"]["classes"])
+        self.assertIn("paying", by_label["Дмитрий"]["classes"])
+        self.assertIn("family-parent", by_label["Дмитрий"]["classes"])
+
+        edges = [e for e in alley["elements"] if "source" in e["data"]]
+        family_edges = [e for e in edges if e["data"]["kind"] == "family"]
+        ring_edges = [e for e in edges if e["data"]["kind"] == "ring"]
+        self.assertEqual(len(family_edges), 1)
+        self.assertEqual(family_edges[0]["data"]["source"], f"u{self.elena.id}")
+        self.assertEqual(family_edges[0]["data"]["target"], f"u{self.dmitry.id}")
+        # Кольцо только между платящими (Дмитрий ↔ Мария), Иван не в кольце
+        self.assertEqual(len(ring_edges), 1)
+        ring_ends = {ring_edges[0]["data"]["source"], ring_edges[0]["data"]["target"]}
+        self.assertEqual(ring_ends, {f"u{self.dmitry.id}", f"u{maria.id}"})
+
+    def test_four_dependents_attach_to_payer(self):
+        kids = []
+        for i in range(4):
+            kid = BotUser.objects.create(
+                max_user_id=f"map-kid-{i}",
+                real_name=f"Ребёнок{i}",
+            )
+            kids.append(kid)
+            self.alley.members.add(kid)
+        link_family_members([self.dmitry, self.elena, *kids])
+        graphs = build_clients_map()
+        alley = next(g for g in graphs if g["group_name"] == "9 аллея")
+        family_edges = [
+            e for e in alley["elements"]
+            if e.get("data", {}).get("kind") == "family"
+        ]
+        self.assertEqual(len(family_edges), 5)  # Елена + 4 ребёнка → Дмитрий
+        for edge in family_edges:
+            self.assertEqual(edge["data"]["target"], f"u{self.dmitry.id}")
+        self.assertIn("family-parent", next(
+            e["classes"] for e in alley["elements"]
+            if e["data"].get("label") == "Дмитрий"
+        ))
 
     def test_panel_page_renders_groups(self):
         import json
@@ -86,7 +134,7 @@ class ClientsMapTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         self.assertIn("Карта клиентов", body)
-        self.assertIn("семей", body)
+        self.assertIn("платящие", body)
         match = re.search(
             r'<script id="clients-map-data" type="application/json">(.*?)</script>',
             body,
@@ -96,5 +144,7 @@ class ClientsMapTests(TestCase):
         payload = json.loads(match.group(1))
         alley = next(g for g in payload if g["group_name"] == "9 аллея")
         nodes = [e for e in alley["elements"] if "source" not in e["data"]]
-        self.assertEqual(len(nodes), 2)
-        self.assertTrue(all(n["data"]["kind"] == "household" for n in nodes))
+        self.assertEqual(len(nodes), 3)
+        self.assertTrue(all(n["data"]["kind"] == "person" for n in nodes))
+        edges = [e for e in alley["elements"] if "source" in e["data"]]
+        self.assertTrue(any(e["data"]["kind"] == "family" for e in edges))

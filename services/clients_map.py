@@ -1,7 +1,7 @@
-"""Клиентская карта: графы групп, родственники в одной вершине.
+"""Клиентская карта: графы групп.
 
-Вершина = семья / домохозяйство (плательщик + прикреплённые).
-Название группы только в заголовке карточки — хаб-узел не рисуем.
+Вершина = житель. Члены семьи, привязанные по платежке, — рёбрами к плательщику.
+Платящие корни группы связаны между собой кольцом. Название группы — только в заголовке.
 """
 from __future__ import annotations
 
@@ -42,7 +42,10 @@ def is_paying_user(user: BotUser) -> bool:
 
 
 def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
-    """root_id -> household dict with members (related users merged)."""
+    """root_id -> household dict with members (related users merged).
+
+    Используется прогнозом и агрегациями; граф карты рисует людей отдельно.
+    """
     by_id = {int(u.id): u for u in users}
     members_by_root: dict[int, list[BotUser]] = defaultdict(list)
 
@@ -77,6 +80,10 @@ def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
     return households
 
 
+def _person_node_id(user_id: int) -> str:
+    return f"u{int(user_id)}"
+
+
 def build_group_graph(
     group: MapGroup,
     users: list[BotUser],
@@ -85,98 +92,141 @@ def build_group_graph(
 ) -> dict[str, Any] | None:
     """Данные одного графа группы в формате элементов Cytoscape.js."""
     panel_role_bot_ids = panel_role_bot_ids or set()
-    households_map = build_households(users)
-    households = sorted(
-        households_map.values(),
-        key=lambda h: (-h["member_count"], h["label"].lower(), h["root_id"]),
-    )
-    if not households:
+    by_id: dict[int, BotUser] = {}
+    for u in users:
+        by_id[int(u.id)] = u
+    if not by_id:
         return None
+
+    # Убедимся, что плательщики привязанных есть в графе (на случай неполного списка).
+    for u in list(by_id.values()):
+        payer_id = u.family_payer_id
+        if payer_id and int(payer_id) not in by_id:
+            payer = getattr(u, "family_payer", None)
+            if payer is not None:
+                by_id[int(payer.id)] = payer
+
+    ordered_users = sorted(
+        by_id.values(),
+        key=lambda u: (_display_name(u).lower(), int(u.id)),
+    )
 
     elements: list[dict[str, Any]] = []
     nodes: list[dict[str, Any]] = []
+    payer_ids: list[int] = []
 
-    for household in households:
-        labels = household["labels"]
-        cy_label = "\n".join(labels)
-        href = reverse("panel:user_dashboard", args=[household["root_id"]])
-        classes = ["household"]
-        if household["has_family"]:
-            classes.append("family")
-        if household["is_paying"]:
-            classes.append("paying")
-        if household["active_subscription"]:
-            classes.append("active-sub")
-        is_panel_role = any(
-            int(m.id) in panel_role_bot_ids for m in household["members"]
+    for user in ordered_users:
+        uid = int(user.id)
+        is_dependent = bool(user.family_payer_id)
+        is_paying = is_paying_user(user)
+        has_dependents = any(
+            int(o.family_payer_id or 0) == uid for o in ordered_users if int(o.id) != uid
         )
+        label = _display_name(user)
+        href = reverse("panel:user_dashboard", args=[uid])
+        classes = ["person"]
+        if is_dependent:
+            classes.append("dependent")
+        else:
+            classes.append("root")
+            if has_dependents:
+                classes.append("family-parent")
+        if is_paying:
+            classes.append("paying")
+            payer_ids.append(uid)
+        if user.has_feature_access():
+            classes.append("active-sub")
+        is_panel_role = uid in panel_role_bot_ids
         if is_panel_role:
             classes.append("panel-role")
+
+        node_id = _person_node_id(uid)
         elements.append(
             {
                 "data": {
-                    "id": household["id"],
-                    "label": cy_label,
-                    "kind": "household",
+                    "id": node_id,
+                    "label": label,
+                    "kind": "person",
                     "href": href,
-                    "root_id": household["root_id"],
-                    "member_count": household["member_count"],
-                    "is_paying": household["is_paying"],
+                    "user_id": uid,
+                    "is_paying": is_paying,
+                    "is_dependent": is_dependent,
                     "is_panel_role": is_panel_role,
+                    "payer_id": int(user.family_payer_id) if user.family_payer_id else None,
                 },
                 "classes": " ".join(classes),
             }
         )
         nodes.append(
             {
-                "id": household["id"],
-                "kind": "household",
-                "label": household["label"],
-                "labels": labels,
-                "has_family": household["has_family"],
-                "member_count": household["member_count"],
-                "root_id": household["root_id"],
-                "is_paying": household["is_paying"],
+                "id": node_id,
+                "kind": "person",
+                "label": label,
+                "user_id": uid,
+                "is_paying": is_paying,
+                "is_dependent": is_dependent,
                 "is_panel_role": is_panel_role,
             }
         )
 
-    # Связи между семейными вершинами одной группы (без хаба с названием).
-    n = len(households)
-    if n >= 2:
-        ring_steps = n if n > 2 else 1
+    # Спицы семьи: зависимый → плательщик.
+    for user in ordered_users:
+        payer_id = user.family_payer_id
+        if not payer_id:
+            continue
+        pid = int(payer_id)
+        if pid not in by_id:
+            continue
+        uid = int(user.id)
+        elements.append(
+            {
+                "data": {
+                    "id": f"e-fam-{uid}-{pid}",
+                    "source": _person_node_id(uid),
+                    "target": _person_node_id(pid),
+                    "kind": "family",
+                },
+                "classes": "family",
+            }
+        )
+
+    # Кольцо только между платящими корнями.
+    payer_ids = sorted(set(payer_ids))
+    n_payers = len(payer_ids)
+    if n_payers >= 2:
+        ring_steps = n_payers if n_payers > 2 else 1
         for i in range(ring_steps):
-            a = households[i]["id"]
-            b = households[(i + 1) % n]["id"]
+            a = payer_ids[i]
+            b = payer_ids[(i + 1) % n_payers]
             elements.append(
                 {
                     "data": {
                         "id": f"e-ring-{a}-{b}",
-                        "source": a,
-                        "target": b,
+                        "source": _person_node_id(a),
+                        "target": _person_node_id(b),
                         "kind": "ring",
                     },
                     "classes": "ring",
                 }
             )
 
-    payer_count = sum(1 for h in households if h["is_paying"])
+    households = build_households(list(by_id.values()))
     panel_role_count = sum(1 for n in nodes if n.get("is_panel_role"))
     return {
         "group_id": group.id,
         "group_name": group.name,
-        "vertex_count": len(households),
-        "payer_count": payer_count,
+        "vertex_count": len(nodes),
+        "payer_count": len(payer_ids),
         "panel_role_count": panel_role_count,
         "household_count": len(households),
-        "user_count": sum(h["member_count"] for h in households),
+        "user_count": len(nodes),
         "nodes": nodes,
         "elements": elements,
     }
 
 
 def _expand_with_family(users: list[BotUser]) -> list[BotUser]:
-    """Include family payers and dependents so relatives share one vertex."""
+    """Include family payers and dependents so relatives appear together."""
     by_id: dict[int, BotUser] = {int(u.id): u for u in users}
     payer_ids = [u.family_payer_id for u in users if u.family_payer_id]
     if payer_ids:
