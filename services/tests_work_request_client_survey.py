@@ -63,8 +63,9 @@ class ClientServiceSurveyTests(TestCase):
     def test_start_survey_sends_max_and_sets_pending(self):
         self.req.status = WorkRequestStatus.AWAITING_CLIENT
         self.req.save(update_fields=["status"])
-        ok = start_client_service_survey(self.req, send_fn=self.capture)
+        ok, detail = start_client_service_survey(self.req, send_fn=self.capture)
         self.assertTrue(ok)
+        self.assertIn("отправлен", detail.lower())
         self.assertTrue(any("Услуга была оказана" in t for _, t in self.sent))
         pending = PendingAction.objects.get(user=self.client_user)
         self.assertEqual(pending.pending_kind, "work_request_service_survey")
@@ -103,7 +104,8 @@ class ClientServiceSurveyTests(TestCase):
         pending.pending_payload = {"work_request_id": self.req.id}
         pending.save()
         with patch(
-            "services.work_request_client_survey._send", return_value=self.capture
+            "services.work_request_client_survey._send_or_raise",
+            side_effect=lambda u, t, send_fn=None: self.capture(u, t),
         ):
             out = handle_service_survey_step(self.client_user, "нет", pending)
         self.assertIn("не оказана", out.lower())
@@ -118,11 +120,8 @@ class ClientServiceSurveyTests(TestCase):
         c = Client()
         self.assertTrue(c.login(username="svadmin", password="pass"))
         with patch(
-            "services.work_request_client_survey._default_send_fn",
-            create=True,
-        ), patch(
-            "services.work_request_dispatch._default_send_fn",
-            return_value=self.capture,
+            "services.work_request_client_survey._send_or_raise",
+            side_effect=lambda u, t, send_fn=None: self.capture(u, t),
         ):
             resp = c.post(
                 reverse("panel:work_request_detail", args=[self.req.id]),
@@ -139,3 +138,19 @@ class ClientServiceSurveyTests(TestCase):
         self.assertTrue(any("Услуга была оказана" in t for _, t in self.sent))
         pending = PendingAction.objects.get(user=self.client_user)
         self.assertEqual(pending.pending_kind, "work_request_service_survey")
+
+    def test_panel_resend_survey_button(self):
+        self.req.status = WorkRequestStatus.AWAITING_CLIENT
+        self.req.save(update_fields=["status"])
+        c = Client()
+        self.assertTrue(c.login(username="svadmin", password="pass"))
+        with patch(
+            "services.work_request_client_survey._send_or_raise",
+            side_effect=lambda u, t, send_fn=None: self.capture(u, t),
+        ):
+            resp = c.post(
+                reverse("panel:work_request_detail", args=[self.req.id]),
+                {"action": "send_client_survey"},
+            )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(any("Услуга была оказана" in t for _, t in self.sent))

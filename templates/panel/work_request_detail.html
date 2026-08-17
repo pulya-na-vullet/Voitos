@@ -30,6 +30,14 @@
   <p><strong>Населённый пункт:</strong> {{ item.client_locality|default:item.user.locality|default:"—" }}</p>
   <p><strong>Адрес жителя:</strong> {{ item.user.address|default:"—" }}</p>
   <p><strong>Статус:</strong> {{ item.get_status_display }}</p>
+  {% if item.status == "awaiting_client" %}
+  <form method="post" style="margin:8px 0 12px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="send_client_survey">
+    <button class="btn small" type="submit">Отправить клиенту опрос в MAX</button>
+    <span class="muted" style="margin-left:8px;">«Услуга оказана?» → сумма или оценка сервиса</span>
+  </form>
+  {% endif %}
   {% if item.assigned_contractor %}
     <p><strong>Исполнитель:</strong>
       <a href="{% url 'panel:user_dashboard' item.assigned_contractor.user_id %}">{{ item.assigned_contractor }}</a>

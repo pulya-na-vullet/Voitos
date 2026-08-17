@@ -285,6 +285,25 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             reject_commission(req, note=(request.POST.get("note") or "").strip())
             messages.info(request, f"Комиссия по заявке #{req.id} отклонена.")
             return redirect("panel:work_request_detail", pk=pk)
+        if action == "send_client_survey":
+            from services.work_request_client_survey import start_client_service_survey
+
+            if req.status != WorkRequestStatus.AWAITING_CLIENT:
+                req.status = WorkRequestStatus.AWAITING_CLIENT
+                req.save(update_fields=["status", "updated_at"])
+            ok, detail = start_client_service_survey(req)
+            if ok:
+                messages.success(request, detail)
+            else:
+                messages.warning(request, detail)
+            log_manager_action(
+                request.user,
+                action="work_request_client_survey",
+                title=f"Заявка #{req.id}: опрос клиента в MAX",
+                detail=detail,
+                meta={"work_request_id": req.id, "ok": ok},
+            )
+            return redirect("panel:work_request_detail", pk=pk)
         status = (request.POST.get("status") or "").strip()
         if status in WorkRequestStatus.values:
             if status == WorkRequestStatus.DONE and not is_panel_admin(request.user):
@@ -309,31 +328,28 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             )
             if status in {WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED}:
                 close_task_for_source(AdminTaskKind.WORK_REQUEST, "WorkRequest", req.id)
-            # Ручной перевод в «ждём клиента» → сразу опрос в MAX: услуга оказана?
-            if (
-                status == WorkRequestStatus.AWAITING_CLIENT
-                and prev_status != WorkRequestStatus.AWAITING_CLIENT
-            ):
+            # Ручной перевод / повторное сохранение в «ждём клиента» → опрос в MAX
+            if status == WorkRequestStatus.AWAITING_CLIENT:
                 from services.work_request_client_survey import start_client_service_survey
 
-                if start_client_service_survey(req):
-                    messages.success(
-                        request,
-                        "Заявка обновлена. Клиенту в MAX отправлен вопрос: "
-                        "оказана ли услуга.",
-                    )
+                ok, detail = start_client_service_survey(req)
+                if ok:
+                    messages.success(request, f"Заявка обновлена. {detail}")
                 else:
                     messages.warning(
                         request,
-                        "Статус сохранён, но сообщение клиенту в MAX не ушло "
-                        "(проверьте токен бота / chat_id жителя).",
+                        f"Статус сохранён. {detail}",
                     )
                 log_manager_action(
                     request.user,
                     action="work_request_awaiting_client",
                     title=f"Заявка #{req.id}: ждём подтверждения клиента",
-                    detail="Запущен опрос клиента в MAX",
-                    meta={"work_request_id": req.id, "prev_status": prev_status},
+                    detail=detail,
+                    meta={
+                        "work_request_id": req.id,
+                        "prev_status": prev_status,
+                        "ok": ok,
+                    },
                 )
                 return redirect("panel:work_request_detail", pk=pk)
             messages.success(request, "Заявка обновлена.")

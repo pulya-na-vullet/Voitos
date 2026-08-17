@@ -26,6 +26,25 @@ def _send():
     return _default_send_fn()
 
 
+def _send_or_raise(user: BotUser, text: str, *, send_fn=None) -> None:
+    """Отправка в MAX; без токена / id — явная ошибка (не тихий skip)."""
+    if send_fn is not None:
+        send_fn(user, text)
+        return
+
+    from ai.factory import get_runtime_settings
+
+    cfg = get_runtime_settings()
+    token = (cfg.max_bot_token or "").strip()
+    if not token:
+        raise RuntimeError("Не задан токен бота MAX (Настройки).")
+    if not (user.chat_id or "").strip() and not (user.max_user_id or "").strip():
+        raise RuntimeError(
+            f"У жителя {user} нет chat_id / max_user_id — бот не знает, куда писать."
+        )
+    _send()(user, text)
+
+
 def service_survey_message(req: WorkRequest) -> str:
     role = req.role.name if req.role_id else "мастер"
     return (
@@ -36,10 +55,12 @@ def service_survey_message(req: WorkRequest) -> str:
     )
 
 
-def start_client_service_survey(req: WorkRequest, *, send_fn=None) -> bool:
+def start_client_service_survey(
+    req: WorkRequest, *, send_fn=None
+) -> tuple[bool, str]:
     """
     Сразу спросить клиента: оказана ли услуга.
-    Вызывается при ручном переводе в awaiting_client из панели.
+    Возвращает (ok, человекочитаемый статус).
     """
     req = (
         WorkRequest.objects.select_related("user", "role", "assigned_contractor")
@@ -47,9 +68,12 @@ def start_client_service_survey(req: WorkRequest, *, send_fn=None) -> bool:
         .first()
     )
     if not req:
-        return False
+        return False, "Заявка не найдена."
     if req.status != WorkRequestStatus.AWAITING_CLIENT:
-        return False
+        return (
+            False,
+            "Опрос отправляется только в статусе «Ждём подтверждения клиента».",
+        )
 
     # Не дублировать отложенный опрос суммы от мастера — сначала «услуга оказана?»
     try:
@@ -62,19 +86,23 @@ def start_client_service_survey(req: WorkRequest, *, send_fn=None) -> bool:
     except Exception:
         logger.exception("cancel scheduled client confirm WR %s", req.id)
 
-    send_fn = send_fn or _send()
     text = service_survey_message(req)
     try:
-        send_fn(req.user, text)
-    except Exception:
+        _send_or_raise(req.user, text, send_fn=send_fn)
+    except Exception as exc:
         logger.exception("Failed to send service survey WR %s", req.id)
-        return False
+        # Pending всё равно ставим — клиент может ответить, если сообщение дойдёт иначе
+        pending, _ = PendingAction.objects.get_or_create(user=req.user)
+        pending.pending_kind = SERVICE_SURVEY_PENDING
+        pending.pending_payload = {"work_request_id": req.id}
+        pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+        return False, f"Ожидание ответа включено, но MAX не отправил: {exc}"
 
     pending, _ = PendingAction.objects.get_or_create(user=req.user)
     pending.pending_kind = SERVICE_SURVEY_PENDING
     pending.pending_payload = {"work_request_id": req.id}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
-    return True
+    return True, "Клиенту в MAX отправлен вопрос: оказана ли услуга."
 
 
 def handle_service_survey_step(user: BotUser, text: str, pending: PendingAction) -> str:
@@ -114,9 +142,7 @@ def _on_service_yes(req: WorkRequest, pending: PendingAction) -> str:
     if req.reported_amount is not None:
         pending.pending_payload = {"work_request_id": req.id}
         pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
-        return (
-            "Спасибо! Уточним оплату.\n\n" + _client_confirm_message(req)
-        )
+        return "Спасибо! Уточним оплату.\n\n" + _client_confirm_message(req)
     pending.pending_payload = {
         "work_request_id": req.id,
         "step": "amount_only",
@@ -149,7 +175,7 @@ def _on_service_no(req: WorkRequest, pending: PendingAction) -> str:
 
     try:
         if req.assigned_contractor_id:
-            _send()(
+            _send_or_raise(
                 req.assigned_contractor.user,
                 f"Клиент по заявке #{req.id} ответил, что услуга не оказана.\n"
                 "Заявка закрыта. Новые заказы снова доступны.",
@@ -158,15 +184,14 @@ def _on_service_no(req: WorkRequest, pending: PendingAction) -> str:
         logger.exception("notify master service not provided WR %s", req.id)
 
     try:
-        from panel.admin_tasks import close_task_for_source
         from database.models import AdminTaskKind
+        from panel.admin_tasks import close_task_for_source
 
         close_task_for_source(AdminTaskKind.WORK_REQUEST, "WorkRequest", req.id)
         close_task_for_source(AdminTaskKind.WORK_COMMISSION, "WorkRequest", req.id)
     except Exception:
         logger.exception("close admin tasks after survey no WR %s", req.id)
 
-    # Оценка качества сервиса (даже если услуга не состоялась)
     rating_line = (
         "\n\nОцените качество сервиса по этой заявке от 1 до 5 "
         "(5 — отлично)."
