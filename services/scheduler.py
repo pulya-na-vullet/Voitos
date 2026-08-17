@@ -17,6 +17,7 @@ from services.work_request_dispatch import (
 )
 from services.work_request_completion import process_due_scheduled_messages
 from services.work_request_rating import backfill_rating_asks
+from services.wish_ballot import process_wish_ballots
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +66,20 @@ def run_service_campaign_scheduler(stop_event=None, interval_seconds: int = 60) 
                 rated = backfill_rating_asks(send_fn=send_fn)
                 if rated:
                     logger.info("Asked ratings for %s closed work request(s)", rated)
+                wish_stats = process_wish_ballots(send_fn=send_fn)
+                if wish_stats.get("tallied") or wish_stats.get("started"):
+                    logger.info(
+                        "Wish ballots: tallied=%s started=%s",
+                        wish_stats.get("tallied"),
+                        wish_stats.get("started"),
+                    )
             else:
                 expire_stale_counter_offers()
                 expire_stale_work_offers()
                 dispatch_open_requests()
                 process_due_scheduled_messages()
                 backfill_rating_asks()
+                process_wish_ballots()
         except Exception:
             logger.exception("Service campaign scheduler loop error")
         time.sleep(interval_seconds)

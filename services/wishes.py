@@ -166,9 +166,13 @@ def capture_wish(
     if not body:
         raise ValueError("Пустое пожелание")
     topic_key = normalize_topic(topic) if topic else detect_topic(body)
+    from services.wish_ballot import ensure_open_period
+
+    period = ensure_open_period(group)
     wish = NeighborhoodWish.objects.create(
         user=user,
         group=group,
+        period=period,
         text=body,
         source_message=source_message or text,
         topic=topic_key,
@@ -179,15 +183,38 @@ def capture_wish(
         kind=ActivityKind.SERVICE_WISH,
         title=f"Пожелание: {wish.get_topic_display()}",
         detail=wish.text[:500],
-        meta={"wish_id": wish.id, "group_id": group.id, "topic": wish.topic},
+        meta={
+            "wish_id": wish.id,
+            "group_id": group.id,
+            "topic": wish.topic,
+            "period_id": period.id,
+        },
     )
     return wish
 
 
-def topic_stats(group: ServiceGroup | None = None) -> list[dict]:
+def topic_stats(
+    group: ServiceGroup | None = None,
+    *,
+    period=None,
+    open_period_only: bool = False,
+) -> list[dict]:
     qs = NeighborhoodWish.objects.all()
     if group is not None:
         qs = qs.filter(group=group)
+    if period is not None:
+        qs = qs.filter(period=period)
+    elif open_period_only and group is not None:
+        from database.models import WishPeriod, WishPeriodStatus
+
+        open_p = (
+            WishPeriod.objects.filter(group=group, status=WishPeriodStatus.OPEN)
+            .order_by("-opened_at")
+            .first()
+        )
+        if open_p is None:
+            return []
+        qs = qs.filter(period=open_p)
     rows = (
         qs.values("topic")
         .annotate(count=Count("id"))

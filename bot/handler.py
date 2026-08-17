@@ -231,6 +231,7 @@ class UpdateHandler:
         if pending.pending_kind in {
             "service_invite_pick",
             "wish_group_pick",
+            "wish_ballot_vote",
             "contractor_offer_reply",
             "contractor_registration",
             "registration",

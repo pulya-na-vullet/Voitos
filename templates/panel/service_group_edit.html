@@ -149,7 +149,49 @@
 
 <div class="card" style="max-width:900px; margin-top:16px;">
   <h3 style="margin-top:0;">Пожелания группы <span class="badge">{{ wish_total }}</span></h3>
-  <p class="muted">Что пишут участники в бот — сгруппировано по темам (как голосование).</p>
+  <p class="muted">Что пишут участники в бот — сгруппировано по темам.
+    Раз в две недели жителям уходит голосование по топ-3 темам (2 дня), затем менеджеру — задача организовать сбор.
+  </p>
+  {% if open_wish_period %}
+  <p class="muted" style="margin-top:0;">
+    Текущий период подачи: с {{ open_wish_period.opened_at|date:"d.m.Y H:i" }}
+    <span class="badge">открыт</span>
+  </p>
+  {% endif %}
+
+  {% if active_wish_ballot %}
+  <div style="margin:14px 0; padding:12px; border:1px solid rgba(240,180,41,0.25); border-radius:8px; background:rgba(240,180,41,0.06);">
+    <h3 style="margin-top:0;">Голосование #{{ active_wish_ballot.id }}
+      <span class="badge">{{ active_wish_ballot.get_status_display }}</span>
+    </h3>
+    <p class="muted" style="margin-top:0;">
+      До {{ active_wish_ballot.voting_ends_at|date:"d.m H:i" }}
+      {% if active_wish_ballot.winner_label %}
+        · победитель: <strong>{{ active_wish_ballot.winner_label }}</strong>
+      {% endif %}
+    </p>
+    {% if ballot_vote_rows %}
+    <table>
+      <thead><tr><th>Вариант</th><th>Пожеланий</th><th>Голосов</th></tr></thead>
+      <tbody>
+      {% for row in ballot_vote_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="mono">{{ row.wish_count }}</td>
+          <td class="mono"><strong>{{ row.votes }}</strong></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if active_wish_ballot.status == "won" %}
+    <p style="margin-bottom:0;">
+      <a class="btn small" href="{% url 'panel:services' %}?wish_ballot={{ active_wish_ballot.id }}&group_id={{ group.id }}">Создать сбор по итогам →</a>
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if wish_stats %}
   <div class="grid two" style="margin-bottom:14px;">
     <div>
