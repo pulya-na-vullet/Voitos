@@ -418,6 +418,22 @@ class BotUser(models.Model):
         default=100,
         help_text="0–100. Пользователю не показывается. По умолчанию 100.",
     )
+    onboarding_steps = models.JSONField(
+        "Пройденные истории онбординга",
+        default=list,
+        blank=True,
+        help_text="Коды просмотренных комиксов: snow, playground, electrician, manicure, computer.",
+    )
+    onboarding_completed_at = models.DateTimeField(
+        "Онбординг завершён",
+        null=True,
+        blank=True,
+    )
+    onboarding_reward_granted = models.BooleanField(
+        "Месяц за онбординг выдан",
+        default=False,
+        help_text="После 5/5 историй подписка продлевается на 1 месяц один раз.",
+    )
     first_seen_at = models.DateTimeField(auto_now_add=True)
     last_seen_at = models.DateTimeField(auto_now=True)
 

@@ -176,6 +176,14 @@ CONTRACTOR_REG_RE = re.compile(
     r")\s*[.!]?\s*$",
     re.IGNORECASE,
 )
+ONBOARDING_RE = re.compile(
+    r"^\s*(/)?("
+    r"обучение|комиксы|комикс|онбординг|onboarding|"
+    r"истории\s+voitos|расскажи\s+о\s+(себе|voitos)|"
+    r"как\s+работает\s+voitos|про\s+voitos"
+    r")\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
 WORK_DONE_RE = re.compile(
     r"^\s*(/)?("
     r"заявка\s+выполнена|заказ\s+выполнен|работу\s+выполнил|"
@@ -574,6 +582,8 @@ class IntentAnalyzer:
     def _rule_based(self, text: str) -> IntentResult | None:
         if HELP_RE.match(text):
             return IntentResult(intent="help", confidence=1.0)
+        if ONBOARDING_RE.match(text):
+            return IntentResult(intent="comic_onboarding", confidence=1.0)
         if SUBSCRIPTION_RE.match(text):
             return IntentResult(intent="subscription_info", confidence=1.0)
         if SERVICE_COLLECTIONS_RE.match(text):
