@@ -53,9 +53,12 @@ class PanelRolesTests(TestCase):
         self.assertEqual(self.g2.manager_id, mgr_user.id)
         self.assertEqual(set(manager_group_ids(mgr_user)), {self.g1.id, self.g2.id})
 
-        # Нельзя назначить не из группы
-        with self.assertRaises(ValueError):
-            assign_group_manager(self.g1, self.u3)
+        # Можно назначить жителя не из группы
+        assign_group_manager(self.g1, self.u3, password="Outsider1!")
+        self.g1.refresh_from_db()
+        self.assertEqual(
+            self.g1.manager.panel_profile.bot_user_id, self.u3.id
+        )
 
     def test_manager_scope(self):
         mgr_user, _ = assign_group_manager(self.g1, self.u1, password="Secret123!")

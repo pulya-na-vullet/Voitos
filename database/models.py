@@ -424,6 +424,12 @@ class BotUser(models.Model):
         verbose_name = "Пользователь"
         verbose_name_plural = "Пользователи"
         ordering = ["-last_seen_at"]
+        indexes = [
+            models.Index(fields=["real_name"], name="botuser_real_name_idx"),
+            models.Index(fields=["phone"], name="botuser_phone_idx"),
+            models.Index(fields=["locality"], name="botuser_locality_idx"),
+            models.Index(fields=["display_name"], name="botuser_display_name_idx"),
+        ]
 
     def __str__(self) -> str:
         return self.real_name or self.display_name or self.username or self.max_user_id

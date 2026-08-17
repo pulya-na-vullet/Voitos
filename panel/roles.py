@@ -223,13 +223,12 @@ def assign_group_manager(
     ensure_password: bool = True,
 ) -> tuple[AbstractBaseUser, str]:
     """
-    Назначить менеджера группы из участника. Один менеджер на группу.
+    Назначить менеджера группы — любого жителя из системы.
+    Один менеджер на группу; один менеджер может вести несколько групп.
 
     Всегда возвращает plaintext-пароль (для отправки в MAX): если пароль
     не задали и учётка уже была — генерируем новый и сбрасываем.
     """
-    if not group.members.filter(pk=bot_user.pk).exists():
-        raise ValueError("Менеджером можно назначить только участника этой группы")
     user, _profile, plain = get_or_create_manager_account(bot_user, password=password)
     if not plain and ensure_password:
         plain = generate_temp_password()
