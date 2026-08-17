@@ -48,6 +48,7 @@ urlpatterns = [
         executor_views.manager_log_detail,
         name="manager_log_detail",
     ),
+    path("bot-users/search/", views.bot_users_search, name="bot_users_search"),
     path("services/groups/<int:pk>/", views.service_group_edit, name="service_group_edit"),
     path(
         "services/campaigns/<int:pk>/",

@@ -1307,6 +1307,30 @@ def services_archive(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@admin_required
+@require_http_methods(["GET"])
+def bot_users_search(request: HttpRequest) -> JsonResponse:
+    """AJAX-поиск жителей для назначения менеджера (и др.). Лимит результатов."""
+    from panel.bot_user_search import SEARCH_MIN_CHARS, search_bot_users
+
+    q = (request.GET.get("q") or "").strip()
+    try:
+        limit = int(request.GET.get("limit") or 30)
+    except (TypeError, ValueError):
+        limit = 30
+    if len(q) < SEARCH_MIN_CHARS:
+        return JsonResponse(
+            {
+                "results": [],
+                "q": q,
+                "hint": f"Введите минимум {SEARCH_MIN_CHARS} символа",
+            }
+        )
+    results = search_bot_users(q, limit=limit)
+    return JsonResponse({"results": results, "q": q, "count": len(results)})
+
+
+@login_required
 @require_http_methods(["GET", "POST"])
 def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
     group = get_object_or_404(
@@ -1334,7 +1358,7 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 return redirect("panel:service_group_edit", pk=pk)
             raw_id = (request.POST.get("manager_bot_user_id") or "").strip()
             if not raw_id.isdigit():
-                messages.error(request, "Выберите участника группы.")
+                messages.error(request, "Выберите жителя через поиск.")
                 return redirect("panel:service_group_edit", pk=pk)
             bot_user = get_object_or_404(BotUser, pk=int(raw_id))
             password = (request.POST.get("manager_password") or "").strip() or None
@@ -1372,16 +1396,7 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         old_ids = set(group.members.values_list("id", flat=True))
         ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
         group.members.set(BotUser.objects.filter(id__in=ids))
-        # Если менеджер больше не в группе — снять назначение.
-        if group.manager_id:
-            profile = getattr(group.manager, "panel_profile", None)
-            bot_id = getattr(profile, "bot_user_id", None) if profile else None
-            if bot_id and bot_id not in ids:
-                clear_group_manager(group)
-                messages.warning(
-                    request,
-                    "Менеджер был исключён из состава — назначение снято.",
-                )
+        # Менеджер может быть не участником группы — назначение не снимаем.
         new_ids = [i for i in ids if i not in old_ids]
         group_notices = 0
         campaign_notices = 0
@@ -1416,6 +1431,9 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
     member_ids = set(group.members.values_list("id", flat=True))
     # Админ видит всех для набора состава; менеджер — тоже всех (чтобы добавлять жителей).
+    # Состав: не грузим миллион строк — только текущие участники + пагинация через поиск не здесь.
+    # Для чекбоксов состава оставляем scoped список; при огромной базе админ всё ещё
+    # получает полный queryset (отдельная задача). Менеджер — поиск назначается отдельно.
     users = scoped_bot_users_qs(request.user) if not is_panel_admin(request.user) else BotUser.objects.all().order_by("real_name", "display_name")
     members = list(group.members.all().order_by("real_name", "display_name"))
     from database.models import NeighborhoodWish
@@ -1429,12 +1447,18 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         .order_by("-created_at")[:40]
     )
     current_manager_bot_id = None
+    current_manager_label = ""
     manager_login = ""
     if group.manager_id:
         manager_login = group.manager.username
         profile = getattr(group.manager, "panel_profile", None)
         if profile and profile.bot_user_id:
             current_manager_bot_id = profile.bot_user_id
+            bot = getattr(profile, "bot_user", None)
+            if bot:
+                from panel.bot_user_search import serialize_bot_user
+
+                current_manager_label = serialize_bot_user(bot)["label"]
     return render(
         request,
         "panel/service_group_edit.html",
@@ -1454,6 +1478,7 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "can_assign_manager": is_panel_admin(request.user),
             "can_delete_group": is_panel_admin(request.user),
             "current_manager_bot_id": current_manager_bot_id,
+            "current_manager_label": current_manager_label,
             "manager_login": manager_login,
         },
     )
