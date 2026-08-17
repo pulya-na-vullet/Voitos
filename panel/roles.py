@@ -175,12 +175,12 @@ def get_or_create_manager_account(
     password: str | None = None,
 ) -> tuple[AbstractBaseUser, PanelProfile, str | None]:
     """
-    Учётная запись менеджера для жителя бота.
+    Учётная запись панели для жителя бота (менеджер или уже существующая).
     Возвращает (user, profile, plaintext_password_or_None если пароль не меняли).
     """
     existing_profile = (
         PanelProfile.objects.select_related("user")
-        .filter(bot_user=bot_user, role=PanelRole.MANAGER)
+        .filter(bot_user=bot_user)
         .first()
     )
     if existing_profile:
@@ -220,23 +220,16 @@ def assign_group_manager(
     bot_user: BotUser,
     *,
     password: str | None = None,
-    ensure_password: bool = True,
-) -> tuple[AbstractBaseUser, str]:
+) -> tuple[AbstractBaseUser, str | None]:
     """
     Назначить менеджера группы из участника. Один менеджер на группу.
 
-    Всегда возвращает plaintext-пароль (для отправки в MAX): если пароль
-    не задали и учётка уже была — генерируем новый и сбрасываем.
+    Пароль в plaintext возвращается только если учётка новая или пароль
+    явно задали. Уже существующий доступ не сбрасываем.
     """
     if not group.members.filter(pk=bot_user.pk).exists():
         raise ValueError("Менеджером можно назначить только участника этой группы")
     user, _profile, plain = get_or_create_manager_account(bot_user, password=password)
-    if not plain and ensure_password:
-        plain = generate_temp_password()
-        user.set_password(plain)
-        user.save(update_fields=["password"])
-    if not plain:
-        raise ValueError("Не удалось подготовить пароль менеджера")
     group.manager = user
     group.save(update_fields=["manager", "updated_at"])
     return user, plain
@@ -245,7 +238,7 @@ def assign_group_manager(
 def manager_credentials_max_message(
     *,
     username: str,
-    password: str,
+    password: str | None,
     group_name: str,
     login_url: str | None = None,
     access_hint: str | None = None,
@@ -259,20 +252,38 @@ def manager_credentials_max_message(
         "Вам назначена роль менеджера в панели Voitos.",
         f"Группа: {group_name}",
         "",
-        "Данные для входа в веб-панель:",
-        f"Логин: {username}",
-        f"Пароль: {password}",
-        "",
-        f"URL: {url}",
     ]
-    if hint:
-        lines.append(hint)
-    lines.extend(
-        [
-            "",
-            "Смените пароль после первого входа, если передавали его другим людям.",
-        ]
-    )
+    if password:
+        lines.extend(
+            [
+                "Данные для входа в веб-панель:",
+                f"Логин: {username}",
+                f"Пароль: {password}",
+                "",
+                f"URL: {url}",
+            ]
+        )
+        if hint:
+            lines.append(hint)
+        lines.extend(
+            [
+                "",
+                "Смените пароль после первого входа, если передавали его другим людям.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Доступ в панель у вас уже есть — используйте прежний логин и пароль.",
+                f"Логин: {username}",
+                "",
+                f"URL: {url}",
+            ]
+        )
+        if hint:
+            lines.append(hint)
+        lines.append("")
+        lines.append("Новый пароль не выдавался.")
     return "\n".join(lines)
 
 
