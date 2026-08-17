@@ -44,12 +44,19 @@
   <form method="post" enctype="multipart/form-data" id="launch-campaign-form">
     {% csrf_token %}
     <input type="hidden" name="action" value="launch">
+    {% if prefill.wish_ballot_id %}
+    <input type="hidden" name="wish_ballot_id" value="{{ prefill.wish_ballot_id }}">
+    <p class="muted" style="margin-top:0;">
+      Сбор по итогам голосования #{{ prefill.wish_ballot_id }} —
+      после запуска период пожеланий закроется и откроется новый.
+    </p>
+    {% endif %}
     <div class="grid two">
       <div class="form-row">
         <label>Категория</label>
         <select name="category" id="launch-category" required>
           {% for value, label in category_choices %}
-          <option value="{{ value }}">{{ label }}</option>
+          <option value="{{ value }}" {% if prefill.category == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -58,19 +65,19 @@
         <select name="group_id" id="launch-group" required>
           <option value="" data-members="0">— выберите —</option>
           {% for g in groups %}
-          <option value="{{ g.id }}" data-members="{{ g.member_count }}">{{ g.name }} ({{ g.member_count }} чел.)</option>
+          <option value="{{ g.id }}" data-members="{{ g.member_count }}" {% if prefill.group_id == g.id|stringformat:"s" %}selected{% endif %}>{{ g.name }} ({{ g.member_count }} чел.)</option>
           {% endfor %}
         </select>
       </div>
     </div>
     <div class="form-row">
       <label>Название сбора</label>
-      <input type="text" name="title" placeholder="Чистка снега">
+      <input type="text" name="title" placeholder="Чистка снега" value="{{ prefill.title }}">
       <div class="hint">Дата «от ДД.ММ.ГГГГ» добавится сама</div>
     </div>
     <div class="form-row">
       <label>Комментарий / улица</label>
-      <input type="text" name="description" placeholder="Уборка на вашей улице">
+      <input type="text" name="description" placeholder="Уборка на вашей улице" value="{{ prefill.description }}">
     </div>
     <div class="form-row">
       <label>Дата и время мероприятия</label>

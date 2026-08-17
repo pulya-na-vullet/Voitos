@@ -180,6 +180,14 @@ class MessagePipeline:
                 self._store_out(user, reply, "volunteer_help")
                 return reply
 
+        if pending.pending_kind == "wish_ballot_vote":
+            from services.wish_ballot import handle_wish_ballot_vote
+
+            reply = handle_wish_ballot_vote(user, text, pending)
+            if reply is not None:
+                self._store_out(user, reply, "wish_ballot_vote")
+                return reply
+
         if pending.pending_kind == "reminder_time":
             reply = self._finish_pending_reminder(user, text, pending)
             if reply is not None:

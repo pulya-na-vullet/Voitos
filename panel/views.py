@@ -1193,6 +1193,22 @@ def services_home(request: HttpRequest) -> HttpResponse:
                     send_fn=_notify_user,
                     send_media_fn=send_media,
                 )
+                ballot_raw = (request.POST.get("wish_ballot_id") or "").strip()
+                if ballot_raw.isdigit():
+                    from database.models import WishBallot, WishBallotStatus
+                    from services.wish_ballot import close_period_after_campaign
+
+                    ballot = WishBallot.objects.filter(
+                        pk=int(ballot_raw),
+                        group=group,
+                        status=WishBallotStatus.WON,
+                    ).first()
+                    if ballot is not None:
+                        close_period_after_campaign(ballot, campaign)
+                        messages.info(
+                            request,
+                            "Период пожеланий закрыт, открыт новый приём идей.",
+                        )
                 photo_n = campaign.offer_photos.count()
                 extra = f", с фото ({photo_n})" if photo_n else ""
                 messages.success(
@@ -1217,6 +1233,32 @@ def services_home(request: HttpRequest) -> HttpResponse:
     scope_ids = scoped_bot_user_ids(request.user)
     if scope_ids is not None:
         pending_qs = pending_qs.filter(user_id__in=scope_ids)
+
+    wish_ballot_id = (request.GET.get("wish_ballot") or "").strip()
+    prefill = {
+        "wish_ballot_id": "",
+        "group_id": (request.GET.get("group_id") or "").strip(),
+        "category": (request.GET.get("category") or "").strip(),
+        "title": "",
+        "description": "",
+    }
+    if wish_ballot_id.isdigit():
+        from database.models import WishBallot, WishBallotStatus
+
+        ballot = (
+            WishBallot.objects.select_related("group")
+            .filter(pk=int(wish_ballot_id), status=WishBallotStatus.WON)
+            .first()
+        )
+        if ballot is not None:
+            from services.wish_ballot import topic_to_category
+
+            prefill["wish_ballot_id"] = str(ballot.id)
+            prefill["group_id"] = str(ballot.group_id)
+            prefill["category"] = topic_to_category(ballot.winner_topic)
+            prefill["title"] = ballot.winner_label or ballot.winner_topic
+            prefill["description"] = (ballot.winner_summary or "")[:400]
+
     return render(
         request,
         "panel/services_home.html",
@@ -1227,6 +1269,7 @@ def services_home(request: HttpRequest) -> HttpResponse:
             "cfg": cfg,
             "tax_stats": tax_stats,
             "pending_service": pending_qs.count(),
+            "prefill": prefill,
         },
     )
 
@@ -1496,12 +1539,29 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
     from services.service import group_accumulated_budget
     from services.wishes import topic_stats
 
-    wish_stats = topic_stats(group)
+    wish_stats = topic_stats(group, open_period_only=True)
+    if not wish_stats:
+        wish_stats = topic_stats(group)
     recent_wishes = (
         NeighborhoodWish.objects.filter(group=group)
         .select_related("user")
         .order_by("-created_at")[:40]
     )
+    from database.models import WishBallot, WishBallotStatus, WishPeriod, WishPeriodStatus
+    from services.wish_ballot import vote_summary_table
+
+    open_period = (
+        WishPeriod.objects.filter(group=group, status=WishPeriodStatus.OPEN)
+        .order_by("-opened_at")
+        .first()
+    )
+    active_ballot = (
+        WishBallot.objects.filter(group=group)
+        .exclude(status=WishBallotStatus.CANCELLED)
+        .order_by("-started_at")
+        .first()
+    )
+    ballot_vote_rows = vote_summary_table(active_ballot) if active_ballot else []
     current_manager_bot_id = None
     manager_login = ""
     if group.manager_id:
@@ -1547,6 +1607,9 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "manager_login": manager_login,
             "panel_role_bot_ids": panel_role_bot_ids,
             "admin_bot_ids": admin_bot_ids,
+            "open_wish_period": open_period,
+            "active_wish_ballot": active_ballot,
+            "ballot_vote_rows": ballot_vote_rows,
         },
     )
 

@@ -165,6 +165,7 @@ class AdminTaskKind(models.TextChoices):
     CONTRACTOR_COUNTER = "contractor_counter", "Другое время исполнителя"
     WORK_REQUEST = "work_request", "Заявка на исполнителя"
     WORK_COMMISSION = "work_commission", "Комиссия исполнителя 10%"
+    WISH_BALLOT = "wish_ballot", "Сбор по итогам голосования"
 
 
 class WorkRequestStatus(models.TextChoices):
@@ -666,6 +667,18 @@ class ServiceGroup(models.Model):
         return self.members.count()
 
 
+class WishPeriodStatus(models.TextChoices):
+    OPEN = "open", "Приём пожеланий"
+    CLOSED = "closed", "Закрыт"
+
+
+class WishBallotStatus(models.TextChoices):
+    VOTING = "voting", "Голосование"
+    WON = "won", "Есть победитель"
+    COMPLETED = "completed", "Сбор создан"
+    CANCELLED = "cancelled", "Отменено"
+
+
 class NeighborhoodWish(models.Model):
     """Resident idea / vote for improvements in their ServiceGroup."""
 
@@ -675,6 +688,14 @@ class NeighborhoodWish(models.Model):
         on_delete=models.CASCADE,
         related_name="wishes",
         verbose_name="Группа",
+    )
+    period = models.ForeignKey(
+        "WishPeriod",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="wishes",
+        verbose_name="Период подачи",
     )
     text = models.TextField("Пожелание")
     source_message = models.TextField("Исходное сообщение", blank=True, default="")
@@ -695,10 +716,122 @@ class NeighborhoodWish(models.Model):
         indexes = [
             models.Index(fields=["group", "topic"]),
             models.Index(fields=["-created_at"]),
+            models.Index(fields=["period", "topic"]),
         ]
 
     def __str__(self) -> str:
         return f"[{self.get_topic_display()}] {self.text[:60]}"
+
+
+class WishPeriod(models.Model):
+    """Период приёма пожеланий группы до создания сбора по голосованию."""
+
+    group = models.ForeignKey(
+        ServiceGroup,
+        on_delete=models.CASCADE,
+        related_name="wish_periods",
+        verbose_name="Группа",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=WishPeriodStatus.choices,
+        default=WishPeriodStatus.OPEN,
+        db_index=True,
+    )
+    opened_at = models.DateTimeField(auto_now_add=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Период пожеланий"
+        verbose_name_plural = "Периоды пожеланий"
+        ordering = ["-opened_at"]
+        indexes = [
+            models.Index(fields=["group", "status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.group_id} · {self.status} · {self.opened_at:%d.%m.%Y}"
+
+
+class WishBallot(models.Model):
+    """Раунд голосования: топ-3 темы периода → 2 дня → победитель → задача на сбор."""
+
+    group = models.ForeignKey(
+        ServiceGroup,
+        on_delete=models.CASCADE,
+        related_name="wish_ballots",
+        verbose_name="Группа",
+    )
+    period = models.ForeignKey(
+        WishPeriod,
+        on_delete=models.CASCADE,
+        related_name="ballots",
+        verbose_name="Период",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=WishBallotStatus.choices,
+        default=WishBallotStatus.VOTING,
+        db_index=True,
+    )
+    # [{topic, label, wish_count, samples: [str, ...]}, ...]
+    options = models.JSONField(default=list, blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    voting_ends_at = models.DateTimeField()
+    tallied_at = models.DateTimeField(null=True, blank=True)
+    winner_topic = models.CharField(max_length=32, blank=True, default="")
+    winner_label = models.CharField(max_length=128, blank=True, default="")
+    winner_summary = models.TextField(blank=True, default="")
+    campaign = models.OneToOneField(
+        "ServiceCampaign",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="wish_ballot",
+        verbose_name="Сбор по итогам",
+    )
+
+    class Meta:
+        verbose_name = "Голосование по пожеланиям"
+        verbose_name_plural = "Голосования по пожеланиям"
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(fields=["group", "status"]),
+            models.Index(fields=["status", "voting_ends_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Ballot #{self.pk} {self.group} ({self.status})"
+
+
+class WishVote(models.Model):
+    """Голос жителя в раунде: вариант 1..3 или отказ."""
+
+    ballot = models.ForeignKey(
+        WishBallot,
+        on_delete=models.CASCADE,
+        related_name="votes",
+    )
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="wish_votes",
+    )
+    # "" = отказ / «не делаем»; иначе ключ WishTopic
+    choice_topic = models.CharField(max_length=32, blank=True, default="")
+    will_do = models.BooleanField(default=False)
+    raw_reply = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Голос по пожеланиям"
+        verbose_name_plural = "Голоса по пожеланиям"
+        unique_together = [("ballot", "user")]
+        ordering = ["-updated_at"]
+
+    def __str__(self) -> str:
+        return f"vote ballot={self.ballot_id} user={self.user_id} → {self.choice_topic or 'нет'}"
 
 
 class ServiceCampaign(models.Model):
