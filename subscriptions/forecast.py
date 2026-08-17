@@ -104,8 +104,10 @@ def _payer_rows() -> list[PayerRow]:
     ):
         all_users.setdefault(int(u.id), u)
 
-    # Подтянуть dependents для подписей.
-    expanded = _expand_with_family(list(all_users.values()))
+    # Подтянуть dependents для подписей домохозяйств в прогнозе.
+    expanded = _expand_with_family(
+        list(all_users.values()), include_external_dependents=True
+    )
     households = build_households(expanded)
     start, end, _ = next_month_bounds()
 

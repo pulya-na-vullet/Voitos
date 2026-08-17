@@ -229,19 +229,32 @@ def build_group_graph(
     }
 
 
-def _expand_with_family(users: list[BotUser]) -> list[BotUser]:
-    """Include family payers and dependents so relatives appear together."""
+def _expand_with_family(
+    users: list[BotUser],
+    *,
+    include_external_dependents: bool = False,
+) -> list[BotUser]:
+    """Дополнить список семьи для графа/прогноза.
+
+    По умолчанию подтягиваем только недостающего плательщика (если в группе
+    есть иждивенец). Иждивенцев из других групп НЕ добавляем — иначе они
+    «расползаются» по всем группам, где состоит плательщик.
+    """
     by_id: dict[int, BotUser] = {int(u.id): u for u in users}
-    payer_ids = [u.family_payer_id for u in users if u.family_payer_id]
-    if payer_ids:
-        for payer in BotUser.objects.filter(id__in=payer_ids).select_related("family_payer"):
-            by_id[int(payer.id)] = payer
-    root_ids = list(by_id.keys())
-    if root_ids:
-        for dep in BotUser.objects.filter(family_payer_id__in=root_ids).select_related(
+    payer_ids = [int(u.family_payer_id) for u in users if u.family_payer_id]
+    missing_payers = [pid for pid in payer_ids if pid not in by_id]
+    if missing_payers:
+        for payer in BotUser.objects.filter(id__in=missing_payers).select_related(
             "family_payer"
         ):
-            by_id[int(dep.id)] = dep
+            by_id[int(payer.id)] = payer
+    if include_external_dependents:
+        root_ids = list(by_id.keys())
+        if root_ids:
+            for dep in BotUser.objects.filter(family_payer_id__in=root_ids).select_related(
+                "family_payer"
+            ):
+                by_id[int(dep.id)] = dep
     return list(by_id.values())
 
 
