@@ -64,21 +64,22 @@ class ClientsMapTests(TestCase):
         self.assertIn("Елена", family["label"])
         self.assertIn("Дмитрий", family["label"])
 
-    def test_family_spokes_and_payer_ring(self):
-        # Второй плательщик в той же группе — для кольца между платящими.
+    def test_family_spokes_and_root_ring(self):
+        # Без активной подписки грани между корнями всё равно есть.
         maria = BotUser.objects.create(
             max_user_id="map-mr",
             real_name="Мария",
-            subscription_until=timezone.now() + timedelta(days=40),
         )
         self.alley.members.add(maria)
+        self.dmitry.subscription_until = None
+        self.dmitry.save(update_fields=["subscription_until"])
 
         graphs = build_clients_map()
         alley = next(g for g in graphs if g["group_name"] == "9 аллея")
         # Дмитрий, Елена, Иван, Мария — по одной вершине на человека
         self.assertEqual(alley["vertex_count"], 4)
         self.assertEqual(alley["user_count"], 4)
-        self.assertEqual(alley["payer_count"], 2)
+        self.assertEqual(alley["payer_count"], 0)
         self.assertEqual(alley["household_count"], 3)
 
         node_els = [e for e in alley["elements"] if "source" not in e["data"]]
@@ -88,7 +89,6 @@ class ClientsMapTests(TestCase):
         self.assertIn("Елена", by_label)
         self.assertIn("Дмитрий", by_label)
         self.assertIn("dependent", by_label["Елена"]["classes"])
-        self.assertIn("paying", by_label["Дмитрий"]["classes"])
         self.assertIn("family-parent", by_label["Дмитрий"]["classes"])
 
         edges = [e for e in alley["elements"] if "source" in e["data"]]
@@ -97,10 +97,17 @@ class ClientsMapTests(TestCase):
         self.assertEqual(len(family_edges), 1)
         self.assertEqual(family_edges[0]["data"]["source"], f"u{self.elena.id}")
         self.assertEqual(family_edges[0]["data"]["target"], f"u{self.dmitry.id}")
-        # Кольцо только между платящими (Дмитрий ↔ Мария), Иван не в кольце
-        self.assertEqual(len(ring_edges), 1)
-        ring_ends = {ring_edges[0]["data"]["source"], ring_edges[0]["data"]["target"]}
-        self.assertEqual(ring_ends, {f"u{self.dmitry.id}", f"u{maria.id}"})
+        # Кольцо между корневыми (Дмитрий, Иван, Мария); Елена — только спица
+        self.assertEqual(len(ring_edges), 3)
+        ring_nodes = set()
+        for edge in ring_edges:
+            ring_nodes.add(edge["data"]["source"])
+            ring_nodes.add(edge["data"]["target"])
+        self.assertEqual(
+            ring_nodes,
+            {f"u{self.dmitry.id}", f"u{self.ivan.id}", f"u{maria.id}"},
+        )
+        self.assertNotIn(f"u{self.elena.id}", ring_nodes)
 
     def test_four_dependents_attach_to_payer(self):
         kids = []
@@ -134,7 +141,7 @@ class ClientsMapTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         self.assertIn("Карта клиентов", body)
-        self.assertIn("платящие", body)
+        self.assertIn("связаны между собой", body)
         match = re.search(
             r'<script id="clients-map-data" type="application/json">(.*?)</script>',
             body,

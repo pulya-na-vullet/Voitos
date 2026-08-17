@@ -1,7 +1,8 @@
 """Клиентская карта: графы групп.
 
 Вершина = житель. Члены семьи, привязанные по платежке, — рёбрами к плательщику.
-Платящие корни группы связаны между собой кольцом. Название группы — только в заголовке.
+Корневые вершины группы (не иждивенцы) связаны между собой кольцом.
+Название группы — только в заголовке.
 """
 from __future__ import annotations
 
@@ -113,7 +114,8 @@ def build_group_graph(
 
     elements: list[dict[str, Any]] = []
     nodes: list[dict[str, Any]] = []
-    payer_ids: list[int] = []
+    root_ids: list[int] = []
+    paying_count = 0
 
     for user in ordered_users:
         uid = int(user.id)
@@ -129,11 +131,12 @@ def build_group_graph(
             classes.append("dependent")
         else:
             classes.append("root")
+            root_ids.append(uid)
             if has_dependents:
                 classes.append("family-parent")
         if is_paying:
             classes.append("paying")
-            payer_ids.append(uid)
+            paying_count += 1
         if user.has_feature_access():
             classes.append("active-sub")
         is_panel_role = uid in panel_role_bot_ids
@@ -169,7 +172,7 @@ def build_group_graph(
             }
         )
 
-    # Спицы семьи: зависимый → плательщик.
+    # Спицы семьи: зависимый → плательщик по платежке.
     for user in ordered_users:
         payer_id = user.family_payer_id
         if not payer_id:
@@ -190,14 +193,15 @@ def build_group_graph(
             }
         )
 
-    # Кольцо только между платящими корнями.
-    payer_ids = sorted(set(payer_ids))
-    n_payers = len(payer_ids)
-    if n_payers >= 2:
-        ring_steps = n_payers if n_payers > 2 else 1
+    # Кольцо между корневыми вершинами группы (не иждивенцы):
+    # так грани видны даже без активной подписки.
+    root_ids = sorted(set(root_ids))
+    n_roots = len(root_ids)
+    if n_roots >= 2:
+        ring_steps = n_roots if n_roots > 2 else 1
         for i in range(ring_steps):
-            a = payer_ids[i]
-            b = payer_ids[(i + 1) % n_payers]
+            a = root_ids[i]
+            b = root_ids[(i + 1) % n_roots]
             elements.append(
                 {
                     "data": {
@@ -216,7 +220,7 @@ def build_group_graph(
         "group_id": group.id,
         "group_name": group.name,
         "vertex_count": len(nodes),
-        "payer_count": len(payer_ids),
+        "payer_count": paying_count,
         "panel_role_count": panel_role_count,
         "household_count": len(households),
         "user_count": len(nodes),
