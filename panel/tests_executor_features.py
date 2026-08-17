@@ -39,6 +39,7 @@ class ExecutorRolesPanelTests(TestCase):
         resp = self.client.get(reverse("panel:executor_roles"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Ролей пока нет")
+        self.assertContains(resp, "roles-search")
         self.assertNotContains(resp, "Порядок в списке")
         self.assertNotContains(resp, "Код (латиница)")
         resp = self.client.post(
@@ -54,10 +55,10 @@ class ExecutorRolesPanelTests(TestCase):
         role = ExecutorRole.objects.get(name="Сантехник")
         self.assertTrue(role.code.startswith("r_"))
         self.assertTrue(role.requires_qualification_docs)
-        self.assertContains(
-            self.client.get(reverse("panel:executor_roles")),
-            "нужны подтверждающие документы",
-        )
+        page = self.client.get(reverse("panel:executor_roles"))
+        self.assertContains(page, "нужны подтверждающие документы")
+        self.assertContains(page, 'class="role-fold"')
+        self.assertContains(page, "Сантехник")
         labels = {f["label"] for f in role.flags}
         self.assertIn("нужен допуск", labels)
         self.assertIn("нужны подтверждающие документы", labels)

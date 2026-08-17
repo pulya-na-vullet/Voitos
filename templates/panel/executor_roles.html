@@ -13,49 +13,64 @@
 
 <div class="grid two">
   <div class="card">
-    <h3 style="margin-top:0;">Список</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Название и признаки</th><th>Документы</th><th>Техника</th><th>На дому</th><th>Активна</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-bottom:12px;">
+      <h3 style="margin:0;">Список <span class="badge" id="roles-visible-count">{{ roles|length }}</span></h3>
+      <input
+        type="search"
+        id="roles-search"
+        placeholder="Поиск по названию…"
+        autocomplete="off"
+        style="min-width:200px; max-width:280px; flex:1;"
+      >
+    </div>
+    <div class="roles-list" id="roles-list">
       {% for r in roles %}
-        <tr>
-          <td>
-            <form method="post" class="role-edit-form" data-role-id="{{ r.id }}" style="display:flex; flex-direction:column; gap:8px;">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="save">
-              <input type="hidden" name="role_id" value="{{ r.id }}">
-              <input type="hidden" name="flags_json" class="flags-json" value="[]">
+      <details class="role-fold" data-role-name="{{ r.name|lower }}">
+        <summary class="role-fold-summary">
+          <span class="role-fold-name">{{ r.name }}</span>
+          <span class="role-fold-meta muted">
+            {% if r.requires_qualification_docs %}<span class="badge">док.</span>{% endif %}
+            {% if r.is_equipment %}<span class="badge">техника</span>{% endif %}
+            {% if r.accepts_at_home %}<span class="badge">на дому</span>{% endif %}
+            {% if r.is_active %}<span class="badge ok">активна</span>{% else %}<span class="badge">скрыта</span>{% endif %}
+            <span class="role-fold-chevron mono">▼</span>
+          </span>
+        </summary>
+        <div class="role-fold-body">
+          <form method="post" class="role-edit-form" data-role-id="{{ r.id }}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="save">
+            <input type="hidden" name="role_id" value="{{ r.id }}">
+            <input type="hidden" name="flags_json" class="flags-json" value="[]">
+            <div class="form-row">
+              <label>Название</label>
               <input type="text" name="name" value="{{ r.name }}" required>
-              <label class="muted"><input type="checkbox" name="requires_qualification_docs" {% if r.requires_qualification_docs %}checked{% endif %}> нужны подтверждающие документы о квалификации</label>
-              <label class="muted"><input type="checkbox" name="is_equipment" {% if r.is_equipment %}checked{% endif %}> техника (госномер / модель)</label>
-              <label class="muted"><input type="checkbox" name="accepts_at_home" {% if r.accepts_at_home %}checked{% endif %}> мастер принимает на дому</label>
+            </div>
+            <label class="muted"><input type="checkbox" name="requires_qualification_docs" {% if r.requires_qualification_docs %}checked{% endif %}> нужны подтверждающие документы о квалификации</label>
+            <label class="muted"><input type="checkbox" name="is_equipment" {% if r.is_equipment %}checked{% endif %}> техника (госномер / модель)</label>
+            <label class="muted"><input type="checkbox" name="accepts_at_home" {% if r.accepts_at_home %}checked{% endif %}> мастер принимает на дому</label>
+            <div class="form-row" style="margin-top:10px;">
+              <label>Доп. признаки</label>
               <div class="flag-editor" data-editor="role-{{ r.id }}"></div>
-              <label class="muted"><input type="checkbox" name="is_active" {% if r.is_active %}checked{% endif %}> активна</label>
+            </div>
+            <label class="muted"><input type="checkbox" name="is_active" {% if r.is_active %}checked{% endif %}> активна</label>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
               <button class="btn small" type="submit">Сохранить</button>
-            </form>
-          </td>
-          <td>{% if r.requires_qualification_docs %}да{% else %}нет{% endif %}</td>
-          <td>{% if r.is_equipment %}да{% else %}—{% endif %}</td>
-          <td>{% if r.accepts_at_home %}да{% else %}—{% endif %}</td>
-          <td>{% if r.is_active %}<span class="badge ok">да</span>{% else %}<span class="badge">нет</span>{% endif %}</td>
-          <td>
-            <form method="post" onsubmit="return confirm('Удалить / скрыть роль?');">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="delete">
-              <input type="hidden" name="role_id" value="{{ r.id }}">
-              <button class="btn danger small" type="submit">Удалить</button>
-            </form>
-          </td>
-        </tr>
+            </div>
+          </form>
+          <form method="post" style="margin-top:8px;" onsubmit="return confirm('Удалить / скрыть роль?');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="role_id" value="{{ r.id }}">
+            <button class="btn danger small" type="submit">Удалить</button>
+          </form>
+        </div>
+      </details>
       {% empty %}
-        <tr><td colspan="6" class="muted">Ролей пока нет — создайте справа</td></tr>
+      <p class="muted" id="roles-empty">Ролей пока нет — создайте справа</p>
       {% endfor %}
-      </tbody>
-    </table>
+      <p class="muted" id="roles-no-match" hidden>Ничего не найдено</p>
+    </div>
   </div>
   <div class="card">
     <h3 style="margin-top:0;">Новая роль</h3>
@@ -77,6 +92,38 @@
 </div>
 
 <style>
+  .roles-list { display:flex; flex-direction:column; gap:6px; }
+  .role-fold {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.02);
+    overflow: hidden;
+  }
+  .role-fold[hidden] { display: none !important; }
+  .role-fold-summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    user-select: none;
+  }
+  .role-fold-summary::-webkit-details-marker { display: none; }
+  .role-fold-name { font-weight: 600; }
+  .role-fold-meta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .role-fold-chevron { display:inline-block; transition: transform .15s ease; font-size:0.85rem; }
+  .role-fold[open] .role-fold-chevron { transform: rotate(180deg); }
+  .role-fold-body {
+    padding: 0 12px 12px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .role-edit-form { display:flex; flex-direction:column; gap:8px; padding-top:10px; }
   .flag-editor { display:flex; flex-direction:column; gap:6px; }
   .flag-row {
     display:flex; align-items:center; gap:8px;
@@ -198,6 +245,28 @@
       [],
       newForm.querySelector(".flags-json")
     );
+  }
+
+  const search = document.getElementById("roles-search");
+  const folds = Array.from(document.querySelectorAll(".role-fold"));
+  const countEl = document.getElementById("roles-visible-count");
+  const noMatch = document.getElementById("roles-no-match");
+
+  function applySearch() {
+    const q = (search && search.value || "").trim().toLowerCase();
+    let visible = 0;
+    folds.forEach(el => {
+      const name = el.getAttribute("data-role-name") || "";
+      const ok = !q || name.indexOf(q) !== -1;
+      el.hidden = !ok;
+      if (ok) visible += 1;
+    });
+    if (countEl) countEl.textContent = String(visible);
+    if (noMatch) noMatch.hidden = !(folds.length && visible === 0);
+  }
+
+  if (search) {
+    search.addEventListener("input", applySearch);
   }
 })();
 </script>
