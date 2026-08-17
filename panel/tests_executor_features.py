@@ -48,6 +48,7 @@ class ExecutorRolesPanelTests(TestCase):
                 "action": "create",
                 "name": "Сантехник",
                 "requires_qualification_docs": "on",
+                "requires_work_photos": "on",
                 "flags_json": '[{"code":"x2","label":"нужен допуск","on":true}]',
             },
         )
@@ -55,13 +56,62 @@ class ExecutorRolesPanelTests(TestCase):
         role = ExecutorRole.objects.get(name="Сантехник")
         self.assertTrue(role.code.startswith("r_"))
         self.assertTrue(role.requires_qualification_docs)
+        self.assertTrue(role.requires_work_photos)
         page = self.client.get(reverse("panel:executor_roles"))
         self.assertContains(page, "нужны подтверждающие документы")
+        self.assertContains(page, "нужны фото при записи заявки")
         self.assertContains(page, 'class="role-fold"')
         self.assertContains(page, "Сантехник")
         labels = {f["label"] for f in role.flags}
         self.assertIn("нужен допуск", labels)
         self.assertIn("нужны подтверждающие документы", labels)
+
+    def test_create_role_without_work_photos(self):
+        resp = self.client.post(
+            reverse("panel:executor_roles"),
+            {
+                "action": "create",
+                "name": "Мастер маникюра",
+                "flags_json": "[]",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        role = ExecutorRole.objects.get(name="Мастер маникюра")
+        self.assertFalse(role.requires_work_photos)
+        page = self.client.get(reverse("panel:executor_roles"))
+        self.assertContains(page, "без фото")
+
+    def test_toggle_requires_work_photos_on_save(self):
+        role = ExecutorRole.objects.create(
+            code="r_nails", name="Ногти", requires_work_photos=True
+        )
+        resp = self.client.post(
+            reverse("panel:executor_roles"),
+            {
+                "action": "save",
+                "role_id": str(role.id),
+                "name": role.name,
+                "is_active": "on",
+                "flags_json": "[]",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        role.refresh_from_db()
+        self.assertFalse(role.requires_work_photos)
+        resp = self.client.post(
+            reverse("panel:executor_roles"),
+            {
+                "action": "save",
+                "role_id": str(role.id),
+                "name": role.name,
+                "is_active": "on",
+                "requires_work_photos": "on",
+                "flags_json": "[]",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        role.refresh_from_db()
+        self.assertTrue(role.requires_work_photos)
 
     def test_create_starts_without_flags_and_can_remove(self):
         resp = self.client.post(
@@ -172,6 +222,24 @@ class WorkRequestBotTests(TestCase):
         req = WorkRequest.objects.get(user=self.user)
         self.assertEqual(req.role.code, "electrician")
         self.assertEqual(req.photos.count(), 1)
+
+    def test_work_request_without_photos_when_role_allows(self):
+        nails = ExecutorRole.objects.create(
+            code="nails",
+            name="Мастер маникюра",
+            requires_work_photos=False,
+        )
+        msg = start_work_request(self.user, self.pending, role=nails)
+        self.assertIn("маникюра", msg.lower())
+        msg = handle_work_request_step(
+            self.user, "Хочу покрыть гель-лаком", self.pending
+        )
+        self.assertIn("отправлена", msg.lower())
+        self.assertNotIn("фото", msg.lower())
+        req = WorkRequest.objects.get(user=self.user)
+        self.assertEqual(req.role.code, "nails")
+        self.assertEqual(req.photos.count(), 0)
+        self.assertEqual(req.status, "pending")
 
 
 class ManagerLogTests(TestCase):

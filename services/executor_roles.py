@@ -158,6 +158,7 @@ def apply_role_form_fields(role: ExecutorRole, post) -> None:
     role.accepts_at_home = bool(post.get("accepts_at_home"))
     role.requires_qualification_docs = bool(post.get("requires_qualification_docs"))
     role.is_equipment = bool(post.get("is_equipment"))
+    role.requires_work_photos = bool(post.get("requires_work_photos"))
 
 
 def parse_flags_from_post(post) -> list[dict[str, Any]]:

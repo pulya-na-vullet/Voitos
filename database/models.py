@@ -1283,6 +1283,11 @@ class ExecutorRole(models.Model):
         default=False,
         help_text="После принятия заявки согласовываем окна приёма у мастера.",
     )
+    requires_work_photos = models.BooleanField(
+        "Нужны фото при записи заявки",
+        default=True,
+        help_text="Если выключено — житель вызывает мастера без фото (маникюр и т.п.).",
+    )
     for_snow = models.BooleanField("Для уборки снега", default=False)
     for_road = models.BooleanField("Для дорожных работ", default=False)
     for_snow_haul = models.BooleanField(

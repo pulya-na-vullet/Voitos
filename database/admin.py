@@ -140,10 +140,16 @@ class ExecutorRoleAdmin(admin.ModelAdmin):
         "name",
         "requires_qualification_docs",
         "is_equipment",
+        "requires_work_photos",
         "is_active",
         "sort_order",
     )
-    list_filter = ("is_active", "requires_qualification_docs", "is_equipment")
+    list_filter = (
+        "is_active",
+        "requires_qualification_docs",
+        "is_equipment",
+        "requires_work_photos",
+    )
     search_fields = ("code", "name")
 
 
