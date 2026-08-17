@@ -1509,6 +1509,22 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         profile = getattr(group.manager, "panel_profile", None)
         if profile and profile.bot_user_id:
             current_manager_bot_id = profile.bot_user_id
+    from database.models import PanelProfile, PanelRole
+
+    panel_role_bot_ids = set(
+        PanelProfile.objects.filter(
+            bot_user_id__isnull=False,
+            role__in=[PanelRole.ADMIN, PanelRole.MANAGER],
+        ).values_list("bot_user_id", flat=True)
+    )
+    admin_bot_ids = set(
+        PanelProfile.objects.filter(
+            bot_user_id__isnull=False,
+            role=PanelRole.ADMIN,
+        ).values_list("bot_user_id", flat=True)
+    )
+    if current_manager_bot_id:
+        panel_role_bot_ids.add(current_manager_bot_id)
     return render(
         request,
         "panel/service_group_edit.html",
@@ -1529,6 +1545,8 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "can_delete_group": is_panel_admin(request.user),
             "current_manager_bot_id": current_manager_bot_id,
             "manager_login": manager_login,
+            "panel_role_bot_ids": panel_role_bot_ids,
+            "admin_bot_ids": admin_bot_ids,
         },
     )
 

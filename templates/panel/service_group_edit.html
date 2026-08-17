@@ -34,14 +34,25 @@
         </span>
         <span class="muted mono">▼</span>
       </summary>
-      <p class="muted" style="margin-top:0;">Отметьте жителей группы. Новым участникам автоматически придут все активные сборы этой группы (остальным повторно не шлём).</p>
+      <p class="muted" style="margin-top:0;">Отметьте жителей группы. Новым участникам автоматически придут все активные сборы этой группы (остальным повторно не шлём).
+        Менеджер / администратор подсвечен <span style="color:#f0b429;">жёлто-оранжевым</span>.
+      </p>
       <table>
         <thead><tr><th></th><th>Имя</th><th>Телефон</th><th>Нас. пункт</th><th>Адрес</th></tr></thead>
         <tbody>
         {% for u in users %}
-          <tr>
+          <tr class="{% if u.id == current_manager_bot_id or u.id in panel_role_bot_ids %}row-panel-role{% endif %}">
             <td><input type="checkbox" name="user_ids" value="{{ u.id }}" {% if u.id in member_ids %}checked{% endif %}></td>
-            <td>{{ u.real_name|default:u.display_name|default:u.max_user_id }}</td>
+            <td>
+              {{ u.real_name|default:u.display_name|default:u.max_user_id }}
+              {% if u.id == current_manager_bot_id %}
+                <span class="badge panel-role-badge">менеджер группы</span>
+              {% elif u.id in admin_bot_ids %}
+                <span class="badge panel-role-badge">админ</span>
+              {% elif u.id in panel_role_bot_ids %}
+                <span class="badge panel-role-badge">менеджер</span>
+              {% endif %}
+            </td>
             <td class="mono">{{ u.phone|default:"—" }}</td>
             <td>{{ u.locality|default:"—" }}</td>
             <td>{{ u.address|truncatechars:50 }}</td>
@@ -120,6 +131,20 @@
 <style>
   details.members-fold > summary::-webkit-details-marker { display: none; }
   details.members-fold[open] > summary .mono { transform: rotate(180deg); display: inline-block; }
+  tr.row-panel-role > td {
+    background: rgba(240, 180, 41, 0.16) !important;
+    box-shadow: inset 3px 0 0 #f0b429;
+  }
+  tr.row-panel-role:hover > td {
+    background: rgba(240, 180, 41, 0.24) !important;
+  }
+  .badge.panel-role-badge {
+    margin-left: 6px;
+    color: #f0b429;
+    border-color: rgba(240, 180, 41, 0.45);
+    background: rgba(240, 180, 41, 0.12);
+    vertical-align: middle;
+  }
 </style>
 
 <div class="card" style="max-width:900px; margin-top:16px;">

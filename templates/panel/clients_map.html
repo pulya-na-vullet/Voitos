@@ -7,6 +7,7 @@
 </div>
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
   Каждая группа — отдельный граф семей. Родственники в одной вершине.
+  Менеджеры и администраторы подсвечены <span style="color:#f0b429;">жёлто-оранжевым</span>.
   {% if graph_count %}
     Графов: {{ graph_count }} · семей: {{ vertex_total }} · платящих: {{ payer_total }}.
   {% endif %}
@@ -92,11 +93,28 @@
           },
         },
         {
+          selector: "node.panel-role",
+          style: {
+            "background-color": "#8a5a12",
+            "border-color": "#f0b429",
+            "border-width": 4,
+            color: "#fff8e8",
+          },
+        },
+        {
+          selector: "node.panel-role.family",
+          style: {
+            "border-color": "#ffb84d",
+            "border-width": 4,
+            "background-color": "#9a6418",
+          },
+        },
+        {
           selector: "edge",
           style: {
             width: 2,
             "curve-style": "bezier",
-            "line-color": "rgba(61,156,253,0.35)",
+            "line-color": "rgba(46,196,182,0.35)",
             "line-style": "dashed",
             "target-arrow-shape": "none",
           },
@@ -104,8 +122,15 @@
         {
           selector: "node:selected",
           style: {
-            "border-color": "#3d9cfd",
+            "border-color": "#ffcc66",
             "border-width": 4,
+          },
+        },
+        {
+          selector: "node.panel-role:selected",
+          style: {
+            "border-color": "#ffe08a",
+            "border-width": 5,
           },
         },
       ],
