@@ -293,6 +293,7 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     "Перевести заявку в «Выполнена» может только администратор.",
                 )
                 return redirect("panel:work_request_detail", pk=pk)
+            prev_status = req.status
             req.status = status
             req.admin_note = (request.POST.get("note") or "").strip()
             req.client_locality = (
@@ -308,6 +309,33 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             )
             if status in {WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED}:
                 close_task_for_source(AdminTaskKind.WORK_REQUEST, "WorkRequest", req.id)
+            # Ручной перевод в «ждём клиента» → сразу опрос в MAX: услуга оказана?
+            if (
+                status == WorkRequestStatus.AWAITING_CLIENT
+                and prev_status != WorkRequestStatus.AWAITING_CLIENT
+            ):
+                from services.work_request_client_survey import start_client_service_survey
+
+                if start_client_service_survey(req):
+                    messages.success(
+                        request,
+                        "Заявка обновлена. Клиенту в MAX отправлен вопрос: "
+                        "оказана ли услуга.",
+                    )
+                else:
+                    messages.warning(
+                        request,
+                        "Статус сохранён, но сообщение клиенту в MAX не ушло "
+                        "(проверьте токен бота / chat_id жителя).",
+                    )
+                log_manager_action(
+                    request.user,
+                    action="work_request_awaiting_client",
+                    title=f"Заявка #{req.id}: ждём подтверждения клиента",
+                    detail="Запущен опрос клиента в MAX",
+                    meta={"work_request_id": req.id, "prev_status": prev_status},
+                )
+                return redirect("panel:work_request_detail", pk=pk)
             messages.success(request, "Заявка обновлена.")
             return redirect("panel:work_request_detail", pk=pk)
     from services.contractors import max_profile_link

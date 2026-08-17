@@ -26,6 +26,7 @@ WORK_FLOW_PENDING_KINDS = frozenset(
         "work_request_rating",
         "work_request_schedule_master",
         "work_request_schedule_client",
+        "work_request_service_survey",
     }
 )
 

@@ -37,7 +37,12 @@ def parse_score(text: str) -> int | None:
     return None
 
 
-def rating_ask_message(req: WorkRequest) -> str:
+def rating_ask_message(req: WorkRequest, *, service_provided: bool = True) -> str:
+    if not service_provided:
+        return (
+            f"Оцените качество сервиса по заявке #{req.id}.\n"
+            "Напишите оценку от 1 до 5, где 5 — отлично."
+        )
     name = "исполнителя"
     if req.assigned_contractor_id:
         name = str(req.assigned_contractor.user)
@@ -48,7 +53,12 @@ def rating_ask_message(req: WorkRequest) -> str:
 
 
 def ask_client_for_rating(
-    req: WorkRequest, *, send_fn=None, send: bool = True
+    req: WorkRequest,
+    *,
+    send_fn=None,
+    send: bool = True,
+    service_provided: bool = True,
+    allow_without_confirm: bool = False,
 ) -> bool:
     """Поставить pending оценки; опционально отправить отдельное сообщение."""
     req = (
@@ -65,7 +75,7 @@ def ask_client_for_rating(
 
     client = req.user
     if send:
-        text = rating_ask_message(req)
+        text = rating_ask_message(req, service_provided=service_provided)
         if send_fn is None:
             from services.work_request_dispatch import _default_send_fn
 
@@ -80,9 +90,14 @@ def ask_client_for_rating(
     if not pending.pending_kind or pending.pending_kind in {
         RATING_PENDING,
         "work_request_client_confirm",
+        "work_request_service_survey",
     }:
         pending.pending_kind = RATING_PENDING
-        pending.pending_payload = {"work_request_id": req.id, "step": "score"}
+        pending.pending_payload = {
+            "work_request_id": req.id,
+            "step": "score",
+            "service_provided": service_provided,
+        }
         pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
 
     WorkRequest.objects.filter(pk=req.id).update(rating_asked_at=timezone.now())
@@ -118,9 +133,11 @@ def handle_rating_step(user: BotUser, text: str, pending: PendingAction) -> str:
         payload["step"] = "comment"
         pending.pending_payload = payload
         pending.save(update_fields=["pending_payload", "updated_at"])
+        service_ok = payload.get("service_provided", True)
+        what = "сервиса" if service_ok is False else "работы"
         return (
             f"Оценка {score}/5 принята.\n"
-            "Напишите короткий комментарий о работе "
+            f"Напишите короткий комментарий о качестве {what} "
             "(или «пропустить», если без комментария)."
         )
 
