@@ -1,0 +1,124 @@
+{% extends "panel/base.html" %}
+{% block title %}Менеджер {{ manager.username }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Менеджер <span class="mono">{{ manager.username }}</span></h1>
+  <a class="btn secondary small" href="{% url 'panel:managers' %}">← Все менеджеры</a>
+</div>
+<p class="muted" style="margin-top:-6px;">
+  {% if profile.bot_user %}Житель: {{ profile.bot_user }} · {% endif %}
+  Группы:
+  {% for g in groups %}{{ g.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+</p>
+
+{% if periods %}
+<div class="card" style="margin-bottom:16px;">
+  <form method="get" style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+    <div class="form-row" style="margin:0; min-width:240px;">
+      <label>Период опроса</label>
+      <select name="period" onchange="this.form.submit()">
+        {% for p in periods %}
+        <option value="{{ p.id }}" {% if selected and selected.id == p.id %}selected{% endif %}>
+          {{ p.group.name }} · {{ p.started_at|date:"d.m.Y" }} · {{ p.get_status_display }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{% if selected %}
+<div class="grid two" style="margin-bottom:16px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Сводка периода</h3>
+    <p>
+      Группа: <strong>{{ selected.group.name }}</strong><br>
+      Статус: <span class="badge">{{ selected.get_status_display }}</span><br>
+      С {{ selected.started_at|date:"d.m.Y H:i" }}
+      до {{ selected.ends_at|date:"d.m.Y H:i" }}
+    </p>
+    <p class="mono">
+      Средняя: {% if stats.avg %}{{ stats.avg }}{% else %}—{% endif %}
+      · ответов: {{ stats.count }}
+      · ОС 1–4: {{ stats.low_count }}
+    </p>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Саммари ИИ</h3>
+    {% if selected.ai_summary %}
+    <p style="white-space:pre-wrap; margin-top:0;">{{ selected.ai_summary }}</p>
+    <p class="muted mono">{{ selected.ai_summarized_at|date:"d.m.Y H:i" }}</p>
+    {% else %}
+    <p class="muted">Саммари ещё нет — появится после закрытия периода или по кнопке.</p>
+    {% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="period_id" value="{{ selected.id }}">
+      <input type="hidden" name="action" value="resummarize">
+      <button class="btn secondary small" type="submit">Обновить саммари ИИ</button>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Отзывы 1–4 за период</h3>
+  <table>
+    <thead><tr><th>Оценка</th><th>Житель</th><th>Комментарий</th><th>Когда</th></tr></thead>
+    <tbody>
+    {% for r in feedback %}
+      <tr>
+        <td class="mono"><strong>{{ r.score }}</strong>/5</td>
+        <td><a href="{% url 'panel:user_dashboard' r.user_id %}">{{ r.user }}</a></td>
+        <td>{% if r.comment %}{{ r.comment }}{% else %}<span class="muted">без текста</span>{% endif %}</td>
+        <td class="mono">{{ r.created_at|date:"d.m H:i" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Пока нет оценок 1–4</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Все ответы периода</h3>
+  <table>
+    <thead><tr><th>Оценка</th><th>Житель</th><th>Комментарий</th><th>Когда</th></tr></thead>
+    <tbody>
+    {% for r in all_responses %}
+      <tr>
+        <td class="mono">{{ r.score }}/5</td>
+        <td>{{ r.user }}</td>
+        <td>{% if r.comment %}{{ r.comment }}{% else %}—{% endif %}</td>
+        <td class="mono">{{ r.created_at|date:"d.m H:i" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Ответов ещё нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Лог сообщений ИИ</h3>
+  <table>
+    <thead><tr><th>Когда</th><th>Роль</th><th>Текст</th></tr></thead>
+    <tbody>
+    {% for log in ai_logs %}
+      <tr>
+        <td class="mono">{{ log.created_at|date:"d.m H:i" }}</td>
+        <td><span class="badge">{{ log.role }}</span></td>
+        <td style="white-space:pre-wrap; max-width:640px;">{{ log.content|truncatechars:800 }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="3" class="muted">Лог пуст</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card">
+  <p class="muted" style="margin:0;">Опросов по этому менеджеру ещё не было — первая рассылка уйдёт при старте планировщика.</p>
+</div>
+{% endif %}
+{% endblock %}

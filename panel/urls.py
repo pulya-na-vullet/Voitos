@@ -42,6 +42,12 @@ urlpatterns = [
         executor_views.work_request_detail,
         name="work_request_detail",
     ),
+    path("managers/", executor_views.managers_quality_list, name="managers"),
+    path(
+        "managers/<int:user_id>/",
+        executor_views.managers_quality_detail,
+        name="managers_detail",
+    ),
     path("manager-logs/", executor_views.manager_logs_list, name="manager_logs"),
     path(
         "manager-logs/<int:user_id>/",
