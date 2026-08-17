@@ -77,8 +77,14 @@ def build_households(users: list[BotUser]) -> dict[int, dict[str, Any]]:
     return households
 
 
-def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] | None:
+def build_group_graph(
+    group: MapGroup,
+    users: list[BotUser],
+    *,
+    panel_role_bot_ids: set[int] | None = None,
+) -> dict[str, Any] | None:
     """Данные одного графа группы в формате элементов Cytoscape.js."""
+    panel_role_bot_ids = panel_role_bot_ids or set()
     households_map = build_households(users)
     households = sorted(
         households_map.values(),
@@ -101,6 +107,11 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] |
             classes.append("paying")
         if household["active_subscription"]:
             classes.append("active-sub")
+        is_panel_role = any(
+            int(m.id) in panel_role_bot_ids for m in household["members"]
+        )
+        if is_panel_role:
+            classes.append("panel-role")
         elements.append(
             {
                 "data": {
@@ -111,6 +122,7 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] |
                     "root_id": household["root_id"],
                     "member_count": household["member_count"],
                     "is_paying": household["is_paying"],
+                    "is_panel_role": is_panel_role,
                 },
                 "classes": " ".join(classes),
             }
@@ -125,6 +137,7 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] |
                 "member_count": household["member_count"],
                 "root_id": household["root_id"],
                 "is_paying": household["is_paying"],
+                "is_panel_role": is_panel_role,
             }
         )
 
@@ -148,11 +161,13 @@ def build_group_graph(group: MapGroup, users: list[BotUser]) -> dict[str, Any] |
             )
 
     payer_count = sum(1 for h in households if h["is_paying"])
+    panel_role_count = sum(1 for n in nodes if n.get("is_panel_role"))
     return {
         "group_id": group.id,
         "group_name": group.name,
         "vertex_count": len(households),
         "payer_count": payer_count,
+        "panel_role_count": panel_role_count,
         "household_count": len(households),
         "user_count": sum(h["member_count"] for h in households),
         "nodes": nodes,
@@ -176,9 +191,24 @@ def _expand_with_family(users: list[BotUser]) -> list[BotUser]:
     return list(by_id.values())
 
 
+def _panel_role_bot_user_ids() -> set[int]:
+    """BotUser id менеджеров и администраторов панели (связанных с жителем)."""
+    from database.models import PanelProfile, PanelRole
+
+    return set(
+        PanelProfile.objects.filter(
+            bot_user_id__isnull=False,
+            role__in=[PanelRole.ADMIN, PanelRole.MANAGER],
+        ).values_list("bot_user_id", flat=True)
+    )
+
+
 def build_clients_map(*, group_ids: list[int] | set[int] | None = None) -> list[dict[str, Any]]:
     """Все группы сервисов как отдельные графы + блок без группы."""
-    groups_qs = ServiceGroup.objects.prefetch_related(
+    panel_role_ids = _panel_role_bot_user_ids()
+    groups_qs = ServiceGroup.objects.select_related(
+        "manager", "manager__panel_profile"
+    ).prefetch_related(
         Prefetch(
             "members",
             queryset=BotUser.objects.select_related("family_payer").order_by("id"),
@@ -195,12 +225,18 @@ def build_clients_map(*, group_ids: list[int] | set[int] | None = None) -> list[
         members = list(group.members.all())
         if not members:
             continue
+        # Менеджер этой группы тоже подсвечивается, даже если не в members
+        role_ids = set(panel_role_ids)
+        profile = getattr(getattr(group, "manager", None), "panel_profile", None)
+        if profile and profile.bot_user_id:
+            role_ids.add(int(profile.bot_user_id))
         users = _expand_with_family(members)
         for u in users:
             seen_user_ids.add(int(u.id))
         graph = build_group_graph(
             MapGroup(id=int(group.id), name=group.name),
             users,
+            panel_role_bot_ids=role_ids,
         )
         if graph:
             graphs.append(graph)
@@ -220,6 +256,7 @@ def build_clients_map(*, group_ids: list[int] | set[int] | None = None) -> list[
                 graph = build_group_graph(
                     MapGroup(id=None, name="Без группы"),
                     users,
+                    panel_role_bot_ids=panel_role_ids,
                 )
                 if graph:
                     graphs.append(graph)

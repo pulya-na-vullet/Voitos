@@ -6,7 +6,8 @@ from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.utils import timezone
 
-from database.models import BotUser, ServiceGroup
+from database.models import BotUser, PanelProfile, PanelRole, ServiceGroup
+from panel.roles import assign_group_manager
 from services.clients_map import build_clients_map, build_households, household_root_id
 from subscriptions.family import link_family_members
 
@@ -37,10 +38,19 @@ class ClientsMapTests(TestCase):
         self.rockers.members.add(self.rocker)
         link_family_members([self.elena, self.dmitry])
         self.admin = User.objects.create_superuser("mapadm", "m@t.com", "pass")
-        from database.models import PanelProfile, PanelRole
         PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
         self.client = Client()
         self.client.login(username="mapadm", password="pass")
+
+    def test_manager_node_marked_panel_role(self):
+        assign_group_manager(self.alley, self.ivan, password="MgrMap99!")
+        graphs = build_clients_map()
+        alley = next(g for g in graphs if g["group_name"] == "9 аллея")
+        nodes = [e for e in alley["elements"] if "source" not in e["data"]]
+        ivan_node = next(n for n in nodes if "Иван" in n["data"]["label"])
+        self.assertIn("panel-role", ivan_node["classes"])
+        self.assertTrue(ivan_node["data"]["is_panel_role"])
+        self.assertGreaterEqual(alley["panel_role_count"], 1)
 
     def test_household_merges_relatives(self):
         self.elena.refresh_from_db()
