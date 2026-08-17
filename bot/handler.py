@@ -232,6 +232,7 @@ class UpdateHandler:
             "service_invite_pick",
             "wish_group_pick",
             "wish_ballot_vote",
+            "manager_survey",
             "contractor_offer_reply",
             "contractor_registration",
             "registration",

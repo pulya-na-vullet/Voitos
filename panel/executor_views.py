@@ -388,6 +388,119 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 @login_required
 @admin_required
+def managers_quality_list(request: HttpRequest) -> HttpResponse:
+    from database.models import ManagerSurveyPeriod, ManagerSurveyResponse
+    from django.db.models import Avg, Count
+
+    managers = (
+        PanelProfile.objects.filter(role=PanelRole.MANAGER)
+        .select_related("user", "bot_user")
+        .order_by("user__username")
+    )
+    rows = []
+    for profile in managers:
+        groups = list(profile.user.managed_service_groups.order_by("name"))
+        periods = ManagerSurveyPeriod.objects.filter(manager=profile.user)
+        latest = periods.order_by("-started_at").first()
+        agg = ManagerSurveyResponse.objects.filter(period__manager=profile.user).aggregate(
+            avg=Avg("score"), cnt=Count("id")
+        )
+        low_cnt = ManagerSurveyResponse.objects.filter(
+            period__manager=profile.user, score__lte=4
+        ).count()
+        rows.append(
+            {
+                "profile": profile,
+                "groups": groups,
+                "latest": latest,
+                "avg": round(float(agg["avg"]), 2) if agg["avg"] is not None else None,
+                "count": int(agg["cnt"] or 0),
+                "low_count": low_cnt,
+            }
+        )
+    return render(request, "panel/managers.html", {"rows": rows})
+
+
+@login_required
+@admin_required
+@require_http_methods(["GET", "POST"])
+def managers_quality_detail(request: HttpRequest, user_id: int) -> HttpResponse:
+    from database.models import (
+        ManagerSurveyAILog,
+        ManagerSurveyPeriod,
+        ManagerSurveyResponse,
+    )
+    from services.manager_survey import period_stats, summarize_period_with_ai
+
+    manager = get_object_or_404(User, pk=user_id)
+    profile = PanelProfile.objects.filter(user=manager).select_related("bot_user").first()
+    if not profile or profile.role != PanelRole.MANAGER:
+        messages.error(request, "Это не менеджер.")
+        return redirect("panel:managers")
+
+    periods = list(
+        ManagerSurveyPeriod.objects.filter(manager=manager)
+        .select_related("group")
+        .order_by("-started_at")[:24]
+    )
+    period_id = (request.GET.get("period") or request.POST.get("period_id") or "").strip()
+    selected = None
+    if period_id.isdigit():
+        selected = next((p for p in periods if p.id == int(period_id)), None)
+    if selected is None and periods:
+        selected = periods[0]
+
+    if request.method == "POST" and selected is not None:
+        action = request.POST.get("action")
+        if action == "resummarize":
+            summarize_period_with_ai(selected)
+            messages.success(request, "Саммари ИИ обновлено.")
+            return redirect(f"{request.path}?period={selected.id}")
+
+    feedback = []
+    stats = {"avg": None, "count": 0, "low_count": 0}
+    ai_logs = []
+    if selected is not None:
+        stats = period_stats(selected)
+        feedback = list(
+            ManagerSurveyResponse.objects.filter(period=selected, score__lte=4)
+            .select_related("user")
+            .order_by("score", "-created_at")
+        )
+        # Также все ответы периода для полной картины
+        all_responses = list(
+            ManagerSurveyResponse.objects.filter(period=selected)
+            .select_related("user")
+            .order_by("score", "-created_at")
+        )
+        ai_logs = list(
+            ManagerSurveyAILog.objects.filter(manager=manager, period=selected).order_by(
+                "created_at"
+            )[:100]
+        )
+    else:
+        all_responses = []
+
+    groups = list(manager.managed_service_groups.order_by("name"))
+    return render(
+        request,
+        "panel/managers_detail.html",
+        {
+            "manager": manager,
+            "profile": profile,
+            "groups": groups,
+            "periods": periods,
+            "selected": selected,
+            "stats": stats,
+            "feedback": feedback,
+            "all_responses": all_responses,
+            "ai_logs": ai_logs,
+        },
+    )
+
+
+@login_required
+@admin_required
 def manager_logs_list(request: HttpRequest) -> HttpResponse:
     managers = (
         PanelProfile.objects.filter(role=PanelRole.MANAGER)

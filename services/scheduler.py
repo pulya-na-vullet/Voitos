@@ -18,6 +18,7 @@ from services.work_request_dispatch import (
 from services.work_request_completion import process_due_scheduled_messages
 from services.work_request_rating import backfill_rating_asks
 from services.wish_ballot import process_wish_ballots
+from services.manager_survey import process_manager_surveys
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,13 @@ def run_service_campaign_scheduler(stop_event=None, interval_seconds: int = 60) 
                         wish_stats.get("tallied"),
                         wish_stats.get("started"),
                     )
+                mgr_stats = process_manager_surveys(send_fn=send_fn)
+                if mgr_stats.get("closed") or mgr_stats.get("started"):
+                    logger.info(
+                        "Manager surveys: closed=%s started=%s",
+                        mgr_stats.get("closed"),
+                        mgr_stats.get("started"),
+                    )
             else:
                 expire_stale_counter_offers()
                 expire_stale_work_offers()
@@ -80,6 +88,7 @@ def run_service_campaign_scheduler(stop_event=None, interval_seconds: int = 60) 
                 process_due_scheduled_messages()
                 backfill_rating_asks()
                 process_wish_ballots()
+                process_manager_surveys()
         except Exception:
             logger.exception("Service campaign scheduler loop error")
         time.sleep(interval_seconds)

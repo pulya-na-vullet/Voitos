@@ -633,6 +633,114 @@ class PanelProfile(models.Model):
         return self.role == PanelRole.MANAGER
 
 
+class ManagerSurveyPeriodStatus(models.TextChoices):
+    COLLECTING = "collecting", "Сбор ответов"
+    CLOSED = "closed", "Закрыт"
+
+
+class ManagerSurveyPeriod(models.Model):
+    """Месячный опрос качества работы менеджера группы."""
+
+    group = models.ForeignKey(
+        "ServiceGroup",
+        on_delete=models.CASCADE,
+        related_name="manager_surveys",
+        verbose_name="Группа",
+    )
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="manager_survey_periods",
+        verbose_name="Менеджер",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=ManagerSurveyPeriodStatus.choices,
+        default=ManagerSurveyPeriodStatus.COLLECTING,
+        db_index=True,
+    )
+    started_at = models.DateTimeField(auto_now_add=True)
+    ends_at = models.DateTimeField()
+    closed_at = models.DateTimeField(null=True, blank=True)
+    ai_summary = models.TextField("Саммари ИИ", blank=True, default="")
+    ai_summarized_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Опрос менеджера"
+        verbose_name_plural = "Опросы менеджеров"
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(fields=["group", "status"]),
+            models.Index(fields=["manager", "-started_at"]),
+            models.Index(fields=["status", "ends_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Survey #{self.pk} {self.group} → {self.manager_id}"
+
+
+class ManagerSurveyResponse(models.Model):
+    """Оценка жителя: 1–5 и комментарий (особенно при 1–4)."""
+
+    period = models.ForeignKey(
+        ManagerSurveyPeriod,
+        on_delete=models.CASCADE,
+        related_name="responses",
+    )
+    user = models.ForeignKey(
+        "BotUser",
+        on_delete=models.CASCADE,
+        related_name="manager_survey_responses",
+    )
+    score = models.PositiveSmallIntegerField()
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Ответ опроса менеджера"
+        verbose_name_plural = "Ответы опросов менеджеров"
+        unique_together = [("period", "user")]
+        ordering = ["score", "-created_at"]
+        indexes = [
+            models.Index(fields=["period", "score"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.score}/5 by {self.user_id} period={self.period_id}"
+
+
+class ManagerSurveyAILog(models.Model):
+    """Лог сообщений ИИ по саммари работы менеджера."""
+
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="manager_survey_ai_logs",
+    )
+    period = models.ForeignKey(
+        ManagerSurveyPeriod,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ai_logs",
+    )
+    role = models.CharField(max_length=16)  # system / user / assistant / error
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Лог ИИ по менеджеру"
+        verbose_name_plural = "Логи ИИ по менеджерам"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["manager", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.role} mgr={self.manager_id} @ {self.created_at:%d.%m.%Y}"
+
+
 class ServiceGroup(models.Model):
     """Admin-defined group of residents for service campaign broadcasts."""
 

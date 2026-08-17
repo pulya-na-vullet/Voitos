@@ -46,6 +46,7 @@
       <a href="{% url 'panel:clients_map' %}" class="{% if request.resolver_match.url_name == 'clients_map' %}active{% endif %}">Карта</a>
       {% if panel_is_admin %}
       <a href="{% url 'panel:earnings_forecast' %}" class="{% if request.resolver_match.url_name == 'earnings_forecast' %}active{% endif %}">Прогноз</a>
+      <a href="{% url 'panel:managers' %}" class="{% if request.resolver_match.url_name == 'managers' or request.resolver_match.url_name == 'managers_detail' %}active{% endif %}">Менеджеры</a>
       <a href="{% url 'panel:manager_logs' %}" class="{% if request.resolver_match.url_name == 'manager_logs' or request.resolver_match.url_name == 'manager_log_detail' %}active{% endif %}">Лог менеджеров</a>
       <a href="{% url 'panel:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">Настройки</a>
       {% endif %}

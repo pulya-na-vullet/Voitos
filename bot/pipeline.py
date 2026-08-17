@@ -188,6 +188,14 @@ class MessagePipeline:
                 self._store_out(user, reply, "wish_ballot_vote")
                 return reply
 
+        if pending.pending_kind == "manager_survey":
+            from services.manager_survey import handle_manager_survey_step
+
+            reply = handle_manager_survey_step(user, text, pending)
+            if reply is not None:
+                self._store_out(user, reply, "manager_survey")
+                return reply
+
         if pending.pending_kind == "reminder_time":
             reply = self._finish_pending_reminder(user, text, pending)
             if reply is not None:
