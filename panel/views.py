@@ -1468,12 +1468,20 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 group_name=group.name,
             )
             _notify_user(bot_user, max_text)
-            messages.success(
-                request,
-                f"Менеджер группы: {bot_user}. "
-                f"Логин: {account.username}. "
-                f"Пароль и данные для входа отправлены пользователю в MAX.",
-            )
+            if plain:
+                messages.success(
+                    request,
+                    f"Менеджер группы: {bot_user}. "
+                    f"Логин: {account.username}. "
+                    f"Пароль и данные для входа отправлены пользователю в MAX.",
+                )
+            else:
+                messages.success(
+                    request,
+                    f"Менеджер группы: {bot_user}. "
+                    f"Логин: {account.username}. "
+                    f"Учётка уже была — пароль не меняли, в MAX ушло уведомление о группе.",
+                )
             return redirect("panel:service_group_edit", pk=pk)
         if action == "clear_manager":
             if not is_panel_admin(request.user):

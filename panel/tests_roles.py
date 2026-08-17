@@ -47,11 +47,16 @@ class PanelRolesTests(TestCase):
         self.assertTrue(is_panel_manager(mgr_user))
         self.assertFalse(is_panel_admin(mgr_user))
 
-        # Тот же менеджер на вторую группу
-        assign_group_manager(self.g2, self.u1, password=None)
+        # Тот же менеджер на вторую группу — пароль не сбрасываем
+        _, plain2 = assign_group_manager(self.g2, self.u1, password=None)
+        self.assertIsNone(plain2)
         self.g2.refresh_from_db()
         self.assertEqual(self.g2.manager_id, mgr_user.id)
         self.assertEqual(set(manager_group_ids(mgr_user)), {self.g1.id, self.g2.id})
+        # Старый пароль всё ещё работает
+        self.assertTrue(
+            self.client.login(username=mgr_user.username, password="Secret123!")
+        )
 
         # Нельзя назначить не из группы
         with self.assertRaises(ValueError):
@@ -146,3 +151,29 @@ class PanelRolesTests(TestCase):
         self.assertIn("Пароль: MgrPass99", called_text)
         self.assertIn("URL:", called_text)
         self.assertIn("/panel/login/", called_text)
+
+    @patch("panel.views._notify_user")
+    def test_second_group_keeps_password(self, notify_mock):
+        assign_group_manager(self.g1, self.u2, password="MgrPass99")
+        notify_mock.reset_mock()
+        self.client.login(username="admin", password="adminpass")
+        self.g2.members.add(self.u2)
+        url = reverse("panel:service_group_edit", args=[self.g2.id])
+        resp = self.client.post(
+            url,
+            {
+                "action": "assign_manager",
+                "manager_bot_user_id": str(self.u2.id),
+                "manager_password": "",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.g2.refresh_from_db()
+        self.assertEqual(self.g2.manager_id, self.g1.manager_id)
+        notify_mock.assert_called_once()
+        _user, text = notify_mock.call_args[0]
+        self.assertIn("уже есть", text)
+        self.assertNotIn("Пароль:", text)
+        self.assertTrue(
+            self.client.login(username=self.g2.manager.username, password="MgrPass99")
+        )
