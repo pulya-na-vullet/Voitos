@@ -536,6 +536,23 @@ class MessagePipeline:
             return "Не удалось прочитать сохранённый чек. Пришлите PDF или скрин ещё раз."
 
         if choose_subscription:
+            from services.work_request_completion import (
+                active_job_for_user,
+                awaiting_client_for_user,
+                awaiting_commission_for_user,
+            )
+
+            if (
+                active_job_for_user(user)
+                or awaiting_commission_for_user(user)
+                or awaiting_client_for_user(user)
+            ):
+                return (
+                    "Сейчас у вас открыта заявка как у исполнителя — "
+                    "чек подписки не принимаем.\n"
+                    "Пришлите чек ещё раз: он пойдёт в отчёт по работе / комиссию.\n"
+                    "Или напишите «отмена», чтобы сбросить сохранённый файл."
+                )
             try:
                 receipt = submit_receipt(user, file_bytes, filename=filename)
             except Exception:
@@ -550,7 +567,7 @@ class MessagePipeline:
             if receipt.transfer_date:
                 amount_line += f", дата: {receipt.transfer_date.strftime('%d.%m.%Y')}"
             return (
-                "Ваш чек отправлен на проверку администратору.\n"
+                "Чек подписки отправлен на проверку администратору.\n"
                 f"{amount_line}."
             )
 

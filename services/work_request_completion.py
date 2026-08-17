@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
 from decimal import Decimal, InvalidOperation
@@ -120,6 +121,97 @@ def active_job_for_user(user: BotUser) -> WorkRequest | None:
     )
 
 
+def awaiting_commission_for_user(user: BotUser) -> WorkRequest | None:
+    return (
+        WorkRequest.objects.filter(
+            assigned_contractor__user=user,
+            status=WorkRequestStatus.AWAITING_COMMISSION,
+            commission_status__in=[
+                WorkRequestCommissionStatus.AWAITING,
+                WorkRequestCommissionStatus.REJECTED,
+            ],
+        )
+        .select_related("role", "assigned_contractor", "assigned_contractor__user")
+        .order_by("-updated_at")
+        .first()
+    )
+
+
+def awaiting_client_for_user(user: BotUser) -> WorkRequest | None:
+    return (
+        WorkRequest.objects.filter(
+            assigned_contractor__user=user,
+            status=WorkRequestStatus.AWAITING_CLIENT,
+        )
+        .select_related("role", "assigned_contractor")
+        .order_by("-updated_at")
+        .first()
+    )
+
+
+def route_contractor_receipt_photo(
+    user: BotUser,
+    pending: PendingAction,
+    *,
+    image_bytes: bytes,
+    filename: str = "receipt.jpg",
+) -> str | None:
+    """
+    Пока у исполнителя открыта заявка — чек только по работе/комиссии, не подписка.
+    Возвращает текст ответа или None, если можно принимать чек подписки/сбора.
+    """
+    # Уже в нужном диалоге — пусть вызывающий код обработает сам.
+    if pending.pending_kind in {COMPLETE_PENDING, COMMISSION_PENDING}:
+        return None
+
+    commission_req = awaiting_commission_for_user(user)
+    if commission_req is not None:
+        pending.pending_kind = COMMISSION_PENDING
+        pending.pending_payload = {"work_request_id": commission_req.id}
+        pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+        reply = handle_commission_receipt_photo(
+            user, pending, image_bytes=image_bytes, filename=filename
+        )
+        return (
+            "Это чек комиссии по заявке "
+            f"#{commission_req.id} (не чек подписки).\n\n"
+            + reply
+        )
+
+    waiting = awaiting_client_for_user(user)
+    if waiting is not None:
+        return (
+            f"По заявке #{waiting.id} отчёт уже отправлен — ждём подтверждения клиента.\n"
+            "Сейчас чек подписки или сбора не принимаем.\n"
+            "Когда заявка закроется, можно будет прислать чек подписки отдельно."
+        )
+
+    job = active_job_for_user(user)
+    if job is None:
+        return None
+
+    # Фото при открытой работе → начинаем отчёт, чек буферизуем (не в подписку).
+    if job.status == WorkRequestStatus.SCHEDULING:
+        job.status = WorkRequestStatus.IN_PROGRESS
+        job.save(update_fields=["status", "updated_at"])
+
+    pending.pending_kind = COMPLETE_PENDING
+    pending.pending_payload = {
+        "step": "method",
+        "work_request_id": job.id,
+        "receipt_b64": base64.b64encode(image_bytes).decode("ascii"),
+        "receipt_filename": (filename or "receipt.jpg")[:120],
+    }
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    return (
+        f"Чек принят как отчёт по работе (заявка #{job.id}: {job.role.name}), "
+        "а не как оплата подписки.\n\n"
+        "Как клиент оплатил?\n"
+        "1 / перевод — используем этот чек\n"
+        "2 / наличные — укажете сумму без чека"
+    )
+
+
 def contractor_blocked_for_new_offers(contractor: ContractorProfile) -> bool:
     """Новые заявки закрыты, пока не закрыта комиссия / активная работа (по всем ролям УЗ)."""
     user_id = contractor.user_id
@@ -200,7 +292,10 @@ def handle_completion_step(user: BotUser, text: str, pending: PendingAction) -> 
     if not req or not req.assigned_contractor or req.assigned_contractor.user_id != user.id:
         pending.clear_pending()
         return "Заявка не найдена. Напишите «заявка выполнена» снова."
-    if req.status != WorkRequestStatus.IN_PROGRESS:
+    if req.status not in {
+        WorkRequestStatus.IN_PROGRESS,
+        WorkRequestStatus.SCHEDULING,
+    }:
         pending.clear_pending()
         return f"Заявка #{req.id} уже не в работе (статус: {req.get_status_display()})."
 
@@ -216,6 +311,9 @@ def handle_completion_step(user: BotUser, text: str, pending: PendingAction) -> 
             return "Укажите сумму перевода в рублях (например: 2500)."
         if raw in _CASH or "налич" in raw:
             payload["pay_method"] = WorkRequestPayMethod.CASH
+            # Наличные — буфер чека не нужен
+            payload.pop("receipt_b64", None)
+            payload.pop("receipt_filename", None)
             payload["step"] = "amount"
             pending.pending_payload = payload
             pending.save(update_fields=["pending_payload", "updated_at"])
@@ -229,17 +327,36 @@ def handle_completion_step(user: BotUser, text: str, pending: PendingAction) -> 
         payload["amount"] = str(amount)
         method = payload.get("pay_method")
         if method == WorkRequestPayMethod.TRANSFER:
+            receipt_b64 = payload.get("receipt_b64")
+            if receipt_b64:
+                try:
+                    receipt_bytes = base64.b64decode(receipt_b64)
+                except Exception:
+                    receipt_bytes = None
+                if receipt_bytes:
+                    return _finalize_executor_report(
+                        user,
+                        pending,
+                        payload,
+                        req,
+                        receipt_bytes=receipt_bytes,
+                        filename=str(payload.get("receipt_filename") or "receipt.jpg"),
+                    )
             payload["step"] = "receipt"
             pending.pending_payload = payload
             pending.save(update_fields=["pending_payload", "updated_at"])
             return (
                 f"Сумма перевода: {amount} ₽.\n"
-                "Пришлите фото или PDF чека перевода от клиента."
+                "Пришлите фото или PDF чека перевода от клиента "
+                "(это чек по работе, не по подписке)."
             )
         return _finalize_executor_report(user, pending, payload, req, receipt_bytes=None)
 
     if step == "receipt":
-        return "Жду фото или PDF чека перевода. Пришлите файл в чат."
+        return (
+            "Жду фото или PDF чека перевода по заявке. "
+            "Это не чек подписки — пришлите файл в чат."
+        )
 
     return start_completion(user, pending)
 

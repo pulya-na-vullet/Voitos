@@ -31,6 +31,7 @@ from services.work_request_completion import (
     handle_commission_receipt_photo,
     handle_completion_step,
     process_due_scheduled_messages,
+    route_contractor_receipt_photo,
     start_completion,
 )
 from services.work_request_dispatch import accept_offer, try_dispatch_request
@@ -134,3 +135,46 @@ class WorkRequestCompletionFlowTests(TestCase):
         self.assertIn("чек", msg.lower())
         pending.refresh_from_db()
         self.assertEqual(pending.pending_payload.get("step"), "receipt")
+
+    def test_photo_while_job_open_not_subscription(self):
+        offer = try_dispatch_request(self.req, send_fn=self.capture, use_ai=False)
+        accept_offer(offer, send_fn=self.capture)
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.status, WorkRequestStatus.IN_PROGRESS)
+        pending, _ = PendingAction.objects.get_or_create(user=self.exec_user)
+        pending.clear_pending()
+        msg = route_contractor_receipt_photo(
+            self.exec_user,
+            pending,
+            image_bytes=b"fake-job-receipt",
+            filename="job.jpg",
+        )
+        self.assertIsNotNone(msg)
+        self.assertIn("не как оплата подписки", msg.lower())
+        self.assertIn("перевод", msg.lower())
+        pending.refresh_from_db()
+        self.assertEqual(pending.pending_kind, COMPLETE_PENDING)
+        self.assertTrue(pending.pending_payload.get("receipt_b64"))
+
+        handle_completion_step(self.exec_user, "1", pending)
+        reply = handle_completion_step(self.exec_user, "2500", pending)
+        self.assertIn("принят", reply.lower())
+        self.req.refresh_from_db()
+        self.assertEqual(self.req.status, WorkRequestStatus.AWAITING_CLIENT)
+        self.assertEqual(self.req.reported_amount, Decimal("2500.00"))
+        self.assertTrue(bool(self.req.job_receipt))
+
+    def test_photo_blocked_while_awaiting_client(self):
+        offer = try_dispatch_request(self.req, send_fn=self.capture, use_ai=False)
+        accept_offer(offer, send_fn=self.capture)
+        pending, _ = PendingAction.objects.get_or_create(user=self.exec_user)
+        start_completion(self.exec_user, pending)
+        handle_completion_step(self.exec_user, "наличные", pending)
+        handle_completion_step(self.exec_user, "1000", pending)
+        pending.clear_pending()
+        msg = route_contractor_receipt_photo(
+            self.exec_user, pending, image_bytes=b"x", filename="x.jpg"
+        )
+        self.assertIsNotNone(msg)
+        self.assertIn("не принимаем", msg.lower())
+        self.assertNotEqual(pending.pending_kind, COMPLETE_PENDING)
