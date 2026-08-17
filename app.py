@@ -246,10 +246,22 @@ def main() -> int:
     _ensure_env_file()
     _ensure_dependencies()
     run_migrations()
+
+    # Если БД пустая (wipe / чужой data/) — поднять последний непустой дамп.
+    try:
+        from database.dump import maybe_restore_if_empty
+
+        restored = maybe_restore_if_empty()
+        if restored:
+            logger.warning("Restored DB from dump %s — re-running migrations", restored.name)
+            run_migrations()
+    except Exception:
+        logger.exception("Auto-restore from dump failed (non-fatal)")
+
     ensure_admin_user()
     sync_env_into_settings()
 
-    # Initial dump on startup so there is always at least one backup
+    # Дамп только если в БД уже есть данные (пустой latest не перезаписываем).
     try:
         from database.dump import create_db_dump
 

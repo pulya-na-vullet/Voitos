@@ -107,4 +107,68 @@
     <button class="btn" type="submit">Сохранить</button>
   </form>
 </div>
+
+<div class="card" style="max-width:720px; margin-top:16px;">
+  <h3 style="margin-top:0;">Резервные копии БД</h3>
+  <p class="muted" style="margin-top:0;">
+    Папка <span class="mono">data/dumps/</span>. При запуске, если БД пустая,
+    Voitos сам поднимет последний непустой дамп. Пустой дамп больше не затирает
+    <span class="mono">latest.sqlite3</span>.
+  </p>
+  {% if db_is_empty %}
+  <div class="flash warn" style="margin-bottom:12px;">
+    Сейчас в рабочей БД нет жителей.
+    {% if best_dump_name %}
+      Есть дамп с данными: <strong class="mono">{{ best_dump_name }}</strong> —
+      восстановите ниже или просто перезапустите <span class="mono">python app.py</span>.
+    {% else %}
+      Непустых дампов не найдено. Если остались файлы
+      <span class="mono">voitos_*.sqlite3</span> — скопируйте их в
+      <span class="mono">data/dumps/</span> и нажмите «Восстановить».
+    {% endif %}
+  </div>
+  {% endif %}
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+    <form method="post" action="{% url 'panel:dump_now' %}">
+      {% csrf_token %}
+      <button class="btn secondary small" type="submit">Снять дамп сейчас</button>
+    </form>
+    {% if best_dump_name %}
+    <form method="post" action="{% url 'panel:restore_dump' %}"
+          onsubmit="return confirm('Восстановить БД из {{ best_dump_name }}? Текущий файл сохранится как safety-копия.');">
+      {% csrf_token %}
+      <input type="hidden" name="dump_name" value="{{ best_dump_name }}">
+      <button class="btn small" type="submit">Восстановить лучший дамп</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if dump_rows %}
+  <table>
+    <thead><tr><th>Файл</th><th>Жителей</th><th>Размер</th><th></th></tr></thead>
+    <tbody>
+    {% for d in dump_rows %}
+      <tr>
+        <td class="mono">{{ d.name }}{% if d.name == best_dump_name %} <span class="badge ok">лучший</span>{% endif %}</td>
+        <td>{{ d.users }}</td>
+        <td class="muted">{{ d.size_kb }} КБ</td>
+        <td>
+          {% if d.has_data %}
+          <form method="post" action="{% url 'panel:restore_dump' %}" style="display:inline;"
+                onsubmit="return confirm('Восстановить из {{ d.name }}?');">
+            {% csrf_token %}
+            <input type="hidden" name="dump_name" value="{{ d.name }}">
+            <button class="btn secondary small" type="submit">Восстановить</button>
+          </form>
+          {% else %}
+          <span class="muted">пустой</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Дампов пока нет.</p>
+  {% endif %}
+</div>
 {% endblock %}
