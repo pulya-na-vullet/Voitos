@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+import threading
 import time
 from typing import Any
 
@@ -14,6 +15,22 @@ from bot.ssl_utils import apply_session_ssl, ssl_verify_value
 logger = logging.getLogger(__name__)
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+# MAX: «Limit is: 5 calls per second» — держим запас.
+_MIN_REQUEST_INTERVAL_SEC = 0.25
+_rate_lock = threading.Lock()
+_last_request_at = 0.0
+
+
+def _throttle_max_api() -> None:
+    """Глобальный лимит частоты запросов ко всему MAX API в процессе."""
+    global _last_request_at
+    with _rate_lock:
+        now = time.monotonic()
+        wait = _MIN_REQUEST_INTERVAL_SEC - (now - _last_request_at)
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_at = time.monotonic()
 
 
 class MaxApiError(RuntimeError):
@@ -46,36 +63,68 @@ class MaxClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         timeout = kwargs.pop("timeout", 60)
+        retries_429 = int(kwargs.pop("retries_429", 4))
         kwargs.setdefault("verify", self.session.verify)
-        try:
-            response = self.session.request(method, self._url(path), timeout=timeout, **kwargs)
-        except requests.exceptions.SSLError as exc:
-            logger.error(
-                "SSL error talking to MAX. Certs of Минцифры are required. "
-                "Voitos ships them in certs/. Or set MAX_SSL_VERIFY=false in .env as a temporary workaround. "
-                "Details: %s",
-                exc,
-            )
-            raise
-        if response.status_code >= 400:
-            logger.error(
-                "MAX API %s %s -> %s: %s",
-                method,
-                path,
-                response.status_code,
-                response.text[:500],
-            )
-            raise MaxApiError(
-                f"MAX API error {response.status_code}: {response.text[:300]}",
-                status_code=response.status_code,
-                body=response.text[:1000],
-            )
-        if not response.content:
-            return {}
-        try:
-            return response.json()
-        except ValueError:
-            return {"raw": response.text}
+        last_exc: Exception | None = None
+        for attempt in range(max(1, retries_429 + 1)):
+            _throttle_max_api()
+            try:
+                response = self.session.request(
+                    method, self._url(path), timeout=timeout, **kwargs
+                )
+            except requests.exceptions.SSLError as exc:
+                logger.error(
+                    "SSL error talking to MAX. Certs of Минцифры are required. "
+                    "Voitos ships them in certs/. Or set MAX_SSL_VERIFY=false in .env as a temporary workaround. "
+                    "Details: %s",
+                    exc,
+                )
+                raise
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    delay = float(retry_after) if retry_after else 0.0
+                except (TypeError, ValueError):
+                    delay = 0.0
+                if delay <= 0:
+                    delay = min(40.0, 2.0 * (2**attempt))
+                logger.warning(
+                    "MAX API rate limit 429 on %s %s — wait %.1fs (attempt %s)",
+                    method,
+                    path,
+                    delay,
+                    attempt + 1,
+                )
+                last_exc = MaxApiError(
+                    f"MAX API error 429: {response.text[:300]}",
+                    status_code=429,
+                    body=response.text[:1000],
+                )
+                if attempt >= retries_429:
+                    raise last_exc
+                time.sleep(delay)
+                continue
+            if response.status_code >= 400:
+                logger.error(
+                    "MAX API %s %s -> %s: %s",
+                    method,
+                    path,
+                    response.status_code,
+                    response.text[:500],
+                )
+                raise MaxApiError(
+                    f"MAX API error {response.status_code}: {response.text[:300]}",
+                    status_code=response.status_code,
+                    body=response.text[:1000],
+                )
+            if not response.content:
+                return {}
+            try:
+                return response.json()
+            except ValueError:
+                return {"raw": response.text}
+        assert last_exc is not None
+        raise last_exc
 
     def get_me(self) -> dict[str, Any]:
         return self._request("GET", "/me")
@@ -122,7 +171,16 @@ class MaxClient:
             params["marker"] = marker
         if types:
             params["types"] = ",".join(types)
-        return self._request("GET", "/updates", params=params, timeout=timeout + 20)
+        # Long poll: сервер держит соединение до `timeout` сек.
+        # Read timeout HTTP должен быть заметно больше, иначе ловим ложные ReadTimeout.
+        # На 429 внутри long poll лучше не долбить сразу — меньше попыток.
+        return self._request(
+            "GET",
+            "/updates",
+            params=params,
+            timeout=(15, timeout + 45),
+            retries_429=2,
+        )
 
     def send_message(
         self,

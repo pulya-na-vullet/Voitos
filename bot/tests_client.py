@@ -71,3 +71,42 @@ class MaxClientUploadTests(SimpleTestCase):
         with self.assertRaises(MaxApiError) as ctx:
             client.upload_image(b"not-an-image", "bad.bin")
         self.assertIn("BAD_REQUEST", str(ctx.exception))
+
+
+class MaxClientRateLimitTests(SimpleTestCase):
+    @patch("bot.client.time.sleep")
+    def test_retries_on_429_then_succeeds(self, mock_sleep):
+        client = MaxClient("test-token")
+        bad = MagicMock()
+        bad.status_code = 429
+        bad.text = '{"code":"too.many.requests"}'
+        bad.headers = {"Retry-After": "1"}
+        bad.content = bad.text.encode()
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.content = b'{"ok":true}'
+        ok.json.return_value = {"ok": True}
+        ok.text = '{"ok":true}'
+        client.session.request = MagicMock(side_effect=[bad, ok])
+
+        data = client._request("GET", "/me", timeout=5, retries_429=2)
+        self.assertEqual(data, {"ok": True})
+        self.assertEqual(client.session.request.call_count, 2)
+        mock_sleep.assert_called()
+
+    @patch("bot.client.time.sleep")
+    def test_get_updates_uses_tuple_timeout(self, mock_sleep):
+        client = MaxClient("test-token")
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.content = b'{"updates":[]}'
+        ok.json.return_value = {"updates": []}
+        ok.text = '{"updates":[]}'
+        client.session.request = MagicMock(return_value=ok)
+
+        client.get_updates(marker=1, timeout=30)
+        kwargs = client.session.request.call_args.kwargs
+        timeout = kwargs.get("timeout")
+        self.assertIsInstance(timeout, tuple)
+        self.assertEqual(timeout[0], 15)
+        self.assertGreaterEqual(timeout[1], 75)
