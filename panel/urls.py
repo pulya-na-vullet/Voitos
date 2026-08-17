@@ -77,4 +77,5 @@ urlpatterns = [
     path("delete/reminder/<int:pk>/", views.delete_reminder, name="delete_reminder"),
     path("delete/message/<int:pk>/", views.delete_message, name="delete_message"),
     path("dump/", views.dump_now, name="dump_now"),
+    path("restore-dump/", views.restore_dump, name="restore_dump"),
 ]

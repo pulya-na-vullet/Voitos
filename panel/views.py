@@ -932,6 +932,27 @@ def settings_view(request: HttpRequest) -> HttpResponse:
 
     tax_breakdown = sync_self_employed_tax_collected(cfg)
     cfg.refresh_from_db()
+    from database.dump import (
+        dump_has_data,
+        find_best_nonempty_dump,
+        is_working_db_empty,
+        list_dump_files,
+        sqlite_botuser_count,
+    )
+
+    dump_rows = []
+    for p in list_dump_files():
+        n = sqlite_botuser_count(p)
+        dump_rows.append(
+            {
+                "name": p.name,
+                "users": n,
+                "has_data": n > 0,
+                "mtime": p.stat().st_mtime,
+                "size_kb": max(1, p.stat().st_size // 1024),
+            }
+        )
+    best = find_best_nonempty_dump()
     return render(
         request,
         "panel/settings.html",
@@ -944,6 +965,9 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             "has_token": bool(cfg.max_bot_token),
             "has_api_key": bool(cfg.yandex_api_key),
             "bot_status": BotRuntimeStatus.load(),
+            "db_is_empty": is_working_db_empty(),
+            "dump_rows": dump_rows,
+            "best_dump_name": best.name if best else "",
         },
     )
 
@@ -1039,9 +1063,59 @@ def delete_message(request: HttpRequest, pk: int) -> HttpResponse:
 @admin_required
 @require_POST
 def dump_now(request: HttpRequest) -> HttpResponse:
+    from database.dump import create_db_dump, is_working_db_empty
+
+    if is_working_db_empty():
+        messages.warning(
+            request,
+            "БД пустая — дамп не создан, чтобы не затереть хороший бэкап в data/dumps/.",
+        )
+        return redirect("panel:users")
     path = create_db_dump()
-    messages.success(request, f"Дамп создан: {path.name}")
+    if path:
+        messages.success(request, f"Дамп создан: {path.name}")
+    else:
+        messages.warning(request, "Дамп не создан.")
     return redirect("panel:users")
+
+
+@login_required
+@admin_required
+@require_POST
+def restore_dump(request: HttpRequest) -> HttpResponse:
+    """Восстановить БД из выбранного или лучшего непустого дампа."""
+    from database.dump import (
+        find_best_nonempty_dump,
+        list_dump_files,
+        restore_db_from_dump,
+        sqlite_botuser_count,
+    )
+
+    name = (request.POST.get("dump_name") or "").strip()
+    dumps = {p.name: p for p in list_dump_files()}
+    if name and name in dumps:
+        dump = dumps[name]
+    else:
+        dump = find_best_nonempty_dump()
+    if not dump:
+        messages.error(
+            request,
+            "Нет непустого дампа в data/dumps/. "
+            "Если файлы voitos_*.sqlite3 остались на диске — положите их в data/dumps/ и повторите.",
+        )
+        return redirect("panel:settings")
+    try:
+        restore_db_from_dump(dump)
+    except Exception as exc:
+        messages.error(request, f"Не удалось восстановить: {exc}")
+        return redirect("panel:settings")
+    n = sqlite_botuser_count(dump)
+    messages.success(
+        request,
+        f"БД восстановлена из {dump.name} ({n} жителей). "
+        "Перезапустите python app.py, чтобы воркеры подхватили файл.",
+    )
+    return redirect("panel:settings")
 
 
 # Backward-compatible aliases
