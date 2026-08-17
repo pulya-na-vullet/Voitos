@@ -934,13 +934,15 @@ def format_receipt_pick_menu(invites: list[ServiceInvite]) -> str:
     """Numbered menu: 1 = subscription, then open service invites."""
     lines = [
         "К чему относится этот чек? Ответьте номером:",
-        "1. Подписка",
+        "1. Подписка Voitos (продление доступа в боте)",
     ]
     for i, inv in enumerate(invites, 2):
         lines.append(
-            f"{i}. {inv.campaign.get_category_display()} — {inv.campaign.title} "
+            f"{i}. Сбор группы: {inv.campaign.get_category_display()} — {inv.campaign.title} "
             f"({inv.amount_due:.0f} ₽)"
         )
+    lines.append("")
+    lines.append("Не путайте с чеком по заявке мастера — он принимается только пока заявка открыта.")
     return "\n".join(lines)
 
 

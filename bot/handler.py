@@ -180,7 +180,7 @@ class UpdateHandler:
                 self._reply(
                     user,
                     "Сейчас у вас другой незавершённый диалог. "
-                    "Завершите его или напишите «отмена», затем пришлите чек оплаты.",
+                    "Завершите его или напишите «отмена», затем пришлите чек.",
                 )
                 return
             self._handle_receipt(user, receipt_url, filename)
@@ -394,6 +394,16 @@ class UpdateHandler:
             self._reply(user, "Не удалось скачать файл чека. Пришлите ещё раз.")
             return
 
+        # Исполнитель с открытой заявкой: чек только по работе / комиссии.
+        from services.work_request_completion import route_contractor_receipt_photo
+
+        routed = route_contractor_receipt_photo(
+            user, pending, image_bytes=raw, filename=filename or "receipt.jpg"
+        )
+        if routed is not None:
+            self._reply(user, routed)
+            return
+
         # If user has open service invites — always ask destination,
         # with subscription as option #1 (even for a single invite).
         invites = open_invites_for_user(user)
@@ -413,7 +423,7 @@ class UpdateHandler:
             logger.exception("Receipt processing failed")
             self._reply(
                 user,
-                "Не удалось разобрать чек. Пришлите PDF или более чёткий скрин перевода.\n\n"
+                "Не удалось разобрать чек подписки. Пришлите PDF или более чёткий скрин перевода.\n\n"
                 + payment_help_text(),
             )
             return
@@ -421,7 +431,7 @@ class UpdateHandler:
         ChatMessage.objects.create(
             user=user,
             role=MessageRole.USER,
-            text=f"[чек] сумма={receipt.amount} match={receipt.details_match}",
+            text=f"[чек подписки] сумма={receipt.amount} match={receipt.details_match}",
             intent="receipt_submit",
             meta={"receipt_id": receipt.id},
         )
@@ -429,7 +439,7 @@ class UpdateHandler:
         if receipt.transfer_date:
             amount_line += f", дата: {receipt.transfer_date.strftime('%d.%m.%Y')}"
         msg = (
-            "Ваш чек отправлен на проверку администратору.\n"
+            "Чек подписки отправлен на проверку администратору.\n"
             f"{amount_line}."
         )
         self._reply(user, msg)
