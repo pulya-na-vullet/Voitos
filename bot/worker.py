@@ -4,6 +4,7 @@ import logging
 import time
 
 import django
+import requests
 
 django.setup()
 
@@ -13,6 +14,9 @@ from bot.handler import UpdateHandler
 from bot.status import set_bot_error, set_bot_status
 
 logger = logging.getLogger(__name__)
+
+# Если long poll вернул пусто слишком быстро — не крутим цикл вхолостую (→ 429).
+_MIN_POLL_GAP_SEC = 1.0
 
 
 def run_bot_worker(stop_event=None) -> None:
@@ -24,6 +28,7 @@ def run_bot_worker(stop_event=None) -> None:
     handler: UpdateHandler | None = None
     last_token = ""
     empty_polls = 0
+    backoff_sec = 0.0
 
     logger.info("Bot worker started")
     set_bot_status(state="starting", detail="Бот запускается...")
@@ -48,6 +53,7 @@ def run_bot_worker(stop_event=None) -> None:
             handler = UpdateHandler(client)
             last_token = token
             marker = None
+            backoff_sec = 0.0
             try:
                 me = client.get_me()
                 bot_name = str(me.get("name") or me.get("first_name") or "")
@@ -73,6 +79,9 @@ def run_bot_worker(stop_event=None) -> None:
 
         try:
             assert client is not None and handler is not None
+            if backoff_sec > 0:
+                time.sleep(backoff_sec)
+            poll_started = time.monotonic()
             # First call without marker only returns the latest event.
             # After that we always pass marker so new messages are not lost.
             data = client.get_updates(
@@ -88,6 +97,7 @@ def run_bot_worker(stop_event=None) -> None:
                 except (TypeError, ValueError):
                     marker = data["marker"]
 
+            backoff_sec = 0.0
             set_bot_status(
                 state="polling",
                 detail=f"Long polling активен. Последний опрос: {len(updates)} событий",
@@ -113,9 +123,37 @@ def run_bot_worker(stop_event=None) -> None:
                 empty_polls += 1
                 if empty_polls % 10 == 0:
                     logger.info("No updates yet (empty polls=%s, marker=%s)", empty_polls, marker)
+                # Пустой ответ за доли секунды = API не держал long poll → пауза.
+                elapsed = time.monotonic() - poll_started
+                if elapsed < _MIN_POLL_GAP_SEC:
+                    time.sleep(_MIN_POLL_GAP_SEC - elapsed)
 
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout) as exc:
+            # Для long poll таймаут чтения — штатная сетевая ситуация, не «падение бота».
+            logger.warning("MAX long poll timeout (will retry): %s", exc)
+            set_bot_status(
+                state="polling",
+                detail="Ожидание ответа MAX (таймаут long poll) — продолжаем",
+                touch_poll=True,
+            )
+            backoff_sec = 0.0
+            time.sleep(1)
+        except requests.exceptions.RequestException as exc:
+            logger.warning("MAX network error (will retry): %s", exc)
+            set_bot_error(f"Сеть MAX: {exc}")
+            backoff_sec = min(30.0, max(3.0, backoff_sec * 2 or 3.0))
         except MaxApiError as exc:
             body = (exc.body or "").lower()
+            if exc.status_code == 429 or "too.many.requests" in body:
+                backoff_sec = min(60.0, max(5.0, backoff_sec * 2 or 5.0))
+                logger.warning(
+                    "MAX rate limit — backoff %.1fs (marker=%s)", backoff_sec, marker
+                )
+                set_bot_status(
+                    state="polling",
+                    detail=f"Лимит MAX API, пауза {backoff_sec:.0f} с",
+                )
+                continue
             # If webhook blocks polling, force clear and retry
             if exc.status_code in {409, 400} or "webhook" in body or "subscription" in body:
                 logger.warning("Polling blocked — clearing webhooks and retrying")
@@ -125,11 +163,11 @@ def run_bot_worker(stop_event=None) -> None:
                 except Exception:
                     logger.exception("Webhook cleanup failed")
             set_bot_error(f"Ошибка MAX API: {exc}")
-            time.sleep(3)
+            backoff_sec = min(30.0, max(3.0, backoff_sec * 2 or 3.0))
         except Exception as exc:
             set_bot_error(f"Сбой воркера бота: {exc}")
             logger.exception("Unexpected bot worker error")
-            time.sleep(3)
+            backoff_sec = min(30.0, max(3.0, backoff_sec * 2 or 3.0))
 
 
 if __name__ == "__main__":
