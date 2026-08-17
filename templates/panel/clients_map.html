@@ -6,10 +6,11 @@
   <a class="btn secondary small" href="{% url 'panel:earnings_forecast' %}">Прогноз заработка →</a>
 </div>
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
-  Каждая группа — отдельный граф семей. Родственники в одной вершине.
+  Каждая группа — отдельный граф. Члены семьи привязаны к плательщику;
+  остальные вершины группы связаны между собой.
   Менеджеры и администраторы подсвечены <span style="color:#f0b429;">жёлто-оранжевым</span>.
   {% if graph_count %}
-    Графов: {{ graph_count }} · семей: {{ vertex_total }} · платящих: {{ payer_total }}.
+    Графов: {{ graph_count }} · вершин: {{ vertex_total }} · платящих: {{ payer_total }}.
   {% endif %}
 </p>
 
@@ -20,7 +21,7 @@
     <div class="clients-map-graph-head">
       <h2>{{ graph.group_name }}</h2>
       <span class="muted">
-        {{ graph.vertex_count }} семей · {{ graph.payer_count }} платящ. · {{ graph.user_count }} чел.
+        {{ graph.vertex_count }} чел. · {{ graph.payer_count }} платящ. · {{ graph.household_count }} семей
       </span>
     </div>
     <div
@@ -65,19 +66,37 @@
             "background-color": "#222b38",
             "border-width": 2,
             "border-color": "#8b9bb0",
-            width: 78,
-            height: 78,
+            width: 72,
+            height: 72,
             "overlay-padding": 4,
           },
         },
         {
-          selector: "node.family",
+          selector: "node.root",
+          style: {
+            width: 84,
+            height: 84,
+          },
+        },
+        {
+          selector: "node.family-parent",
           style: {
             "border-color": "#2dd4bf",
             "border-width": 3,
             width: 92,
             height: 92,
             "text-max-width": 84,
+          },
+        },
+        {
+          selector: "node.dependent",
+          style: {
+            width: 58,
+            height: 58,
+            "font-size": 11,
+            "background-color": "#1a2430",
+            "border-color": "#5a6a7c",
+            "text-max-width": 70,
           },
         },
         {
@@ -102,7 +121,7 @@
           },
         },
         {
-          selector: "node.panel-role.family",
+          selector: "node.panel-role.family-parent",
           style: {
             "border-color": "#ffb84d",
             "border-width": 4,
@@ -114,9 +133,26 @@
           style: {
             width: 2,
             "curve-style": "bezier",
+            "target-arrow-shape": "none",
+          },
+        },
+        {
+          selector: "edge.family",
+          style: {
+            width: 2.5,
+            "line-color": "rgba(45,212,191,0.65)",
+            "line-style": "solid",
+            "curve-style": "haystack",
+            "haystack-radius": 0.4,
+          },
+        },
+        {
+          selector: "edge.ring",
+          style: {
+            width: 2,
             "line-color": "rgba(46,196,182,0.35)",
             "line-style": "dashed",
-            "target-arrow-shape": "none",
+            "curve-style": "bezier",
           },
         },
         {
@@ -138,11 +174,17 @@
         name: "cose",
         animate: false,
         padding: 36,
-        nodeRepulsion: function () { return 14000; },
-        idealEdgeLength: function () { return 120; },
-        edgeElasticity: function () { return 90; },
+        nodeRepulsion: function (node) {
+          return node.hasClass("dependent") ? 6000 : 16000;
+        },
+        idealEdgeLength: function (edge) {
+          return edge.hasClass("family") ? 70 : 130;
+        },
+        edgeElasticity: function (edge) {
+          return edge.hasClass("family") ? 40 : 90;
+        },
         nestingFactor: 1.2,
-        gravity: 0.25,
+        gravity: 0.3,
         numIter: 900,
         initialTemp: 180,
         coolingFactor: 0.95,
