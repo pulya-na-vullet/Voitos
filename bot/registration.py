@@ -95,6 +95,8 @@ def start_registration(user: BotUser, pending: PendingAction) -> str:
             "Добро пожаловать в Voitos!\n"
             "Я ваш ассистент: помогу с делами двора и запомню важное для вас.\n"
             "Для начала заполните короткую анкету.\n\n"
+            "После регистрации можно пройти 5 коротких комиксов про Voitos — "
+            "за все пять дарим месяц подписки (команда «обучение»).\n\n"
             f"{prompt}"
         )
     # Everything filled — restart from name
@@ -104,6 +106,8 @@ def start_registration(user: BotUser, pending: PendingAction) -> str:
         "Добро пожаловать в Voitos!\n"
         "Я ваш ассистент: помогу с делами двора и запомню важное для вас.\n"
         "Для начала заполните короткую анкету.\n\n"
+        "После регистрации — 5 комиксов про Voitos и месяц подписки за прохождение "
+        "(«обучение»).\n\n"
         f"{_STEP_PROMPTS['name']}"
     )
 
@@ -180,7 +184,14 @@ def _finish_if_complete(user: BotUser, pending: PendingAction) -> str | None:
         f"Адрес: {user.address}\n"
         f"Населённый пункт: {user.locality}\n\n"
         "Напишите «описание» или «помощь», чтобы узнать, что умеет бот."
+        + _onboarding_addon()
     )
+
+
+def _onboarding_addon() -> str:
+    from bot.onboarding import registration_finish_addon
+
+    return registration_finish_addon()
 
 
 def _begin_family_check(user: BotUser, pending: PendingAction, candidates: list[BotUser]) -> str:
