@@ -133,6 +133,36 @@ class ClientsMapTests(TestCase):
             if e["data"].get("label") == "Дмитрий"
         ))
 
+    def test_dependents_stay_in_own_group_only(self):
+        """Иждивенцы не должны появляться в чужих группах плательщика."""
+        other = ServiceGroup.objects.create(name="другая группа")
+        other.members.add(self.dmitry)  # плательщик в двух группах
+        # Елена только в «9 аллея»
+        graphs = build_clients_map()
+        alley = next(g for g in graphs if g["group_name"] == "9 аллея")
+        other_g = next(g for g in graphs if g["group_name"] == "другая группа")
+
+        alley_labels = {
+            e["data"]["label"]
+            for e in alley["elements"]
+            if "source" not in e["data"]
+        }
+        other_labels = {
+            e["data"]["label"]
+            for e in other_g["elements"]
+            if "source" not in e["data"]
+        }
+        self.assertIn("Елена", alley_labels)
+        self.assertIn("Дмитрий", alley_labels)
+        self.assertIn("Дмитрий", other_labels)
+        self.assertNotIn("Елена", other_labels)
+        other_family = [
+            e
+            for e in other_g["elements"]
+            if e.get("data", {}).get("kind") == "family"
+        ]
+        self.assertEqual(other_family, [])
+
     def test_panel_page_renders_groups(self):
         import json
         import re
