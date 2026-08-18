@@ -20,6 +20,8 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="voitos-dev-secret-change-me")
 DEBUG = env("DEBUG")
+# В TestCase Django ставит DEBUG=False; для локальной OTP-отладки / тестов API:
+MOBILE_OTP_DEBUG = env.bool("MOBILE_OTP_DEBUG", default=True)
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 INSTALLED_APPS = [
@@ -39,6 +41,7 @@ INSTALLED_APPS = [
     "logs",
     "subscriptions",
     "services",
+    "api",
 ]
 
 MIDDLEWARE = [

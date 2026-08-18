@@ -8,6 +8,7 @@ urlpatterns = [
     path("", RedirectView.as_view(pattern_name="panel:users", permanent=False)),
     path("django-admin/", admin.site.urls),
     path("panel/", include(("panel.urls", "panel"), namespace="panel")),
+    path("api/v1/", include(("api.urls", "api"), namespace="api")),
 ]
 
 # Media/static: DEBUG или явные флаги (Waitress без nginx).

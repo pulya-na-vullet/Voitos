@@ -1,0 +1,565 @@
+openapi: 3.0.3
+info:
+  title: Voitos Mobile API
+  version: 0.1.0
+  description: |
+    JSON API для KMP-клиента. Бизнес-правила остаются в Django domain.
+    Префикс: `/api/v1`. Auth: Bearer token (MobileAuthToken → BotUser).
+servers:
+  - url: http://127.0.0.1:18765/api/v1
+    description: Local Waitress
+tags:
+  - name: auth
+  - name: me
+  - name: subscription
+  - name: collections
+  - name: work-requests
+  - name: onboarding
+  - name: notifications
+  - name: wishes
+paths:
+  /health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  service: { type: string }
+
+  /auth/phone/start:
+    post:
+      tags: [auth]
+      summary: Начать вход по телефону (OTP stub)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, example: "89625507832" }
+      responses:
+        "200":
+          description: OTP отправлен (в dev — код в ответе)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  expires_in: { type: integer }
+                  debug_code: { type: string, nullable: true }
+
+  /auth/phone/verify:
+    post:
+      tags: [auth]
+      summary: Подтвердить OTP → access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code]
+              properties:
+                phone: { type: string }
+                code: { type: string }
+                device_name: { type: string }
+      responses:
+        "200":
+          description: Токен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "400":
+          description: Неверный код
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      security: [{ bearerAuth: [] }]
+      summary: Отозвать текущий токен
+      responses:
+        "204":
+          description: Logged out
+
+  /devices:
+    post:
+      tags: [auth]
+      security: [{ bearerAuth: [] }]
+      summary: Зарегистрировать FCM/APNs токен
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [push_token, platform]
+              properties:
+                push_token: { type: string }
+                platform: { type: string, enum: [android, ios] }
+      responses:
+        "200":
+          description: Saved
+
+  /me:
+    get:
+      tags: [me]
+      security: [{ bearerAuth: [] }]
+      summary: Профиль BotUser
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+    patch:
+      tags: [me]
+      security: [{ bearerAuth: [] }]
+      summary: Обновить анкету
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                real_name: { type: string }
+                phone: { type: string }
+                address: { type: string }
+                locality: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+
+  /me/access:
+    get:
+      tags: [me]
+      security: [{ bearerAuth: [] }]
+      summary: access_state / grace / until
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessInfo"
+
+  /me/subscription:
+    get:
+      tags: [subscription]
+      security: [{ bearerAuth: [] }]
+      summary: Статус подписки + реквизиты
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionInfo"
+
+  /me/receipts:
+    get:
+      tags: [subscription]
+      security: [{ bearerAuth: [] }]
+      summary: Чеки подписки пользователя
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ReceiptBrief" }
+    post:
+      tags: [subscription]
+      security: [{ bearerAuth: [] }]
+      summary: Загрузить чек (multipart)
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: На проверке
+
+  /executor-roles:
+    get:
+      tags: [work-requests]
+      security: [{ bearerAuth: [] }]
+      summary: Каталог ролей для вызова мастера
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ExecutorRoleBrief" }
+
+  /work-requests:
+    get:
+      tags: [work-requests]
+      security: [{ bearerAuth: [] }]
+      summary: Мои заявки
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/WorkRequestBrief" }
+    post:
+      tags: [work-requests]
+      security: [{ bearerAuth: [] }]
+      summary: Создать заявку (описание + role_id; фото отдельно)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_id, description]
+              properties:
+                role_id: { type: integer }
+                description: { type: string }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkRequestBrief"
+
+  /work-requests/{id}:
+    get:
+      tags: [work-requests]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkRequestDetail"
+
+  /work-requests/{id}/photos:
+    post:
+      tags: [work-requests]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Photo added
+
+  /work-requests/{id}/confirm-amount:
+    post:
+      tags: [work-requests]
+      security: [{ bearerAuth: [] }]
+      summary: Клиент подтверждает сумму (R24)
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirmed: { type: boolean }
+                amount: { type: number, nullable: true }
+      responses:
+        "200":
+          description: OK
+
+  /work-requests/{id}/rate:
+    post:
+      tags: [work-requests]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [score]
+              properties:
+                score: { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /collections:
+    get:
+      tags: [collections]
+      security: [{ bearerAuth: [] }]
+      summary: Активные сборы / инвайты пользователя
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CollectionBrief" }
+
+  /collections/{id}:
+    get:
+      tags: [collections]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionDetail"
+
+  /onboarding:
+    get:
+      tags: [onboarding]
+      security: [{ bearerAuth: [] }]
+      summary: Прогресс комиксов
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingProgress"
+
+  /onboarding/steps/{code}/complete:
+    post:
+      tags: [onboarding]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [snow, playground, electrician, manicure, computer]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingProgress"
+
+  /notifications:
+    get:
+      tags: [notifications]
+      security: [{ bearerAuth: [] }]
+      summary: Inbox пушей / событий
+      parameters:
+        - name: unread
+          in: query
+          schema: { type: boolean }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AppNotification" }
+
+  /notifications/{id}/read:
+    post:
+      tags: [notifications]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Marked
+
+  /wishes:
+    get:
+      tags: [wishes]
+      security: [{ bearerAuth: [] }]
+      summary: Статистика пожеланий группы
+      responses:
+        "200":
+          description: Topic tallies
+    post:
+      tags: [wishes]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string }
+                group_id: { type: integer, nullable: true }
+      responses:
+        "201":
+          description: Created
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+
+  schemas:
+    AuthSession:
+      type: object
+      properties:
+        access_token: { type: string }
+        bot_user_id: { type: integer }
+        display_name: { type: string }
+
+    Me:
+      type: object
+      properties:
+        id: { type: integer }
+        real_name: { type: string }
+        phone: { type: string }
+        address: { type: string }
+        locality: { type: string }
+        profile_status: { type: string }
+        onboarding_completed: { type: boolean }
+
+    AccessInfo:
+      type: object
+      properties:
+        state: { type: string, enum: [active, grace, blocked] }
+        subscription_until: { type: string, format: date-time, nullable: true }
+        grace_until: { type: string, format: date-time, nullable: true }
+        label: { type: string }
+
+    SubscriptionInfo:
+      allOf:
+        - $ref: "#/components/schemas/AccessInfo"
+        - type: object
+          properties:
+            price_rub: { type: integer }
+            payment_phone: { type: string }
+            payment_name: { type: string }
+            pending_receipts: { type: integer }
+
+    ReceiptBrief:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string }
+        amount: { type: number, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    ExecutorRoleBrief:
+      type: object
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+        requires_work_photos: { type: boolean }
+
+    WorkRequestBrief:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string }
+        role_name: { type: string }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+
+    WorkRequestDetail:
+      allOf:
+        - $ref: "#/components/schemas/WorkRequestBrief"
+        - type: object
+          properties:
+            assigned_name: { type: string, nullable: true }
+            assigned_phone: { type: string, nullable: true }
+            proposed_slots: { type: array, items: { type: string } }
+            needs_confirm_amount: { type: boolean }
+            needs_rating: { type: boolean }
+
+    CollectionBrief:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        category: { type: string }
+        amount_due: { type: number }
+        status: { type: string }
+        event_at: { type: string, format: date-time, nullable: true }
+
+    CollectionDetail:
+      allOf:
+        - $ref: "#/components/schemas/CollectionBrief"
+        - type: object
+          properties:
+            progress_pct: { type: number }
+            payment_phone: { type: string }
+            payment_name: { type: string }
+
+    OnboardingProgress:
+      type: object
+      properties:
+        done_count: { type: integer }
+        total: { type: integer }
+        completed: { type: boolean }
+        reward_granted: { type: boolean }
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              title: { type: string }
+              done: { type: boolean }
+              image_url: { type: string }
+
+    AppNotification:
+      type: object
+      properties:
+        id: { type: integer }
+        type: { type: string }
+        title: { type: string }
+        body: { type: string }
+        deep_link: { type: string }
+        entity_type: { type: string, nullable: true }
+        entity_id: { type: integer, nullable: true }
+        read_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
