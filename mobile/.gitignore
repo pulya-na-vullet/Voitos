@@ -1,0 +1,11 @@
+# KMP / Android / iOS build artifacts
+.gradle/
+build/
+**/build/
+.idea/
+*.iml
+local.properties
+.DS_Store
+Pods/
+*.xcworkspace/
+DerivedData/

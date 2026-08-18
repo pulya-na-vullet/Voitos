@@ -130,3 +130,7 @@ python manage.py runserver   # только панель, без бота
 - Модель в настройках — только YandexGPT (`yandexgpt-lite` / `yandexgpt`), не DeepSeek.
 - Если бот молчит: нажмите **Проверить MAX**, убедитесь что статус `polling`, затем напишите боту снова. При старте webhook-подписки снимаются автоматически.
 - Ошибка `CERTIFICATE_VERIFY_FAILED` к `platform-api2.max.ru` — сертификат Минцифры в `certs/`. В крайнем случае в `.env`: `MAX_SSL_VERIFY=false`.
+
+## Mobile (KMP)
+
+Черновик нативного клиента без дублирования логики бота: [`docs/mobile/`](docs/mobile/) · API `/api/v1/` · заготовка [`mobile/`](mobile/).
