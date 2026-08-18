@@ -300,10 +300,10 @@ def main() -> int:
     logger.info("Admin panel (network): %s", access_origin + "/panel/")
     logger.info("Login URL for managers: %s", login_url)
     if is_local_lan_mode():
-        logger.info("LAN mode %s — HOST=%s (Wi‑Fi clients OK)", WIFI_WORKSHOP_NOTE, settings.HOST)
+        logger.info("LAN mode %s - HOST=%s (Wi-Fi clients OK)", WIFI_WORKSHOP_NOTE, settings.HOST)
         if settings.HOST not in {"0.0.0.0", "::", "[::]", "*"}:
             logger.warning(
-                "HOST=%s — для доступа из Wi‑Fi сети лучше HOST=0.0.0.0",
+                "HOST=%s - для доступа из Wi-Fi сети лучше HOST=0.0.0.0",
                 settings.HOST,
             )
     else:
