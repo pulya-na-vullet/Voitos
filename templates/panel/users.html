@@ -16,9 +16,10 @@
   </div>
 </div>
 
-<div class="grid stats" style="grid-template-columns: repeat(3, minmax(0,1fr));">
+<div class="grid stats" style="grid-template-columns: repeat(4, minmax(0,1fr));">
   <div class="card"><div class="stat-label">Всего пользователей</div><div class="stat-value">{{ stats.users }}</div></div>
   <div class="card"><div class="stat-label">С активной подпиской</div><div class="stat-value">{{ stats.active }}</div></div>
+  <div class="card"><div class="stat-label">Прошли обучение</div><div class="stat-value">{{ stats.onboarding_done }}</div></div>
   <div class="card"><div class="stat-label">Чеков</div><div class="stat-value">{{ stats.receipts }}</div></div>
 </div>
 
@@ -73,6 +74,7 @@
         <th>Соц. рейтинг</th>
         <th>Помощь / оплаты</th>
         <th>Анкета</th>
+        <th>Обучение</th>
         <th>Подписка</th>
         <th>Доступ</th>
         <th>Активность</th>
@@ -103,6 +105,12 @@
             {{ u.get_profile_status_display }}
           </span>
         </td>
+        <td class="mono">
+          {% with ob=row.onboarding %}
+            <span class="badge {% if ob.completed %}ok{% endif %}">{{ ob.done_count }}/{{ ob.total }}</span>
+            {% if ob.reward_granted %}<div class="muted">+1 мес</div>{% endif %}
+          {% endwith %}
+        </td>
         <td class="mono">{{ u.subscription_label }}</td>
         <td>
           {% with st=u.access_state %}
@@ -122,7 +130,7 @@
       </tr>
       {% endwith %}
     {% empty %}
-      <tr><td colspan="10" class="muted">Никого не найдено. Измените поиск или фильтр.</td></tr>
+      <tr><td colspan="11" class="muted">Никого не найдено. Измените поиск или фильтр.</td></tr>
     {% endfor %}
     </tbody>
   </table>
