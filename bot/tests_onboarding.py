@@ -101,3 +101,19 @@ class ComicOnboardingPanelTests(TestCase):
         self.assertContains(resp, "2 / 5")
         self.assertContains(resp, "Уборка снега")
         self.assertContains(resp, "пройдено")
+
+    def test_users_list_shows_onboarding_counter(self):
+        done = BotUser.objects.create(
+            max_user_id="ob3",
+            real_name="Готово",
+            onboarding_steps=["snow", "playground", "electrician", "manicure", "computer"],
+            onboarding_reward_granted=True,
+        )
+        resp = self.client.get(reverse("panel:users"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Прошли обучение")
+        self.assertContains(resp, "Обучение")
+        self.assertContains(resp, "2/5")  # Пётр partial
+        self.assertContains(resp, "5/5")  # Готово
+        self.assertContains(resp, "+1 мес")
+        self.assertEqual(resp.context["stats"]["onboarding_done"], 1)

@@ -300,6 +300,18 @@ def users_list(request: HttpRequest) -> HttpResponse:
 
     open_tasks_qs = AdminTask.objects.filter(status=AdminTaskStatus.OPEN)
     open_admin_tasks = filter_tasks_for_user(open_tasks_qs, request.user).count()
+    from bot.onboarding import panel_progress
+    from database.models import AccessState
+
+    users_for_stats = list(users_scope.select_related("family_payer"))
+    active_count = sum(
+        1 for u in users_for_stats if u.access_state() == AccessState.ACTIVE
+    )
+    onboarding_done = sum(1 for u in users_for_stats if u.onboarding_reward_granted)
+    # Прогресс обучения на строку списка (N/5)
+    onboarding_by_id = {u.id: panel_progress(u) for u in users_for_stats}
+    for row in rows:
+        row.onboarding = onboarding_by_id.get(row.user.id) or panel_progress(row.user)
     return render(
         request,
         "panel/users.html",
@@ -317,8 +329,9 @@ def users_list(request: HttpRequest) -> HttpResponse:
             "tax_warning": AppSettings.load().tax_limit_warning() if is_panel_admin(request.user) else "",
             "can_delete_users": is_panel_admin(request.user),
             "stats": {
-                "users": users_scope.count(),
-                "active": sum(1 for u in users_scope if u.access_state() == "active"),
+                "users": len(users_for_stats),
+                "active": active_count,
+                "onboarding_done": onboarding_done,
                 "receipts": PaymentReceipt.objects.count() if is_panel_admin(request.user) else 0,
             },
         },

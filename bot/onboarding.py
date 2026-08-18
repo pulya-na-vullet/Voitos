@@ -118,6 +118,9 @@ def is_complete(user: BotUser) -> bool:
 
 def panel_progress(user: BotUser) -> dict:
     done = set(progress_list(user))
+    # Если награда уже выдана — считаем все шаги пройденными (на случай рассинхрона JSON).
+    if user.onboarding_reward_granted or user.onboarding_completed_at:
+        done = set(STORY_CODES)
     steps = [
         {
             "code": s.code,
@@ -127,11 +130,12 @@ def panel_progress(user: BotUser) -> dict:
         }
         for s in STORIES
     ]
+    done_count = sum(1 for s in steps if s["done"])
     return {
         "steps": steps,
-        "done_count": sum(1 for s in steps if s["done"]),
+        "done_count": done_count,
         "total": len(steps),
-        "completed": is_complete(user),
+        "completed": is_complete(user) or done_count >= len(steps),
         "reward_granted": bool(user.onboarding_reward_granted),
         "completed_at": user.onboarding_completed_at,
     }
@@ -171,8 +175,17 @@ def _mark_step(user: BotUser, code: str) -> None:
 def _grant_reward_if_needed(user: BotUser) -> str:
     """Пометить завершение и выдать месяц один раз."""
     now = timezone.now()
-    if progress_count(user) < len(STORIES):
-        user.onboarding_steps = list(STORY_CODES)
+    # Актуальные сроки из БД — иначе можно затереть подписку устаревшим объектом в памяти.
+    user.refresh_from_db(
+        fields=[
+            "subscription_until",
+            "grace_until",
+            "onboarding_steps",
+            "onboarding_completed_at",
+            "onboarding_reward_granted",
+        ]
+    )
+    user.onboarding_steps = list(STORY_CODES)
     if not user.onboarding_completed_at:
         user.onboarding_completed_at = now
 
