@@ -390,7 +390,12 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
             title="Анкета проверена",
             detail=note or "OK",
         )
-        _notify_user(bot_user, "Администратор проверил ваши данные. Анкета принята.")
+        from bot.onboarding import intro_blurb, is_complete
+
+        verify_msg = "Администратор проверил ваши данные. Анкета принята."
+        if not is_complete(bot_user):
+            verify_msg += "\n\n" + intro_blurb()
+        _notify_user(bot_user, verify_msg)
         messages.success(request, "Анкета подтверждена.")
     elif action == "incomplete":
         missing = missing_profile_fields(bot_user)
@@ -454,6 +459,7 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
     from bot.registration import missing_profile_fields
+    from bot.onboarding import panel_progress
     from services.address_overlap import heuristic_candidates
 
     bot_user = get_object_or_404(
@@ -538,6 +544,7 @@ def user_dashboard(request: HttpRequest, user_id: int) -> HttpResponse:
             "executor_profiles": executor_profiles,
             "executor_role_stats": executor_role_stats,
             "executor_ratings": executor_ratings,
+            "onboarding": panel_progress(bot_user),
             "stats": {
                 "messages": ChatMessage.objects.filter(user=bot_user).count(),
                 "memories": MemoryItem.objects.filter(user=bot_user).count(),

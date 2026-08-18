@@ -1,4 +1,4 @@
-"""Заявка жителя: вызвать исполнителя (фото + описание)."""
+"""Заявка жителя: вызвать исполнителя (описание + опционально фото)."""
 
 from __future__ import annotations
 
@@ -24,6 +24,12 @@ from services.executor_roles import (
 )
 
 WORK_REQUEST_KIND = "work_request"
+
+
+def _role_requires_photos(role: ExecutorRole | None) -> bool:
+    if role is None:
+        return True
+    return bool(getattr(role, "requires_work_photos", True))
 
 
 def start_work_request(
@@ -88,6 +94,12 @@ def handle_work_request_step(user: BotUser, text: str, pending: PendingAction) -
         if len(raw) < 5:
             return "Напишите чуть подробнее, что нужно сделать (хотя бы пару слов)."
         payload["description"] = raw[:4000]
+        role = ExecutorRole.objects.filter(pk=payload.get("role_id")).first()
+        if not _role_requires_photos(role):
+            # Фото для этой роли не нужны — сразу создаём и отправляем заявку.
+            pending.pending_payload = payload
+            pending.save(update_fields=["pending_payload", "updated_at"])
+            return _finish_if_possible(user, pending, payload)
         payload["step"] = "photo"
         pending.pending_payload = payload
         pending.save(update_fields=["pending_payload", "updated_at"])
@@ -155,19 +167,41 @@ def handle_work_request_photo(
 
 
 def _finish_if_possible(user: BotUser, pending: PendingAction, payload: dict) -> str:
+    role = ExecutorRole.objects.filter(pk=payload.get("role_id")).first()
+    requires_photos = _role_requires_photos(role)
     request_id = payload.get("draft_id")
     photos = payload.get("photos") or []
-    if not request_id or not photos:
+    if requires_photos and (not request_id or not photos):
         return "Нужно хотя бы одно фото. Пришлите изображение, затем «готово»."
-    req = WorkRequest.objects.select_related("role").filter(pk=request_id, user=user).first()
-    if not req:
-        pending.clear_pending()
-        return "Заявка не найдена — начните снова."
-    if payload.get("description"):
-        req.description = payload["description"]
-    # Черновик → новая заявка только после «готово»
-    req.status = WorkRequestStatus.PENDING
-    req.save(update_fields=["description", "status", "updated_at"] if payload.get("description") else ["status", "updated_at"])
+
+    if not request_id:
+        if not role:
+            pending.clear_pending()
+            return "Ошибка заявки — начните снова: «вызвать мастера»."
+        req = WorkRequest.objects.create(
+            user=user,
+            role=role,
+            description=payload.get("description") or "—",
+            status=WorkRequestStatus.PENDING,
+            client_locality=(user.locality or "").strip()[:255],
+        )
+    else:
+        req = WorkRequest.objects.select_related("role").filter(
+            pk=request_id, user=user
+        ).first()
+        if not req:
+            pending.clear_pending()
+            return "Заявка не найдена — начните снова."
+        if payload.get("description"):
+            req.description = payload["description"]
+        # Черновик → новая заявка только после «готово»
+        req.status = WorkRequestStatus.PENDING
+        req.save(
+            update_fields=["description", "status", "updated_at"]
+            if payload.get("description")
+            else ["status", "updated_at"]
+        )
+
     pending.clear_pending()
     ActivityLog.objects.create(
         user=user,
@@ -189,6 +223,10 @@ def _finish_if_possible(user: BotUser, pending: PendingAction, payload: dict) ->
         )
     except Exception:
         pass
+    photo_n = req.photos.count() if request_id else 0
+    if photos:
+        photo_n = len(photos)
+    photo_line = f"Фото: {photo_n}\n" if photo_n else ""
     # Автоподбор мастера по роли и населённому пункту
     try:
         from services.work_request_dispatch import try_dispatch_request
@@ -201,7 +239,7 @@ def _finish_if_possible(user: BotUser, pending: PendingAction, payload: dict) ->
             return (
                 f"Заявка отправлена.\n"
                 f"Роль: {req.role.name}\n"
-                f"Фото: {len(photos)}\n"
+                f"{photo_line}"
                 "Ищем мастера рядом — напишем, когда подтвердит."
             )
     except Exception:
@@ -209,6 +247,6 @@ def _finish_if_possible(user: BotUser, pending: PendingAction, payload: dict) ->
     return (
         f"Заявка отправлена.\n"
         f"Роль: {req.role.name}\n"
-        f"Фото: {len(photos)}\n"
+        f"{photo_line}"
         "Напишем, когда найдём мастера."
     )

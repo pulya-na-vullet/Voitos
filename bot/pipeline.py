@@ -81,6 +81,13 @@ class MessagePipeline:
             self._store_out(user, reply, "contractor_registration")
             return reply
 
+        from bot.onboarding import ONBOARDING_KIND, handle_onboarding_step
+
+        if pending.pending_kind == ONBOARDING_KIND:
+            reply = handle_onboarding_step(user, text, pending)
+            self._store_out(user, reply, "comic_onboarding")
+            return reply
+
         # Отмена оформления / шагов заявки на мастера («отмена», «я ошибся», …)
         if pending.pending_kind in {
             "work_request",
@@ -229,6 +236,14 @@ class MessagePipeline:
                 self._store_out(user, reply, "contractor_registration")
                 return reply
 
+            from ai.intent import ONBOARDING_RE
+            from bot.onboarding import start_onboarding
+
+            if ONBOARDING_RE.match(text):
+                reply = start_onboarding(user, pending)
+                self._store_out(user, reply, "comic_onboarding")
+                return reply
+
             if not (
                 HELP_RE.match(text)
                 or SUBSCRIPTION_RE.match(text)
@@ -277,6 +292,11 @@ class MessagePipeline:
             from bot.messages import help_message
 
             return help_message(user)
+
+        if intent.intent == "comic_onboarding":
+            from bot.onboarding import start_onboarding
+
+            return start_onboarding(user, pending)
 
         if intent.intent == "subscription_info":
             from bot.messages import subscription_detail_message

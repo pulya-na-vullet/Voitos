@@ -8,6 +8,7 @@
 <p class="muted" style="margin-top:-6px;">
   Каталог ролей для регистрации и заявок «вызвать исполнителя».
   Код роли создаётся автоматически. Галочки «документы» и «техника» влияют на регистрацию в боте.
+  Галочка «нужны фото» — нужна ли фотография при вызове мастера (для маникюра можно снять, для электрика — оставить).
   Доп. признаки добавляете сами.
 </p>
 
@@ -32,6 +33,7 @@
             {% if r.requires_qualification_docs %}<span class="badge">док.</span>{% endif %}
             {% if r.is_equipment %}<span class="badge">техника</span>{% endif %}
             {% if r.accepts_at_home %}<span class="badge">на дому</span>{% endif %}
+            {% if r.requires_work_photos %}<span class="badge">фото</span>{% else %}<span class="badge">без фото</span>{% endif %}
             {% if r.is_active %}<span class="badge ok">активна</span>{% else %}<span class="badge">скрыта</span>{% endif %}
             <span class="role-fold-chevron mono">▼</span>
           </span>
@@ -49,6 +51,7 @@
             <label class="muted"><input type="checkbox" name="requires_qualification_docs" {% if r.requires_qualification_docs %}checked{% endif %}> нужны подтверждающие документы о квалификации</label>
             <label class="muted"><input type="checkbox" name="is_equipment" {% if r.is_equipment %}checked{% endif %}> техника (госномер / модель)</label>
             <label class="muted"><input type="checkbox" name="accepts_at_home" {% if r.accepts_at_home %}checked{% endif %}> мастер принимает на дому</label>
+            <label class="muted"><input type="checkbox" name="requires_work_photos" {% if r.requires_work_photos %}checked{% endif %}> нужны фото при записи заявки</label>
             <div class="form-row" style="margin-top:10px;">
               <label>Доп. признаки</label>
               <div class="flag-editor" data-editor="role-{{ r.id }}"></div>
@@ -81,7 +84,8 @@
       <div class="form-row"><label>Название</label><input name="name" required placeholder="Сантехник"></div>
       <label class="muted"><input type="checkbox" name="requires_qualification_docs"> нужны подтверждающие документы о квалификации</label><br>
       <label class="muted"><input type="checkbox" name="is_equipment"> техника (госномер / модель)</label><br>
-      <label class="muted"><input type="checkbox" name="accepts_at_home"> мастер принимает на дому</label>
+      <label class="muted"><input type="checkbox" name="accepts_at_home"> мастер принимает на дому</label><br>
+      <label class="muted"><input type="checkbox" name="requires_work_photos" checked> нужны фото при записи заявки</label>
       <div class="form-row" style="margin-top:10px;">
         <label>Доп. признаки</label>
         <div class="flag-editor" data-editor="new"></div>

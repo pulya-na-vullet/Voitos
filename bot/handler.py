@@ -6,7 +6,14 @@ from typing import Any
 import base64
 
 from ai.factory import AINotConfiguredError, get_stt_provider
-from ai.intent import HELP_RE, SERVICE_COLLECTIONS_RE, SUBSCRIPTION_RE, WISHES_LIST_RE, WISH_PREFIX_RE
+from ai.intent import (
+    HELP_RE,
+    ONBOARDING_RE,
+    SERVICE_COLLECTIONS_RE,
+    SUBSCRIPTION_RE,
+    WISHES_LIST_RE,
+    WISH_PREFIX_RE,
+)
 from bot.access import AccessDenied, resolve_or_create_user
 from bot.client import MaxClient
 from bot.messages import help_message
@@ -221,6 +228,7 @@ class UpdateHandler:
         is_subscription = bool(SUBSCRIPTION_RE.match(text))
         is_collections = bool(SERVICE_COLLECTIONS_RE.match(text))
         is_wishes = bool(WISHES_LIST_RE.match(text) or WISH_PREFIX_RE.match(text) or looks_like_wish(text))
+        is_onboarding = bool(ONBOARDING_RE.match(text))
         lower = text.lower()
         payment_topic = any(k in lower for k in ("оплат", "подписк", "чек", "перевод"))
 
@@ -237,6 +245,7 @@ class UpdateHandler:
             "contractor_registration",
             "registration",
             "volunteer_help_reply",
+            "comic_onboarding",
             "work_request",
             "work_request_offer_reply",
             "work_request_complete",
@@ -262,12 +271,15 @@ class UpdateHandler:
 
         if state == AccessState.BLOCKED:
             from bot.messages import subscription_detail_message
+            from bot.onboarding import start_onboarding
             from services.service import format_collections_for_user
 
             if needs_registration(user) and not (
-                is_help or is_subscription or is_collections or is_wishes
+                is_help or is_subscription or is_collections or is_wishes or is_onboarding
             ):
                 self._reply(user, start_registration(user, pending))
+            elif is_onboarding:
+                self._reply(user, start_onboarding(user, pending))
             elif is_help:
                 self._reply(user, help_message(user))
             elif is_collections:
@@ -290,7 +302,14 @@ class UpdateHandler:
                 self._reply(user, access_message(user) or payment_help_text())
             return
 
-        if state == AccessState.GRACE and not is_help and not is_subscription and not is_collections and not is_wishes:
+        if (
+            state == AccessState.GRACE
+            and not is_help
+            and not is_subscription
+            and not is_collections
+            and not is_wishes
+            and not is_onboarding
+        ):
             notice = access_message(user)
             if notice and self._should_send_grace_notice(user):
                 self._reply(user, notice)
@@ -468,15 +487,49 @@ class UpdateHandler:
             self._reply(user, help_message(user))
 
     def _reply(self, user, text: str) -> None:
+        attachments = None
+        try:
+            from bot.onboarding import pop_attach_image
+            from database.models import PendingAction
+
+            pending = PendingAction.objects.filter(user=user).first()
+            if pending:
+                image_path = pop_attach_image(pending)
+                if image_path:
+                    attachments = self._image_attachments_from_path(image_path)
+        except Exception:
+            logger.exception("Failed to prepare onboarding image for %s", user.max_user_id)
+
         try:
             if user.chat_id:
-                self.client.send_message(text, chat_id=user.chat_id)
+                self.client.send_message(
+                    text, chat_id=user.chat_id, attachments=attachments
+                )
             else:
-                self.client.send_message(text, user_id=user.max_user_id)
+                self.client.send_message(
+                    text, user_id=user.max_user_id, attachments=attachments
+                )
             logger.info("Reply sent to %s", user.max_user_id)
         except Exception:
             logger.exception("Failed to send reply to user %s", user.max_user_id)
             try:
-                self.client.send_message(text, user_id=user.max_user_id)
+                self.client.send_message(
+                    text, user_id=user.max_user_id, attachments=attachments
+                )
             except Exception:
                 logger.exception("Fallback send also failed")
+                if attachments:
+                    try:
+                        self.client.send_message(text, user_id=user.max_user_id)
+                    except Exception:
+                        logger.exception("Text-only fallback also failed")
+
+    def _image_attachments_from_path(self, path: str):
+        from pathlib import Path
+
+        p = Path(path)
+        if not p.is_file():
+            return None
+        raw = p.read_bytes()
+        token = self.client.upload_image(raw, filename=p.name)
+        return self.client.image_attachments([token])
