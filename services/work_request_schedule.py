@@ -45,12 +45,13 @@ def master_visit_address(req: WorkRequest) -> str:
 
 
 def start_master_scheduling(req: WorkRequest, *, send_fn=None) -> None:
-    """После accept: спросить у мастера окна и адрес приёма."""
+    """После accept: спросить у мастера окна (на дому или выезд к клиенту)."""
     send_fn = send_fn or _send()
     req.status = WorkRequestStatus.SCHEDULING
     contractor = req.assigned_contractor
-    addr = master_visit_address(req)
-    if addr and not req.master_address:
+    home = role_accepts_at_home(req)
+    addr = master_visit_address(req) if home else (req.user.address or "").strip()
+    if home and addr and not req.master_address:
         req.master_address = addr[:512]
     req.proposed_slots = []
     req.agreed_slot = ""
@@ -65,7 +66,10 @@ def start_master_scheduling(req: WorkRequest, *, send_fn=None) -> None:
     )
     c_user = contractor.user
     pending, _ = PendingAction.objects.get_or_create(user=c_user)
-    step = "address" if not (req.master_address or "").strip() else "slots"
+    if home:
+        step = "address" if not (req.master_address or "").strip() else "slots"
+    else:
+        step = "slots"
     pending.pending_kind = MASTER_SCHEDULE_PENDING
     pending.pending_payload = {
         "work_request_id": req.id,
@@ -74,12 +78,13 @@ def start_master_scheduling(req: WorkRequest, *, send_fn=None) -> None:
     }
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
 
+    client_addr = (req.user.address or "").strip() or "адрес клиента уточните у жителя"
     if step == "address":
         msg = (
             f"Заявка #{req.id}: вы принимаете клиентов на дому.\n"
             "Напишите адрес, по которому готовы принять клиента."
         )
-    else:
+    elif home:
         msg = (
             f"Заявка #{req.id}: укажите, в какое время можете принять клиента "
             f"по адресу: {req.master_address}.\n"
@@ -87,6 +92,17 @@ def start_master_scheduling(req: WorkRequest, *, send_fn=None) -> None:
             "15.03 10:00–12:00\n"
             "15.03 14:00–16:00\n"
             "16.03 11:00–13:00\n\n"
+            "Когда перечислите все окна, напишите «готово»."
+        )
+    else:
+        msg = (
+            f"Заявка #{req.id}: согласуйте время визита к клиенту.\n"
+            f"Адрес: {client_addr}\n"
+            f"Клиент: {req.user}\n"
+            f"Телефон: {(req.user.phone or '—')}\n\n"
+            "Укажите варианты времени — каждый с новой строки, например:\n"
+            "15.03 10:00–12:00\n"
+            "15.03 14:00–16:00\n\n"
             "Когда перечислите все окна, напишите «готово»."
         )
     try:
@@ -264,7 +280,9 @@ def handle_client_schedule_step(user: BotUser, text: str, pending: PendingAction
     return _confirm_agreed_slot(req, chosen, pending)
 
 
-def _confirm_agreed_slot(req: WorkRequest, slot: str, pending: PendingAction) -> str:
+def _confirm_agreed_slot(
+    req: WorkRequest, slot: str, pending: PendingAction | None
+) -> str:
     send_fn = _send()
     now = timezone.now()
     req.agreed_slot = slot[:255]
@@ -273,32 +291,90 @@ def _confirm_agreed_slot(req: WorkRequest, slot: str, pending: PendingAction) ->
     req.save(
         update_fields=["agreed_slot", "schedule_agreed_at", "status", "updated_at"]
     )
-    pending.clear_pending()
+    if pending is not None:
+        pending.clear_pending()
 
-    addr = master_visit_address(req) or "—"
-    master = req.assigned_contractor.user
+    addr = master_visit_address(req) or (req.user.address or "").strip() or "—"
+    master = req.assigned_contractor.user if req.assigned_contractor_id else None
     client = req.user
     from services.contractors import format_executor_contacts_block
 
-    contacts = format_executor_contacts_block(req.assigned_contractor)
+    contacts = (
+        format_executor_contacts_block(req.assigned_contractor)
+        if req.assigned_contractor_id
+        else ""
+    )
     common = (
         f"Согласовано по заявке #{req.id}.\n"
         f"Время: {slot}\n"
         f"Адрес: {addr}\n"
-        f"Мастер: {master}\n"
+        f"Мастер: {master or '—'}\n"
         f"{contacts}\n"
         f"Клиент: {client}"
     )
     try:
-        send_fn(client, common + "\n\nЖдём вас в указанное время.")
+        send_fn(client, common + "\n\nСтатус заявки: в работе.")
     except Exception:
         logger.exception("confirm client WR %s", req.id)
+    if master is not None:
+        try:
+            send_fn(
+                master,
+                common
+                + "\n\nСтатус: в работе. Когда закончите, напишите: заявка выполнена",
+            )
+        except Exception:
+            logger.exception("confirm master WR %s", req.id)
     try:
-        send_fn(
-            master,
-            common
-            + "\n\nКогда закончите работу, напишите: заявка выполнена",
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            client,
+            ntype="work_request.in_progress",
+            title="Заявка в работе",
+            body=f"Время согласовано: {slot}",
+            entity_type="work_request",
+            entity_id=req.id,
         )
     except Exception:
-        logger.exception("confirm master WR %s", req.id)
-    return f"Отлично! Зафиксировали визит: {slot}. Мастеру отправлено подтверждение."
+        logger.exception("app inbox in_progress WR %s", req.id)
+    return f"Отлично! Зафиксировали: {slot}. Статус — «В работе»."
+
+
+def confirm_slot_for_client(req: WorkRequest, *, slot: str = "") -> str:
+    """Клиент в приложении выбирает окно или подтверждает договорённость."""
+    if req.status != WorkRequestStatus.SCHEDULING:
+        raise ValueError("Сейчас нельзя подтвердить время по этой заявке.")
+    slots: list[str] = []
+    for item in req.proposed_slots or []:
+        if isinstance(item, dict):
+            label = str(item.get("label") or "").strip()
+        else:
+            label = str(item).strip()
+        if label:
+            slots.append(label)
+
+    chosen = (slot or "").strip()
+    if chosen and slots and chosen not in slots:
+        # номер из списка
+        if chosen.isdigit():
+            idx = int(chosen) - 1
+            if 0 <= idx < len(slots):
+                chosen = slots[idx]
+            else:
+                raise ValueError("Некорректный номер окна.")
+        else:
+            raise ValueError("Выберите одно из предложенных окон.")
+    if not chosen:
+        if slots:
+            raise ValueError("Выберите одно из предложенных окон.")
+        chosen = "Время согласовано с мастером"
+
+    pending = PendingAction.objects.filter(user=req.user).first()
+    if not (
+        pending
+        and pending.pending_kind == CLIENT_SCHEDULE_PENDING
+        and (pending.pending_payload or {}).get("work_request_id") == req.id
+    ):
+        pending = None
+    return _confirm_agreed_slot(req, chosen, pending)

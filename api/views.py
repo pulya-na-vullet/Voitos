@@ -334,22 +334,42 @@ def work_requests_list(request):
     return json_response(
         {
             "items": [
-                {
-                    "id": wr.id,
-                    "status": wr.status,
-                    "role_name": wr.role.name if wr.role_id else "",
-                    "description": wr.description or "",
-                    "created_at": wr.created_at.isoformat(),
-                    "assigned_executor_name": (
-                        str(wr.assigned_contractor)
-                        if wr.assigned_contractor_id
-                        else None
-                    ),
-                }
+                _work_request_brief(wr)
                 for wr in qs
             ]
         }
     )
+
+
+def _slot_labels(wr) -> list[str]:
+    out = []
+    for item in wr.proposed_slots or []:
+        if isinstance(item, dict):
+            label = str(item.get("label") or "").strip()
+        else:
+            label = str(item).strip()
+        if label:
+            out.append(label)
+    return out
+
+
+def _work_request_brief(wr) -> dict:
+    slots = _slot_labels(wr)
+    return {
+        "id": wr.id,
+        "status": wr.status,
+        "status_label": wr.get_status_display(),
+        "role_name": wr.role.name if wr.role_id else "",
+        "description": wr.description or "",
+        "created_at": wr.created_at.isoformat(),
+        "assigned_executor_name": (
+            str(wr.assigned_contractor) if wr.assigned_contractor_id else None
+        ),
+        "proposed_slots": slots,
+        "agreed_slot": wr.agreed_slot or "",
+        "can_confirm_slot": wr.status == "scheduling",
+        "needs_confirm_amount": wr.status == "awaiting_client",
+    }
 
 
 @api_login_required
@@ -366,20 +386,44 @@ def work_request_detail(request, pk: int):
     requires_photos = bool(
         getattr(wr.role, "requires_work_photos", True) if wr.role_id else True
     )
-    return json_response(
+    payload = _work_request_brief(wr)
+    payload.update(
         {
-            "id": wr.id,
-            "status": wr.status,
-            "role_name": wr.role.name if wr.role_id else "",
-            "description": wr.description or "",
-            "created_at": wr.created_at.isoformat(),
             "assigned_name": str(contractor) if contractor else None,
             "assigned_phone": getattr(contractor, "phone", None) if contractor else None,
-            "proposed_slots": wr.proposed_slots or [],
-            "needs_confirm_amount": wr.status == "awaiting_client",
             "needs_rating": False,
             "needs_photos": requires_photos and wr.status == "draft",
             "photo_count": wr.photos.count(),
+        }
+    )
+    return json_response(payload)
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_confirm_slot(request, pk: int):
+    from services.work_request_schedule import confirm_slot_for_client
+
+    wr = (
+        WorkRequest.objects.select_related("role", "assigned_contractor", "user")
+        .filter(pk=pk, user=request.bot_user)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    data = parse_json(request)
+    try:
+        msg = confirm_slot_for_client(wr, slot=str(data.get("slot") or ""))
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    wr.refresh_from_db()
+    return json_response(
+        {
+            "ok": True,
+            "message": msg,
+            "status": wr.status,
+            "status_label": wr.get_status_display(),
+            "agreed_slot": wr.agreed_slot or "",
         }
     )
 

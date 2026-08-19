@@ -24,6 +24,11 @@ urlpatterns = [
         name="work_request_confirm",
     ),
     path(
+        "work-requests/<int:pk>/confirm-slot",
+        views.work_request_confirm_slot,
+        name="work_request_confirm_slot",
+    ),
+    path(
         "work-requests/<int:pk>/photos",
         views.work_request_add_photo,
         name="work_request_photos",

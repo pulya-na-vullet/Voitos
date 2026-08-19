@@ -250,6 +250,42 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     "(или уже есть активное предложение).",
                 )
             return redirect("panel:work_request_detail", pk=pk)
+        if action == "reassign":
+            from services.work_request_dispatch import admin_reassign_executor
+
+            raw_cid = (request.POST.get("contractor_id") or "").strip()
+            contractor_id = int(raw_cid) if raw_cid.isdigit() else None
+            try:
+                offer = admin_reassign_executor(req, contractor_id=contractor_id)
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect("panel:work_request_detail", pk=pk)
+            log_manager_action(
+                request.user,
+                action="work_request_reassign",
+                title=f"Заявка #{req.id}: повторное назначение",
+                detail=(
+                    f"contractor_id={contractor_id}"
+                    if contractor_id
+                    else "автоподбор"
+                ),
+                meta={
+                    "work_request_id": req.id,
+                    "contractor_id": contractor_id,
+                    "offer_id": offer.id if offer else None,
+                },
+            )
+            if offer:
+                messages.success(
+                    request,
+                    f"Назначение обновлено. Предложение: {offer.contractor}.",
+                )
+            else:
+                messages.info(
+                    request,
+                    "Назначение сброшено, свободный мастер по автоподбору не найден.",
+                )
+            return redirect("panel:work_request_detail", pk=pk)
         if action == "approve_commission":
             if not is_panel_admin(request.user):
                 messages.error(
@@ -355,6 +391,10 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             messages.success(request, "Заявка обновлена.")
             return redirect("panel:work_request_detail", pk=pk)
     from services.contractors import max_profile_link
+    from services.work_request_dispatch import (
+        declined_contractor_ids,
+        verified_contractors_for_role,
+    )
 
     assigned = req.assigned_contractor
     assigned_phone = ""
@@ -366,6 +406,17 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
         assigned_max_link = max_profile_link(assigned.user)
     client_phone = (req.user.phone or "").strip()
     client_max_link = max_profile_link(req.user)
+
+    declined_ids = declined_contractor_ids(req)
+    reassign_candidates = []
+    for c in verified_contractors_for_role(req.role):
+        reassign_candidates.append(
+            {
+                "id": c.id,
+                "label": f"{c} · {(c.locality or getattr(c.user, 'locality', '') or '—')}",
+                "declined": c.id in declined_ids,
+            }
+        )
 
     return render(
         request,
@@ -382,6 +433,9 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "can_delete": is_panel_admin(request.user) or is_panel_manager(request.user),
             "can_manage_commission": is_panel_admin(request.user),
             "can_mark_done": is_panel_admin(request.user),
+            "reassign_candidates": reassign_candidates,
+            "can_reassign": req.status
+            not in {WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED},
         },
     )
 

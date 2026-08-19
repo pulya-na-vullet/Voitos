@@ -157,7 +157,17 @@ def ai_rank_candidates(
         return candidates
 
 
+def declined_contractor_ids(req: WorkRequest) -> set[int]:
+    """Мастера, которые уже отказались — система больше не назначает их на эту заявку."""
+    return set(
+        req.offers.filter(status=WorkRequestOfferStatus.DECLINED).values_list(
+            "contractor_id", flat=True
+        )
+    )
+
+
 def excluded_contractor_ids(req: WorkRequest) -> set[int]:
+    """Кого автоподбор пропускает: отказы, активные/принятые/истёкшие офферы."""
     return set(
         req.offers.exclude(status=WorkRequestOfferStatus.CANCELLED).values_list(
             "contractor_id", flat=True
@@ -246,6 +256,11 @@ def send_offer(
         },
     )
     if not created:
+        if offer.status == WorkRequestOfferStatus.DECLINED:
+            raise ValueError(
+                "Этот мастер уже отказался от заявки — "
+                "система не может назначить его исполнителем повторно."
+            )
         if offer.status == WorkRequestOfferStatus.OFFERED:
             return offer
         offer.status = WorkRequestOfferStatus.OFFERED
@@ -538,11 +553,21 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         contractor = offer.contractor
         c_user = contractor.user
         req.assigned_contractor = contractor
-        home = getattr(req.role, "accepts_at_home", False)
-        req.status = (
-            WorkRequestStatus.SCHEDULING if home else WorkRequestStatus.IN_PROGRESS
+        # Найденный исполнитель → всегда согласование времени, затем «в работе».
+        req.status = WorkRequestStatus.SCHEDULING
+        req.proposed_slots = []
+        req.agreed_slot = ""
+        req.schedule_agreed_at = None
+        req.save(
+            update_fields=[
+                "status",
+                "assigned_contractor",
+                "proposed_slots",
+                "agreed_slot",
+                "schedule_agreed_at",
+                "updated_at",
+            ]
         )
-        req.save(update_fields=["status", "assigned_contractor", "updated_at"])
 
     from services.contractors import format_executor_contacts_block
 
@@ -553,52 +578,14 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
     if pending and pending.pending_kind == WORK_OFFER_PENDING:
         pending.clear_pending()
 
-    # Приём на дому — сначала согласование окон, не сразу IN_PROGRESS
-    if getattr(req.role, "accepts_at_home", False):
-        from services.work_request_schedule import start_master_scheduling
-
-        client_text = (
-            f"По заявке #{req.id} найден мастер: {c_user}.\n"
-            f"Роль: {req.role.name}\n"
-            f"{contacts}\n"
-            "Сейчас мастер пришлёт варианты времени."
-        )
-        try:
-            send_fn(req.user, client_text)
-        except Exception:
-            logger.exception("notify client accept(home) WR %s", req.id)
-        try:
-            from api.emit import emit_app_event
-
-            emit_app_event(
-                req.user,
-                ntype="work_request.assigned",
-                title="Мастер назначен",
-                body=client_text[:500],
-                entity_type="work_request",
-                entity_id=req.id,
-            )
-        except Exception:
-            logger.exception("app inbox assign(home) WR %s", req.id)
-        start_master_scheduling(req, send_fn=send_fn)
-        return (
-            "Заявка ваша. Укажите окна приёма — инструкция уже в чате."
-        )
+    from services.work_request_schedule import start_master_scheduling
 
     client_text = (
         f"По заявке #{req.id} найден мастер: {c_user}.\n"
         f"Роль: {req.role.name}\n"
         f"{contacts}\n"
-        "Он свяжется с вами."
-    )
-    exec_text = (
-        f"Вы приняли заявку #{req.id}.\n"
-        f"Клиент: {req.user}\n"
-        f"Населённый пункт: {request_locality(req) or '—'}\n"
-        f"Адрес: {address}\n"
-        f"Телефон клиента: {(req.user.phone or '—')}\n"
-        f"Описание: {(req.description or '')[:500]}\n\n"
-        "Когда закончите — напишите: заявка выполнена"
+        "Статус: согласование времени. Мастер предложит варианты — "
+        "выберите удобное окно в приложении или в чате."
     )
     try:
         send_fn(req.user, client_text)
@@ -610,19 +597,108 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         emit_app_event(
             req.user,
             ntype="work_request.assigned",
-            title="Мастер назначен",
+            title="Мастер назначен — согласуйте время",
             body=client_text[:500],
             entity_type="work_request",
             entity_id=req.id,
         )
     except Exception:
         logger.exception("app inbox assign WR %s", req.id)
-    try:
-        send_fn(c_user, exec_text)
-    except Exception:
-        logger.exception("notify contractor accept WR %s", req.id)
-    return "Заявка закреплена. Контакты клиента — в чате."
+    start_master_scheduling(req, send_fn=send_fn)
+    return "Заявка ваша. Согласуйте время с клиентом — инструкция в чате."
 
+
+def clear_assignment_for_reassign(req: WorkRequest) -> None:
+    """Сброс текущего назначения перед повторным поиском / ручным назначением."""
+    now = timezone.now()
+    for offer in req.offers.filter(status=WorkRequestOfferStatus.OFFERED):
+        offer.status = WorkRequestOfferStatus.CANCELLED
+        offer.responded_at = now
+        offer.save(update_fields=["status", "responded_at"])
+    for offer in req.offers.filter(status=WorkRequestOfferStatus.ACCEPTED):
+        offer.status = WorkRequestOfferStatus.CANCELLED
+        offer.responded_at = now
+        offer.save(update_fields=["status", "responded_at"])
+    if req.assigned_contractor_id:
+        c_user = req.assigned_contractor.user
+        pending = PendingAction.objects.filter(user=c_user).first()
+        if pending and pending.pending_kind in {
+            WORK_OFFER_PENDING,
+            "work_request_schedule_master",
+        }:
+            pending.clear_pending()
+    client_pending = PendingAction.objects.filter(user=req.user).first()
+    if (
+        client_pending
+        and client_pending.pending_kind == "work_request_schedule_client"
+        and (client_pending.pending_payload or {}).get("work_request_id") == req.id
+    ):
+        client_pending.clear_pending()
+    req.assigned_contractor = None
+    req.proposed_slots = []
+    req.agreed_slot = ""
+    req.schedule_agreed_at = None
+    req.master_address = ""
+    req.no_executor_notified_at = None
+    req.status = WorkRequestStatus.PENDING
+    req.save(
+        update_fields=[
+            "assigned_contractor",
+            "proposed_slots",
+            "agreed_slot",
+            "schedule_agreed_at",
+            "master_address",
+            "no_executor_notified_at",
+            "status",
+            "updated_at",
+        ]
+    )
+
+
+def admin_reassign_executor(
+    req: WorkRequest,
+    *,
+    contractor_id: int | None = None,
+    send_fn=None,
+) -> WorkRequestOffer | None:
+    """
+    Админ/менеджер: повторно назначить исполнителя.
+    Отказавшиеся мастера не назначаются (ни авто, ни вручную).
+    """
+    send_fn = send_fn or _default_send_fn()
+    req = WorkRequest.objects.select_related("user", "role", "assigned_contractor").get(
+        pk=req.pk
+    )
+    if req.status in {WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED}:
+        raise ValueError("Нельзя переназначать завершённую или отменённую заявку.")
+
+    if contractor_id is not None:
+        if contractor_id in declined_contractor_ids(req):
+            raise ValueError(
+                "Этот мастер уже отказался от заявки — "
+                "система не может назначить его исполнителем."
+            )
+        contractor = (
+            ContractorProfile.objects.select_related("user", "role")
+            .filter(pk=contractor_id, status=ContractorStatus.VERIFIED)
+            .first()
+        )
+        if contractor is None:
+            raise ValueError("Исполнитель не найден или не проверен.")
+
+    clear_assignment_for_reassign(req)
+    req.refresh_from_db()
+
+    if contractor_id is not None:
+        contractor = ContractorProfile.objects.get(pk=contractor_id)
+        return send_offer(
+            req,
+            contractor,
+            score=1.0,
+            reason="Ручное назначение админом/менеджером",
+            send_fn=send_fn,
+        )
+    return try_dispatch_request(req, send_fn=send_fn)
 
 
 def decline_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:

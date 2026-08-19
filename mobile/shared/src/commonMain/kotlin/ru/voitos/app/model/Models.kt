@@ -57,10 +57,15 @@ data class NotificationList(
 data class WorkRequestBrief(
     val id: Int,
     val status: String,
+    @SerialName("status_label") val statusLabel: String = "",
     @SerialName("role_name") val roleName: String = "",
     val description: String = "",
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("assigned_executor_name") val assignedExecutorName: String? = null,
+    @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
+    @SerialName("agreed_slot") val agreedSlot: String = "",
+    @SerialName("can_confirm_slot") val canConfirmSlot: Boolean = false,
+    @SerialName("needs_confirm_amount") val needsConfirmAmount: Boolean = false,
 )
 
 @Serializable
@@ -206,6 +211,15 @@ data class WorkRequestCancelResult(
     val ok: Boolean = true,
     val id: Int = 0,
     val status: String = "",
+)
+
+@Serializable
+data class WorkRequestConfirmSlotResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    @SerialName("agreed_slot") val agreedSlot: String = "",
 )
 
 @Serializable
