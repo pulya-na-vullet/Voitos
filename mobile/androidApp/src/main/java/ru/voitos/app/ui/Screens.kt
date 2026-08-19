@@ -67,6 +67,7 @@ fun LoginScreen(
     initialPhone: String = "",
     initialDebugCode: String = "",
     recentBaseUrls: List<String> = emptyList(),
+    restoredFromDisk: Boolean = false,
     onLoggedIn: (token: String, name: String, baseUrl: String, phone: String) -> Unit,
     onDebugPrefs: (baseUrl: String, phone: String, debugCode: String) -> Unit = { _, _, _ -> },
     onSaveServer: (baseUrl: String) -> Unit = {},
@@ -78,9 +79,14 @@ fun LoginScreen(
     var code by remember { mutableStateOf(initialDebugCode) }
     var debugHint by remember { mutableStateOf<String?>(null) }
     var healthHint by remember { mutableStateOf<String?>(null) }
-    var savedHint by remember { mutableStateOf<String?>(null) }
+    var savedHint by remember {
+        mutableStateOf(
+            if (restoredFromDisk) "IP восстановлен из файла на телефоне (после переустановки)" else null,
+        )
+    }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var scanning by remember { mutableStateOf(false) }
     var step by remember { mutableStateOf(0) }
     var recent by remember { mutableStateOf(recentBaseUrls) }
     val scope = rememberCoroutineScope()
@@ -131,7 +137,9 @@ fun LoginScreen(
             },
             label = { Text("IP / хост ПК") },
             placeholder = { Text("192.168.101.9") },
-            supportingText = { Text("Сохраняется на устройстве; при смене Wi‑Fi просто поправьте IP") },
+            supportingText = {
+                Text("«Сохранить» пишет в Загрузки — IP останется после удаления APK. Или нажмите «Найти в Wi‑Fi».")
+            },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -152,6 +160,49 @@ fun LoginScreen(
             style = MaterialTheme.typography.bodySmall,
             color = VoitosColors.Muted,
         )
+        Spacer(modifier = Modifier.height(6.dp))
+        Button(
+            onClick = {
+                scope.launch {
+                    scanning = true
+                    error = null
+                    healthHint = null
+                    try {
+                        val port = portText.toIntOrNull() ?: 18765
+                        val prefer = buildList {
+                            add(currentBaseUrl())
+                            addAll(recent)
+                        }
+                        val hit = ru.voitos.app.LanServerDiscovery.findFirst(
+                            port = port,
+                            preferHosts = prefer,
+                        )
+                        if (hit == null) {
+                            error = "Сервер в Wi‑Fi не найден. Проверьте, что app.py запущен и телефон в той же сети (без VPN)."
+                        } else {
+                            host = hit.host
+                            portText = hit.port.toString()
+                            persistDebug()
+                            onSaveServer(hit.baseUrl)
+                            savedHint = "Найден и сохранён: ${hit.baseUrl}"
+                            healthHint = "Сервер отвечает ✓"
+                            recent = listOf(hit.baseUrl) + recent.filter { it != hit.baseUrl }
+                        }
+                    } catch (e: Exception) {
+                        error = friendlyNetworkError(e)
+                    } finally {
+                        scanning = false
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading && !scanning,
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                containerColor = VoitosColors.Accent2,
+            ),
+        ) {
+            Text(if (scanning) "Ищем сервер в Wi‑Fi…" else "Найти сервер в Wi‑Fi")
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -161,7 +212,7 @@ fun LoginScreen(
                     val url = currentBaseUrl()
                     persistDebug()
                     onSaveServer(url)
-                    savedHint = "Сохранено ✓ $url"
+                    savedHint = "Сохранено в Загрузки ✓ $url"
                     recent = listOf(url) + recent.filter { it != url }
                 },
                 modifier = Modifier.weight(1f),
@@ -187,7 +238,7 @@ fun LoginScreen(
                         }
                     }
                 },
-                enabled = !loading,
+                enabled = !loading && !scanning,
             ) { Text("Проверить") }
         }
         savedHint?.let {
@@ -238,7 +289,7 @@ fun LoginScreen(
             Text(it, color = MaterialTheme.colorScheme.error)
         }
         Spacer(modifier = Modifier.height(16.dp))
-        if (loading) {
+        if (loading || scanning) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         } else if (step == 0) {
             Button(

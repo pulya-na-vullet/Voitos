@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
         CrashFileLogger.install(this)
 
         session = SessionStore(this)
-        DevServerSettings.restoreIfNeeded(this, session)
+        val restoredServerUrl = DevServerSettings.restoreIfNeeded(this, session)
         client = VoitosApiClient(baseUrl = session.baseUrl)
         client.accessToken = session.accessToken
 
@@ -122,6 +122,7 @@ class MainActivity : ComponentActivity() {
                                 initialPhone = session.lastPhone,
                                 initialDebugCode = session.lastDebugCode,
                                 recentBaseUrls = session.recentBaseUrls,
+                                restoredFromDisk = restoredServerUrl != null,
                                 onLoggedIn = { token, name, baseUrl, phone ->
                                     DevServerSettings.save(this@MainActivity, session, baseUrl)
                                     session.lastPhone = phone
