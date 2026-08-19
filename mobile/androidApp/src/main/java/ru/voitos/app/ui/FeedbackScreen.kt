@@ -16,7 +16,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -145,7 +144,7 @@ fun FeedbackScreen(
             style = MaterialTheme.typography.bodySmall,
         )
         Spacer(modifier = Modifier.height(12.dp))
-        error?.let { Text(it, color = VoitosColors.Danger) }
+        error?.let { NetworkErrorText(it) }
         message?.let { Text(it, color = VoitosColors.Ok) }
 
         if (formMode == FeedbackFormMode.None) {
@@ -258,17 +257,16 @@ fun FeedbackScreen(
         Text("Мои обращения", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
         Spacer(modifier = Modifier.height(8.dp))
         if (loading && items.isEmpty()) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = VoitosColors.Accent,
-            )
+            VoitosListSkeleton(rows = 2)
         }
         if (!loading && items.isEmpty()) {
             Text("Пока нет обращений", color = VoitosColors.Muted)
         }
-        items.forEach { ticket ->
-            FeedbackTicketCard(ticket)
-            Spacer(modifier = Modifier.height(10.dp))
+        if (!loading) {
+            items.forEach { ticket ->
+                FeedbackTicketCard(ticket)
+                Spacer(modifier = Modifier.height(10.dp))
+            }
         }
     }
 }

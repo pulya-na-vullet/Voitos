@@ -24,7 +24,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -111,12 +110,9 @@ fun CollectionsScreen(
                 Text("Обновить", color = VoitosColors.Accent2)
             }
         }
-        error?.let { Text(it, color = VoitosColors.Danger) }
+        error?.let { NetworkErrorText(it) }
         if (loading && items.isEmpty()) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 24.dp),
-                color = VoitosColors.Accent,
-            )
+            VoitosListSkeleton(rows = 3)
         }
         if (!loading && items.isEmpty() && error == null) {
             Text(
@@ -125,12 +121,14 @@ fun CollectionsScreen(
                 modifier = Modifier.padding(top = 12.dp),
             )
         }
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize().padding(top = 8.dp),
-        ) {
-            items(items, key = { it.id }) { c ->
-                CollectionListCard(item = c, onClick = { onOpen(c.id) })
+        if (!loading) {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize().padding(top = 8.dp),
+            ) {
+                items(items, key = { it.id }) { c ->
+                    CollectionListCard(item = c, onClick = { onOpen(c.id) })
+                }
             }
         }
     }
@@ -269,13 +267,10 @@ fun CollectionDetailScreen(
         VoitosBackButton(onClick = onBack)
         Text("Сбор", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
-        error?.let { Text(it, color = VoitosColors.Danger) }
+        error?.let { NetworkErrorText(it) }
         message?.let { Text(it, color = VoitosColors.Ok) }
         if (loading && detail == null) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = VoitosColors.Accent,
-            )
+            VoitosDetailSkeleton()
         }
         detail?.let { c ->
             val photos = c.photoUrls.ifEmpty {

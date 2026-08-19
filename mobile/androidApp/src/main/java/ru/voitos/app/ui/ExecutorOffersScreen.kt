@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,7 +19,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -75,16 +73,13 @@ fun ExecutorOffersScreen(
         }
         Text("Работа", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
-        error?.let { Text(it, color = VoitosColors.Danger) }
+        error?.let { NetworkErrorText(it) }
         message?.let { Text(it, color = VoitosColors.Ok) }
         if (loading) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = VoitosColors.Accent,
-            )
-        }
+            VoitosListSkeleton(rows = 3)
+        } else {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (!loading && profiles.isEmpty()) {
+            if (profiles.isEmpty()) {
                 item {
                     Text("Вы ещё не зарегистрированы как исполнитель", color = VoitosColors.Muted)
                 }
@@ -158,6 +153,7 @@ fun ExecutorOffersScreen(
                     }
                 }
             }
+        }
         }
     }
 }
