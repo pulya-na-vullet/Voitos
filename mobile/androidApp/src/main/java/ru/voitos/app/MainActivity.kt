@@ -19,6 +19,8 @@ import ru.voitos.app.ui.CabinetScreen
 import ru.voitos.app.ui.CollectionDetailScreen
 import ru.voitos.app.ui.CollectionsScreen
 import ru.voitos.app.ui.ConfirmAmountScreen
+import ru.voitos.app.ui.ExecutorOffersScreen
+import ru.voitos.app.ui.ExecutorRegisterScreen
 import ru.voitos.app.ui.LoginScreen
 import ru.voitos.app.ui.MainShell
 import ru.voitos.app.ui.MainTab
@@ -41,6 +43,8 @@ class MainActivity : ComponentActivity() {
         data class WorkRequestPhotos(val id: Int) : Screen()
         data object Subscription : Screen()
         data object Onboarding : Screen()
+        data object ExecutorRegister : Screen()
+        data object ExecutorOffers : Screen()
         data class Confirm(val id: Int) : Screen()
     }
 
@@ -129,6 +133,8 @@ class MainActivity : ComponentActivity() {
                                     client = client,
                                     onOpenSubscription = { screen = Screen.Subscription },
                                     onOpenOnboarding = { screen = Screen.Onboarding },
+                                    onRegisterExecutor = { screen = Screen.ExecutorRegister },
+                                    onOpenExecutorOffers = { screen = Screen.ExecutorOffers },
                                     onLogout = {
                                         session.clearSession()
                                         client.accessToken = null
@@ -137,6 +143,26 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
+
+                        Screen.ExecutorRegister -> ExecutorRegisterScreen(
+                            client = client,
+                            onDone = {
+                                tab = MainTab.Cabinet
+                                screen = Screen.Main
+                            },
+                            onBack = {
+                                tab = MainTab.Cabinet
+                                screen = Screen.Main
+                            },
+                        )
+
+                        Screen.ExecutorOffers -> ExecutorOffersScreen(
+                            client = client,
+                            onBack = {
+                                tab = MainTab.Cabinet
+                                screen = Screen.Main
+                            },
+                        )
 
                         is Screen.CollectionDetail -> CollectionDetailScreen(
                             client = client,

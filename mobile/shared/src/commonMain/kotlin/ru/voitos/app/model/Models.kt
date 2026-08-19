@@ -115,6 +115,8 @@ data class ExecutorRole(
     val code: String = "",
     val name: String = "",
     @SerialName("requires_work_photos") val requiresWorkPhotos: Boolean = true,
+    @SerialName("is_equipment") val isEquipment: Boolean = false,
+    @SerialName("requires_qualification_docs") val requiresQualificationDocs: Boolean = false,
 )
 
 @Serializable
@@ -201,4 +203,55 @@ data class OnboardingProgress(
     @SerialName("reward_just_granted") val rewardJustGranted: Boolean = false,
     @SerialName("completed_at") val completedAt: String? = null,
     val steps: List<OnboardingStep> = emptyList(),
+)
+
+@Serializable
+data class ExecutorProfileBrief(
+    val id: Int,
+    @SerialName("role_name") val roleName: String = "",
+    @SerialName("role_code") val roleCode: String = "",
+    val status: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    val locality: String = "",
+    val phone: String = "",
+)
+
+@Serializable
+data class ExecutorMe(
+    @SerialName("is_executor") val isExecutor: Boolean = false,
+    val profiles: List<ExecutorProfileBrief> = emptyList(),
+    @SerialName("open_offers_count") val openOffersCount: Int = 0,
+)
+
+@Serializable
+data class ExecutorRegisterResult(
+    val ok: Boolean = true,
+    val id: Int = 0,
+    val status: String = "",
+    val message: String = "",
+)
+
+@Serializable
+data class ExecutorOfferBrief(
+    @SerialName("offer_id") val offerId: Int,
+    @SerialName("work_request_id") val workRequestId: Int = 0,
+    @SerialName("role_name") val roleName: String = "",
+    val description: String = "",
+    val locality: String = "",
+    val address: String = "",
+    val status: String = "",
+    @SerialName("respond_deadline") val respondDeadline: String? = null,
+)
+
+@Serializable
+data class ExecutorOfferList(
+    val items: List<ExecutorOfferBrief> = emptyList(),
+)
+
+@Serializable
+data class ExecutorOfferRespondResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("offer_id") val offerId: Int = 0,
 )

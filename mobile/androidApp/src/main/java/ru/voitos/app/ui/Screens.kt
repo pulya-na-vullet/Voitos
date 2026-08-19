@@ -48,6 +48,7 @@ import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.OnboardingStep
 import ru.voitos.app.model.WorkRequestBrief
 import ru.voitos.app.nav.DeepLinks
+import ru.voitos.app.ui.theme.VoitosColors
 
 @Composable
 fun LoginScreen(
@@ -78,8 +79,10 @@ fun LoginScreen(
         verticalArrangement = Arrangement.Center,
     ) {
         Text("Voitos", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.secondary)
-        Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium)
-        Spacer(modifier = Modifier.height(16.dp))
+        Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
+        Spacer(modifier = Modifier.height(8.dp))
+        VpnDebugBanner()
+        Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = baseUrl,
             onValueChange = {
@@ -314,8 +317,15 @@ fun CollectionsScreen(
         if (onBack != null) {
             TextButton(onClick = onBack) { Text("← Назад") }
         }
-        Text("Сборы", style = MaterialTheme.typography.headlineSmall)
+        Text("Сборы", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (items.isEmpty() && error == null) {
+            Text(
+                "Нет активных сборов по вашим группе/группам",
+                color = VoitosColors.Muted,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(items, key = { it.id }) { c ->
                 Card(
@@ -391,7 +401,7 @@ fun WorkRequestsScreen(
                                             message = "Заявка #${wr.id} отменена"
                                             reload()
                                         } catch (e: Exception) {
-                                            error = e.message
+                                            error = friendlyNetworkError(e)
                                         } finally {
                                             loadingId = null
                                         }
@@ -621,9 +631,9 @@ fun NewWorkRequestScreen(
         if (onBack != null) {
             TextButton(onClick = onBack) { Text("← Назад") }
         }
-        Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall)
+        Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Роль", style = MaterialTheme.typography.labelLarge)
+        Text("Роль", style = MaterialTheme.typography.labelLarge, color = VoitosColors.Text)
         roles.forEach { role ->
             TextButton(
                 onClick = { selectedId = role.id },
@@ -858,26 +868,29 @@ fun OnboardingScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Обучение", style = MaterialTheme.typography.headlineSmall)
-            TextButton(onClick = onBack) { Text("Закрыть") }
+            Text("Обучение", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+            TextButton(onClick = onBack) { Text("Закрыть", color = VoitosColors.Accent) }
         }
         progress?.let {
-            Text("Комикс ${index + 1} из $total · пройдено ${it.doneCount}/$total")
+            Text(
+                "Комикс ${index + 1} из $total · пройдено ${it.doneCount}/$total",
+                color = VoitosColors.Muted,
+            )
         }
         banner?.let {
             Spacer(modifier = Modifier.height(8.dp))
-            Text(it, color = MaterialTheme.colorScheme.primary)
+            Text(it, color = VoitosColors.Accent2)
         }
         Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (step == null) {
             if (error == null) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-                Text("Загрузка…")
+                Text("Загрузка…", color = VoitosColors.Muted)
             }
         } else {
-            Text(step.title, style = MaterialTheme.typography.titleLarge)
-            Text(step.caption)
+            Text(step.title, style = MaterialTheme.typography.titleLarge, color = VoitosColors.Text)
+            Text(step.caption, color = VoitosColors.Text)
             Spacer(modifier = Modifier.height(8.dp))
             AsyncImage(
                 model = onboardingImageModel(context, step, apiBaseUrl),
@@ -893,6 +906,11 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = {
+                    val alreadyDone = step.done && (progress?.completed == true || progress?.rewardGranted == true)
+                    if (alreadyDone && index >= steps.lastIndex) {
+                        onBack()
+                        return@Button
+                    }
                     scope.launch {
                         loading = true
                         error = null
@@ -913,7 +931,7 @@ fun OnboardingScreen(
                                 }
                             }
                         } catch (e: Exception) {
-                            error = e.message
+                            error = friendlyNetworkError(e)
                         } finally {
                             loading = false
                         }
@@ -927,6 +945,7 @@ fun OnboardingScreen(
                         loading -> "…"
                         !step.done -> "Понял · далее"
                         index < steps.lastIndex -> "Далее"
+                        progress?.completed == true || progress?.rewardGranted == true -> "Закрыть"
                         else -> "Готово"
                     },
                 )

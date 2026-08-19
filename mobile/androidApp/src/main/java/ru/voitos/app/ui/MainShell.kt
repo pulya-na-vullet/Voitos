@@ -114,7 +114,12 @@ fun MainShell(
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                content()
+                Column(modifier = Modifier.fillMaxSize()) {
+                    VpnDebugBanner(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        content()
+                    }
+                }
             }
             HorizontalDivider(color = VoitosColors.Line)
             BottomNavBar(

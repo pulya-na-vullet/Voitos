@@ -1,6 +1,5 @@
 package ru.voitos.app.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ru.voitos.app.api.VoitosApiClient
+import ru.voitos.app.model.ExecutorMe
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.SubscriptionInfo
 import ru.voitos.app.ui.theme.VoitosColors
@@ -34,10 +34,13 @@ fun CabinetScreen(
     client: VoitosApiClient,
     onOpenSubscription: () -> Unit,
     onOpenOnboarding: () -> Unit,
+    onRegisterExecutor: () -> Unit,
+    onOpenExecutorOffers: () -> Unit,
     onLogout: () -> Unit,
 ) {
     var me by remember { mutableStateOf<Me?>(null) }
     var sub by remember { mutableStateOf<SubscriptionInfo?>(null) }
+    var executor by remember { mutableStateOf<ExecutorMe?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
 
@@ -47,6 +50,7 @@ fun CabinetScreen(
         try {
             me = client.me()
             sub = client.subscription()
+            executor = client.executorMe()
         } catch (e: Exception) {
             error = friendlyNetworkError(e)
         } finally {
@@ -60,8 +64,10 @@ fun CabinetScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        Text("Личный кабинет", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = Modifier.height(12.dp))
+        Text("Личный кабинет", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        Spacer(modifier = Modifier.height(8.dp))
+        VpnDebugBanner()
+        Spacer(modifier = Modifier.height(8.dp))
         if (loading) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -103,6 +109,36 @@ fun CabinetScreen(
             }
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+
+        PanelCard {
+            Text("Исполнитель", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+            Spacer(modifier = Modifier.height(8.dp))
+            val ex = executor
+            if (ex == null && !loading) {
+                Text("Нет данных", color = VoitosColors.Muted)
+            } else if (ex != null) {
+                if (ex.isExecutor) {
+                    Text("Да, вы зарегистрированы как исполнитель", color = VoitosColors.Ok)
+                    ex.profiles.forEach { p ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        InfoLine("Роль", p.roleName)
+                        InfoLine("Статус", p.statusLabel.ifBlank { p.status })
+                        if (p.locality.isNotBlank()) InfoLine("НП", p.locality)
+                    }
+                    if (ex.openOffersCount > 0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Открытых заявок для вас: ${ex.openOffersCount}",
+                            color = VoitosColors.Accent2,
+                        )
+                    }
+                } else {
+                    Text("Нет — вы пока не исполнитель", color = VoitosColors.Muted)
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(20.dp))
 
         Button(
@@ -127,6 +163,32 @@ fun CabinetScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        Button(
+            onClick = onRegisterExecutor,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = VoitosColors.BgSoft,
+                contentColor = VoitosColors.Text,
+            ),
+        ) { Text("Зарегистрироваться исполнителем") }
+
+        if (executor?.isExecutor == true) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onOpenExecutorOffers,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = VoitosColors.Accent2,
+                    contentColor = VoitosColors.OnAccent,
+                ),
+            ) {
+                val n = executor?.openOffersCount ?: 0
+                Text(if (n > 0) "Мои заявки мастера ($n)" else "Мои заявки мастера")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         TextButton(
             onClick = onLogout,
             modifier = Modifier.fillMaxWidth(),
@@ -140,13 +202,12 @@ fun CabinetScreen(
 private fun InfoLine(label: String, value: String) {
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = VoitosColors.Muted)
-        Text(value, style = MaterialTheme.typography.bodyMedium)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
     }
 }
 
 private fun formatUntil(raw: String?): String {
     if (raw.isNullOrBlank()) return "—"
-    // ISO → кратко дд.мм.гггг если возможно
     val date = raw.take(10)
     return if (date.length == 10 && date[4] == '-') {
         val p = date.split("-")

@@ -262,7 +262,7 @@ def _ask_locality(user: BotUser, payload: dict, pending: PendingAction) -> str:
 
 def _finish(
     user: BotUser,
-    pending: PendingAction,
+    pending: PendingAction | None,
     payload: dict,
     role: ExecutorRole,
 ) -> str:
@@ -298,7 +298,8 @@ def _finish(
         user.locality = profile.locality
         user.save(update_fields=["locality", "last_seen_at"])
 
-    pending.clear_pending()
+    if pending is not None:
+        pending.clear_pending()
     ActivityLog.objects.create(
         user=user,
         kind=ActivityKind.CONTRACTOR_REGISTER,
@@ -344,3 +345,44 @@ def _finish(
         f"{doc_line}{roles_line}\n"
         "После проверки начнёте получать заказы."
     )
+
+
+def submit_contractor_registration_api(user: BotUser, data: dict) -> tuple[ContractorProfile, str]:
+    """Регистрация исполнителя из мобильного API (тот же порядок полей, что в боте)."""
+    role = ExecutorRole.objects.filter(pk=data.get("role_id"), is_active=True).first()
+    if not role:
+        raise ValueError("role_required")
+    phone = normalize_phone(str(data.get("phone") or user.phone or ""))
+    if len(phone) < 10:
+        raise ValueError("phone_required")
+    locality = (str(data.get("locality") or user.locality or "")).strip()
+    if len(locality) < 2:
+        raise ValueError("locality_required")
+    bank = (str(data.get("bank_name") or "")).strip()
+    if len(bank) < 2:
+        raise ValueError("bank_required")
+    payout_raw = str(data.get("payout_phone") or "").strip()
+    if payout_raw.lower() in _SKIP | _YES | {"тот же", "тотже"} or not payout_raw:
+        payout = phone
+    else:
+        payout = normalize_phone(payout_raw)
+        if len(payout) < 10:
+            raise ValueError("payout_phone_invalid")
+    if role.requires_qualification_docs and not (data.get("qual_base64") or data.get("qual_b64")):
+        raise ValueError("qualification_doc_required")
+    label = str(data.get("equipment_label") or data.get("experience") or "").strip()
+    if role.is_equipment and len(label) < 2:
+        raise ValueError("equipment_label_required")
+    payload = {
+        "equipment_label": label[:255],
+        "plate_number": str(data.get("plate_number") or "")[:32],
+        "phone": phone,
+        "locality": locality[:255],
+        "bank_name": bank[:255],
+        "payout_phone": payout,
+        "qual_b64": data.get("qual_base64") or data.get("qual_b64") or "",
+        "qual_filename": (data.get("qual_filename") or "doc.jpg")[:120],
+    }
+    msg = _finish(user, None, payload, role)
+    profile = ContractorProfile.objects.get(user=user, equipment_type=role.code)
+    return profile, msg

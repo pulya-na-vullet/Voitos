@@ -12,7 +12,6 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -20,6 +19,10 @@ import ru.voitos.app.VoitosApi
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
+import ru.voitos.app.model.ExecutorMe
+import ru.voitos.app.model.ExecutorOfferList
+import ru.voitos.app.model.ExecutorOfferRespondResult
+import ru.voitos.app.model.ExecutorRegisterResult
 import ru.voitos.app.model.ExecutorRoleList
 import ru.voitos.app.model.HealthResponse
 import ru.voitos.app.model.Me
@@ -137,11 +140,66 @@ class VoitosApiClient(
             setBody(buildJsonObject {})
         }.body()
 
-    suspend fun cancelWorkRequest(workRequestId: Int): WorkRequestCancelResult =
-        http.post("$baseUrl/work-requests/$workRequestId/cancel") {
+    suspend fun cancelWorkRequest(workRequestId: Int): WorkRequestCancelResult {
+        return try {
+            http.post("$baseUrl/work-requests/$workRequestId/cancel") {
+                applyAuth()
+                contentType(ContentType.Application.Json)
+                setBody(buildJsonObject {})
+            }.body()
+        } catch (e: Exception) {
+            val msg = (e.message ?: "") + " " + (e.cause?.message ?: "")
+            if ("404" in msg || "Not Found" in msg) {
+                throw IllegalStateException(
+                    "Сервер вернул 404 на отмену заявки. Обновите бэкенд " +
+                        "(нужен /api/v1/work-requests/{id}/cancel) и перезапустите app.py.",
+                    e,
+                )
+            }
+            throw e
+        }
+    }
+
+    suspend fun executorMe(): ExecutorMe = authedGet("/me/executor")
+
+    suspend fun registerExecutor(
+        roleId: Int,
+        equipmentLabel: String,
+        plateNumber: String = "",
+        phone: String,
+        locality: String,
+        bankName: String,
+        payoutPhone: String = "",
+        qualBase64: String = "",
+        qualFilename: String = "doc.jpg",
+    ): ExecutorRegisterResult =
+        http.post("$baseUrl/executor/register") {
             applyAuth()
             contentType(ContentType.Application.Json)
-            setBody(buildJsonObject {})
+            setBody(
+                buildJsonObject {
+                    put("role_id", roleId)
+                    put("equipment_label", equipmentLabel)
+                    put("plate_number", plateNumber)
+                    put("phone", phone)
+                    put("locality", locality)
+                    put("bank_name", bankName)
+                    put("payout_phone", payoutPhone)
+                    if (qualBase64.isNotBlank()) {
+                        put("qual_base64", qualBase64)
+                        put("qual_filename", qualFilename)
+                    }
+                },
+            )
+        }.body()
+
+    suspend fun executorOffers(): ExecutorOfferList = authedGet("/executor/offers")
+
+    suspend fun respondExecutorOffer(offerId: Int, accept: Boolean): ExecutorOfferRespondResult =
+        http.post("$baseUrl/executor/offers/$offerId/respond") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("accept", accept) })
         }.body()
 
     suspend fun onboarding(): OnboardingProgress = authedGet("/onboarding")

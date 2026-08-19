@@ -145,10 +145,138 @@ def executor_roles(request):
                     "requires_work_photos": bool(
                         getattr(r, "requires_work_photos", True)
                     ),
+                    "is_equipment": bool(getattr(r, "is_equipment", False)),
+                    "requires_qualification_docs": bool(
+                        getattr(r, "requires_qualification_docs", False)
+                    ),
                 }
                 for r in roles
             ]
         }
+    )
+
+
+@api_login_required
+@require_GET
+def me_executor(request):
+    """Является ли пользователь исполнителем + его роли."""
+    from database.models import ContractorProfile
+
+    profiles = list(
+        ContractorProfile.objects.filter(user=request.bot_user)
+        .select_related("role")
+        .order_by("id")
+    )
+    items = []
+    for p in profiles:
+        items.append(
+            {
+                "id": p.id,
+                "role_name": p.role.name if p.role_id else p.equipment_type,
+                "role_code": p.equipment_type or (p.role.code if p.role_id else ""),
+                "status": p.status,
+                "status_label": p.get_status_display(),
+                "locality": p.locality or "",
+                "phone": p.phone or "",
+            }
+        )
+    return json_response(
+        {
+            "is_executor": bool(items),
+            "profiles": items,
+            "open_offers_count": _open_offers_qs(request.bot_user).count(),
+        }
+    )
+
+
+def _open_offers_qs(user):
+    from database.models import WorkRequestOffer, WorkRequestOfferStatus
+
+    return (
+        WorkRequestOffer.objects.filter(
+            contractor__user=user,
+            status=WorkRequestOfferStatus.OFFERED,
+        )
+        .select_related(
+            "work_request",
+            "work_request__role",
+            "work_request__user",
+            "contractor",
+        )
+        .order_by("-offered_at", "-id")
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def executor_register(request):
+    from bot.contractor_registration import submit_contractor_registration_api
+
+    data = parse_json(request)
+    try:
+        profile, message = submit_contractor_registration_api(request.bot_user, data)
+    except ValueError as exc:
+        return json_response({"error": str(exc)}, status=400)
+    return json_response(
+        {
+            "ok": True,
+            "id": profile.id,
+            "status": profile.status,
+            "message": message,
+        },
+        status=201,
+    )
+
+
+@api_login_required
+@require_GET
+def executor_offers(request):
+    items = []
+    for offer in _open_offers_qs(request.bot_user)[:50]:
+        wr = offer.work_request
+        items.append(
+            {
+                "offer_id": offer.id,
+                "work_request_id": wr.id,
+                "role_name": wr.role.name if wr.role_id else "",
+                "description": (wr.description or "")[:800],
+                "locality": (wr.client_locality or wr.user.locality or "")[:255],
+                "address": (wr.user.address or "")[:500],
+                "status": offer.status,
+                "respond_deadline": (
+                    offer.respond_deadline.isoformat() if offer.respond_deadline else None
+                ),
+            }
+        )
+    return json_response({"items": items})
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def executor_offer_respond(request, pk: int):
+    from database.models import WorkRequestOffer, WorkRequestOfferStatus
+    from services.work_request_dispatch import accept_offer, decline_offer
+
+    offer = (
+        WorkRequestOffer.objects.select_related(
+            "work_request", "work_request__role", "contractor", "contractor__user"
+        )
+        .filter(pk=pk, contractor__user=request.bot_user)
+        .first()
+    )
+    if not offer:
+        return json_response({"error": "not_found"}, status=404)
+    if offer.status != WorkRequestOfferStatus.OFFERED:
+        return json_response({"error": "already_handled"}, status=400)
+    data = parse_json(request)
+    accept = bool(data.get("accept") or data.get("yes"))
+    if accept:
+        msg = accept_offer(offer)
+    else:
+        msg = decline_offer(offer)
+    offer.refresh_from_db()
+    return json_response(
+        {"ok": True, "message": msg, "status": offer.status, "offer_id": offer.id}
     )
 
 
