@@ -1060,6 +1060,7 @@ def approve_service_receipt(
     receipt: ServiceReceipt,
     comment: str = "",
     send_fn=None,
+    amount: Decimal | None = None,
 ) -> ServiceReceipt:
     with transaction.atomic():
         receipt = (
@@ -1069,9 +1070,13 @@ def approve_service_receipt(
         )
         if receipt.status == ReceiptStatus.APPROVED:
             return receipt
-        amount = Decimal(receipt.amount or 0)
+        if amount is None:
+            amount = receipt.amount
+        if amount is None:
+            raise ValueError("Укажите сумму, которую распознали / принимаете по чеку.")
+        amount = Decimal(amount)
         if amount <= 0:
-            raise ValueError("Нельзя принять чек без суммы.")
+            raise ValueError("Сумма должна быть больше нуля.")
 
         invite = (
             type(receipt.invite)
@@ -1086,6 +1091,7 @@ def approve_service_receipt(
             invite.paid_at = timezone.now()
         invite.save()
 
+        receipt.amount = amount
         receipt.status = ReceiptStatus.APPROVED
         receipt.admin_comment = comment
         receipt.reviewed_at = timezone.now()

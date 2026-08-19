@@ -2077,13 +2077,30 @@ def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, "Нет доступа.")
         return redirect(panel_home_url_name(request.user))
     comment = request.POST.get("comment", "").strip()
+    raw_amount = (request.POST.get("amount") or "").strip().replace(",", ".")
     try:
-        approve_service_receipt(receipt, comment=comment, send_fn=_notify_user)
+        amount = Decimal(raw_amount) if raw_amount else None
+    except InvalidOperation:
+        amount = None
+        messages.error(request, "Некорректная сумма по чеку.")
+        return redirect_after_post(
+            request, fallback=f"/panel/services/campaigns/{receipt.campaign_id}/"
+        )
+    try:
+        approve_service_receipt(
+            receipt,
+            comment=comment,
+            amount=amount,
+            send_fn=_notify_user,
+        )
         receipt.refresh_from_db()
         receipt.invite.refresh_from_db()
         receipt.campaign.refresh_from_db()
         _notify_user(receipt.user, approved_service_message(receipt))
-        messages.success(request, f"Сервис-чек #{pk} принят.")
+        messages.success(
+            request,
+            f"Сервис-чек #{pk} принят: {receipt.amount} ₽.",
+        )
         if receipt.campaign.status == CampaignStatus.CLOSED:
             messages.info(request, "Цель сбора достигнута — рассылка «Сбор закрыт.»")
         tax_warn = AppSettings.load().tax_limit_warning()
