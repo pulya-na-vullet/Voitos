@@ -44,6 +44,7 @@ import ru.voitos.app.ui.VoitosBackground
 import ru.voitos.app.ui.WorkRequestPhotosScreen
 import ru.voitos.app.ui.WorkRequestsScreen
 import ru.voitos.app.ui.theme.VoitosTheme
+import ru.voitos.app.ui.theme.VoitosColors
 
 class MainActivity : ComponentActivity() {
     private lateinit var session: SessionStore
@@ -94,7 +95,7 @@ class MainActivity : ComponentActivity() {
                         if (crashText != null) {
                             AlertDialog(
                                 onDismissRequest = { crashText = null },
-                                title = { Text("Прошлый краш (без logcat)") },
+                                title = { Text("Прошлый краш (без logcat)", color = VoitosColors.Text) },
                                 text = {
                                     Column(
                                         modifier = Modifier
@@ -105,14 +106,16 @@ class MainActivity : ComponentActivity() {
                                         Text(
                                             text = crashText.orEmpty(),
                                             fontSize = 11.sp,
+                                            color = VoitosColors.Muted,
                                         )
                                     }
                                 },
                                 confirmButton = {
                                     TextButton(onClick = { crashText = null }) {
-                                        Text("Закрыть")
+                                        Text("Закрыть", color = VoitosColors.Accent)
                                     }
                                 },
+                                containerColor = VoitosColors.Panel,
                             )
                         }
 

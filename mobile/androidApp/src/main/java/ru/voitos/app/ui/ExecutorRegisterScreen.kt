@@ -135,7 +135,8 @@ fun ExecutorRegisterScreen(
                     value = label,
                     onValueChange = { label = it },
                     modifier = Modifier.fillMaxWidth(),
-                )
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+        )
                 Button(
                     onClick = {
                         if (r?.isEquipment == true && label.trim().length < 2) {
@@ -155,7 +156,8 @@ fun ExecutorRegisterScreen(
                     value = plate,
                     onValueChange = { plate = it },
                     modifier = Modifier.fillMaxWidth(),
-                )
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+        )
                 Button(
                     onClick = { step = 3 },
                     modifier = Modifier.fillMaxWidth(),
@@ -168,7 +170,8 @@ fun ExecutorRegisterScreen(
                     value = phone,
                     onValueChange = { phone = it },
                     modifier = Modifier.fillMaxWidth(),
-                )
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+        )
                 Button(
                     onClick = {
                         if (phone.filter { it.isDigit() }.length < 10) {
@@ -188,7 +191,8 @@ fun ExecutorRegisterScreen(
                     value = locality,
                     onValueChange = { locality = it },
                     modifier = Modifier.fillMaxWidth(),
-                )
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+        )
                 Button(
                     onClick = {
                         if (locality.trim().length < 2) {
@@ -208,7 +212,8 @@ fun ExecutorRegisterScreen(
                     value = bank,
                     onValueChange = { bank = it },
                     modifier = Modifier.fillMaxWidth(),
-                )
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+        )
                 Button(
                     onClick = {
                         if (bank.trim().length < 2) {
@@ -235,7 +240,8 @@ fun ExecutorRegisterScreen(
                             samePayout = false
                         },
                         modifier = Modifier.fillMaxWidth(),
-                    )
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+        )
                 }
                 Button(
                     onClick = {

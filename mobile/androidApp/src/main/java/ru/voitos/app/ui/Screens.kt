@@ -142,6 +142,7 @@ fun LoginScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
         )
         Spacer(modifier = Modifier.height(4.dp))
         OutlinedTextField(
@@ -154,6 +155,7 @@ fun LoginScreen(
             label = { Text("Порт") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
         )
         Text(
             currentBaseUrl(),
@@ -270,6 +272,7 @@ fun LoginScreen(
             label = { Text("Телефон") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
         )
         if (step >= 1) {
             Spacer(modifier = Modifier.height(8.dp))
@@ -279,7 +282,8 @@ fun LoginScreen(
                 label = { Text("Код из SMS") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-            )
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+        )
             debugHint?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             }
@@ -399,19 +403,19 @@ fun InboxScreen(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Top,
     ) {
-        Text("Уведомления", style = MaterialTheme.typography.headlineSmall)
+        Text("Уведомления", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
-        TextButton(onClick = onOpenCollections) { Text("Сборы") }
-        TextButton(onClick = onOpenWorkRequests) { Text("Заявки") }
-        TextButton(onClick = onNewWorkRequest) { Text("Вызвать мастера") }
-        TextButton(onClick = onOpenSubscription) { Text("Подписка") }
-        TextButton(onClick = onOpenOnboarding) { Text("Обучение") }
-        TextButton(onClick = onLogout) { Text("Выйти") }
+        TextButton(onClick = onOpenCollections) { Text("Сборы", color = VoitosColors.Accent) }
+        TextButton(onClick = onOpenWorkRequests) { Text("Заявки", color = VoitosColors.Accent) }
+        TextButton(onClick = onNewWorkRequest) { Text("Вызвать мастера", color = VoitosColors.Accent) }
+        TextButton(onClick = onOpenSubscription) { Text("Подписка", color = VoitosColors.Accent) }
+        TextButton(onClick = onOpenOnboarding) { Text("Обучение", color = VoitosColors.Accent) }
+        TextButton(onClick = onLogout) { Text("Выйти", color = VoitosColors.Danger) }
         Spacer(modifier = Modifier.height(8.dp))
         if (loading) {
-            CircularProgressIndicator()
+            CircularProgressIndicator(color = VoitosColors.Accent)
         }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let { Text(it, color = VoitosColors.Danger) }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(notifications, key = { it.id }) { n ->
                 Card(
@@ -434,11 +438,11 @@ fun InboxScreen(
                         },
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text(n.title, style = MaterialTheme.typography.titleMedium)
+                        Text(n.title, style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
                         if (n.body.isNotBlank()) {
-                            Text(n.body, style = MaterialTheme.typography.bodySmall)
+                            Text(n.body, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Muted)
                         }
-                        Text(n.type, style = MaterialTheme.typography.labelSmall)
+                        Text(n.type, style = MaterialTheme.typography.labelSmall, color = VoitosColors.Muted)
                     }
                 }
             }
@@ -666,10 +670,10 @@ fun ConfirmAmountScreen(
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    Column(modifier = Modifier.padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад") }
-        Text("Подтвердите сумму", style = MaterialTheme.typography.headlineSmall)
-        Text("Заявка #$workRequestId")
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        Text("Подтвердите сумму", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        Text("Заявка #$workRequestId", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = {
@@ -681,7 +685,7 @@ fun ConfirmAmountScreen(
                         message = "Сумма подтверждена"
                         onDone()
                     } catch (e: Exception) {
-                        error = e.message
+                        error = friendlyNetworkError(e)
                     } finally {
                         loading = false
                     }
@@ -689,6 +693,7 @@ fun ConfirmAmountScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
+            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
         ) { Text("Да, сумма верна") }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
@@ -696,6 +701,7 @@ fun ConfirmAmountScreen(
             onValueChange = { amount = it },
             label = { Text("Своя сумма, ₽") },
             modifier = Modifier.fillMaxWidth(),
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
         )
         Button(
             onClick = {
@@ -712,7 +718,7 @@ fun ConfirmAmountScreen(
                         message = "Сохранено: $v ₽"
                         onDone()
                     } catch (e: Exception) {
-                        error = e.message
+                        error = friendlyNetworkError(e)
                     } finally {
                         loading = false
                     }
@@ -720,9 +726,10 @@ fun ConfirmAmountScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
+            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.BgSoft, contentColor = VoitosColors.Text),
         ) { Text("Отправить свою сумму") }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        message?.let { Text(it, color = VoitosColors.Ok) }
+        error?.let { Text(it, color = VoitosColors.Danger) }
     }
 }
 
@@ -745,7 +752,7 @@ fun SubscriptionScreen(
                 info = client.subscription()
                 receipts = client.receipts().items
             } catch (e: Exception) {
-                error = e.message
+                error = friendlyNetworkError(e)
             }
         }
     }
@@ -766,7 +773,7 @@ fun SubscriptionScreen(
                 message = "Чек #${res.id} отправлен на проверку"
                 reload()
             } catch (e: Exception) {
-                error = e.message
+                error = friendlyNetworkError(e)
             } finally {
                 loading = false
             }
@@ -774,33 +781,63 @@ fun SubscriptionScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.Top,
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
     ) {
-        TextButton(onClick = onBack) { Text("← Назад") }
-        Text("Подписка", style = MaterialTheme.typography.headlineSmall)
+        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        Text("Подписка", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(12.dp))
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        error?.let { Text(it, color = VoitosColors.Danger) }
+        message?.let { Text(it, color = VoitosColors.Ok) }
         info?.let { s ->
-            Text(s.label.ifBlank { s.state }, style = MaterialTheme.typography.titleMedium)
-            Text("Доступ: ${s.state}")
-            s.subscriptionUntil?.let { Text("До: $it") }
-            s.graceUntil?.let { Text("Grace до: $it") }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Цена: ${s.priceRub} ₽/мес")
-            if (s.paymentPhone.isNotBlank()) {
-                Text("Оплата: ${s.paymentPhone}")
-                if (s.paymentName.isNotBlank()) Text(s.paymentName)
+            PanelCard {
+                Text(
+                    s.label.ifBlank { s.state },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = VoitosColors.Accent2,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Доступ: ${s.state}", color = VoitosColors.Text)
+                s.subscriptionUntil?.let { Text("До: $it", color = VoitosColors.Text) }
+                s.graceUntil?.let { Text("Grace до: $it", color = VoitosColors.Muted) }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Цена: ${s.priceRub} ₽/мес", color = VoitosColors.Text)
             }
-            if (s.pendingReceipts > 0) {
-                Text("Чеков на проверке: ${s.pendingReceipts}")
+            if (s.paymentPhone.isNotBlank() || s.paymentName.isNotBlank() || s.family.members.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                PanelCard {
+                    Text("Оплата и семья", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (s.paymentPhone.isNotBlank()) {
+                        Text("Телефон: ${s.paymentPhone}", color = VoitosColors.Text)
+                    }
+                    if (s.paymentName.isNotBlank()) {
+                        Text("Получатель: ${s.paymentName}", color = VoitosColors.Text)
+                    }
+                    if (s.pendingReceipts > 0) {
+                        Text("Чеков на проверке: ${s.pendingReceipts}", color = VoitosColors.Warn)
+                    }
+                    val fam = s.family
+                    if (fam.isPayer && fam.members.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("К подписке подключены:", color = VoitosColors.Muted)
+                        fam.members.forEach { m ->
+                            Text("• ${m.name.ifBlank { m.phone }}", color = VoitosColors.Text)
+                        }
+                    } else if (fam.payerName.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Подписка через: ${fam.payerName}", color = VoitosColors.Text)
+                    }
+                }
             }
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = { picker.launch("image/*") },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
+                colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
             ) { Text("Загрузить чек") }
             Button(
                 onClick = {
@@ -814,7 +851,7 @@ fun SubscriptionScreen(
                             message = "Тестовый чек #${res.id} на проверке"
                             reload()
                         } catch (e: Exception) {
-                            error = e.message
+                            error = friendlyNetworkError(e)
                         } finally {
                             loading = false
                         }
@@ -822,19 +859,23 @@ fun SubscriptionScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = VoitosColors.BgSoft,
+                    contentColor = VoitosColors.Text,
+                ),
             ) { Text("Тестовый чек (dev)") }
         }
         if (receipts.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
-            Text("История чеков", style = MaterialTheme.typography.titleMedium)
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(receipts, key = { it.id }) { r ->
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text("#${r.id} · ${r.status}")
-                        r.amount?.let { Text("$it ₽ · ${r.period}") }
-                        Text(r.createdAt, style = MaterialTheme.typography.bodySmall)
-                    }
+            Text("История чеков", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+            Spacer(modifier = Modifier.height(8.dp))
+            receipts.forEach { r ->
+                PanelCard {
+                    Text("#${r.id} · ${r.status}", color = VoitosColors.Text)
+                    r.amount?.let { Text("$it ₽ · ${r.period}", color = VoitosColors.Muted) }
+                    Text(r.createdAt, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Muted)
                 }
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     }
@@ -869,7 +910,7 @@ fun NewWorkRequestScreen(
             .padding(16.dp),
     ) {
         if (onBack != null) {
-            TextButton(onClick = onBack) { Text("← Назад") }
+            TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
         }
         Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Text("Выберите роль", color = VoitosColors.Muted)
@@ -888,6 +929,7 @@ fun NewWorkRequestScreen(
             label = { Text("Что случилось") },
             modifier = Modifier.fillMaxWidth(),
             minLines = 3,
+            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
         )
         Spacer(modifier = Modifier.height(8.dp))
         Button(
@@ -1040,14 +1082,15 @@ fun WorkRequestPhotosScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад") }
-        Text("Фото заявки #$workRequestId", style = MaterialTheme.typography.headlineSmall)
-        Text("Нужно хотя бы одно фото места работ.")
+        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        Text("Фото заявки #$workRequestId", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        Text("Нужно хотя бы одно фото места работ.", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = { picker.launch("image/*") },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
+            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
         ) { Text("Выбрать фото") }
         Button(
             onClick = {
@@ -1071,9 +1114,13 @@ fun WorkRequestPhotosScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = VoitosColors.BgSoft,
+                contentColor = VoitosColors.Text,
+            ),
         ) { Text("Добавить тестовое фото") }
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Сейчас приложено: $photoCount")
+        Text("Сейчас приложено: $photoCount", color = VoitosColors.Text)
         Button(
             onClick = {
                 scope.launch {
@@ -1092,10 +1139,11 @@ fun WorkRequestPhotosScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading && photoCount > 0,
+            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
         ) { Text("Готово — отправить") }
-        if (loading) CircularProgressIndicator()
-        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (loading) CircularProgressIndicator(color = VoitosColors.Accent)
+        message?.let { Text(it, color = VoitosColors.Ok) }
+        error?.let { Text(it, color = VoitosColors.Danger) }
     }
 }
 
@@ -1156,7 +1204,7 @@ fun OnboardingScreen(
             Text(it, color = VoitosColors.Accent2)
         }
         Spacer(modifier = Modifier.height(12.dp))
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let { Text(it, color = VoitosColors.Danger) }
         if (step == null) {
             if (error == null) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
@@ -1175,7 +1223,7 @@ fun OnboardingScreen(
                 contentScale = ContentScale.Fit,
             )
             if (step.done) {
-                Text("✓ просмотрено", color = MaterialTheme.colorScheme.primary)
+                Text("✓ просмотрено", color = VoitosColors.Ok)
             }
             Spacer(modifier = Modifier.height(12.dp))
             Button(
