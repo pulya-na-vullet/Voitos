@@ -188,6 +188,8 @@ data class OnboardingStep(
     val caption: String = "",
     val done: Boolean = false,
     @SerialName("image_url") val imageUrl: String = "",
+    /** Имя файла в APK assets/onboarding/ (01_snow.jpg …). */
+    val asset: String = "",
 )
 
 @Serializable
@@ -196,6 +198,7 @@ data class OnboardingProgress(
     val total: Int = 5,
     val completed: Boolean = false,
     @SerialName("reward_granted") val rewardGranted: Boolean = false,
+    @SerialName("reward_just_granted") val rewardJustGranted: Boolean = false,
     @SerialName("completed_at") val completedAt: String? = null,
     val steps: List<OnboardingStep> = emptyList(),
 )

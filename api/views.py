@@ -221,8 +221,11 @@ def onboarding(request):
     prog = panel_progress(request.bot_user)
     for step in prog["steps"]:
         step["image_url"] = f"/static/{step['image']}"
+        # Имя файла в APK assets/onboarding/ (те же 5 комиксов, что в боте)
+        step["asset"] = step["image"].rsplit("/", 1)[-1]
     if prog.get("completed_at"):
         prog["completed_at"] = prog["completed_at"].isoformat()
+    prog["reward_just_granted"] = False
     return json_response(prog)
 
 
@@ -238,6 +241,9 @@ def onboarding_complete_step(request, code: str):
         done.append(code)
         user.onboarding_steps = done
         user.save(update_fields=["onboarding_steps", "last_seen_at"])
+        user.refresh_from_db()
+
+    reward_just_granted = False
     if len(progress_list(user)) >= len(STORIES) and not user.onboarding_reward_granted:
         from bot.onboarding import _grant_reward_if_needed
         from database.models import PendingAction
@@ -246,11 +252,35 @@ def onboarding_complete_step(request, code: str):
         _grant_reward_if_needed(user)
         pending.clear_pending()
         user.refresh_from_db()
+        reward_just_granted = True
+        try:
+            from api.emit import emit_app_event
+            from django.utils import timezone as dj_tz
+
+            until = user.subscription_until
+            until_s = (
+                dj_tz.localtime(until).strftime("%d.%m.%Y") if until else "—"
+            )
+            emit_app_event(
+                user,
+                ntype="subscription.onboarding_reward",
+                title="Месяц подписки начислен",
+                body=(
+                    "Вы прошли обучение Voitos. "
+                    f"Автоматически начислен месяц подписки (до {until_s})."
+                ),
+                entity_type="subscription",
+            )
+        except Exception:
+            pass
+
     prog = panel_progress(user)
     for step in prog["steps"]:
         step["image_url"] = f"/static/{step['image']}"
+        step["asset"] = step["image"].rsplit("/", 1)[-1]
     if prog.get("completed_at"):
         prog["completed_at"] = prog["completed_at"].isoformat()
+    prog["reward_just_granted"] = reward_just_granted
     return json_response(prog)
 
 
