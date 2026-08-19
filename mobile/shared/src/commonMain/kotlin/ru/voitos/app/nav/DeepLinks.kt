@@ -59,7 +59,8 @@ object DeepLinks {
         "subscription.receipt_rejected",
         "subscription.renewal_4d",
         "subscription.renewal_2d",
-        "subscription.renewal_2h" -> Route.Subscription
+        "subscription.renewal_2h",
+        "subscription.onboarding_reward" -> Route.Subscription
         else -> Route.Home
     }
 }

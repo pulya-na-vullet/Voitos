@@ -91,7 +91,20 @@ class MobileApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["total"], 5)
+        self.assertEqual(len(data["steps"]), 5)
         self.assertEqual(data["done_count"], 0)
+        self.assertFalse(data.get("reward_just_granted"))
+        assets = [s.get("asset") for s in data["steps"]]
+        self.assertEqual(
+            assets,
+            [
+                "01_snow.jpg",
+                "02_playground.jpg",
+                "03_electrician.jpg",
+                "04_manicure.jpg",
+                "05_computer.jpg",
+            ],
+        )
 
     def test_register_device(self):
         tok = MobileAuthToken.objects.create(bot_user=self.user)
@@ -456,8 +469,40 @@ class AppEmitHookTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["done_count"], 1)
+        self.assertEqual(len(data["steps"]), 5)
         self.assertTrue(any(s["code"] == "snow" and s["done"] for s in data["steps"]))
         self.assertIn("caption", data["steps"][0])
+        self.assertFalse(data.get("reward_just_granted"))
+
+    def test_onboarding_full_grants_month_once(self):
+        from bot.onboarding import STORY_CODES
+
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        last = None
+        for code in STORY_CODES:
+            last = self.client.post(
+                f"/api/v1/onboarding/steps/{code}/complete",
+                HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+            )
+            self.assertEqual(last.status_code, 200)
+        data = last.json()
+        self.assertEqual(data["done_count"], 5)
+        self.assertTrue(data["completed"])
+        self.assertTrue(data["reward_granted"])
+        self.assertTrue(data["reward_just_granted"])
+        self.client_user.refresh_from_db()
+        self.assertTrue(self.client_user.onboarding_reward_granted)
+        self.assertIsNotNone(self.client_user.subscription_until)
+        note = AppNotification.objects.filter(
+            bot_user=self.client_user, type="subscription.onboarding_reward"
+        ).first()
+        self.assertIsNotNone(note)
+
+        again = self.client.post(
+            f"/api/v1/onboarding/steps/{STORY_CODES[-1]}/complete",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertFalse(again.json().get("reward_just_granted"))
 
     def test_upload_subscription_receipt(self):
         import base64

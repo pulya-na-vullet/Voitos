@@ -6,13 +6,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,17 +34,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import kotlinx.coroutines.launch
 import ru.voitos.app.VoitosApi
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.AppNotification
 import ru.voitos.app.model.CollectionBrief
 import ru.voitos.app.model.OnboardingProgress
+import ru.voitos.app.model.OnboardingStep
 import ru.voitos.app.model.WorkRequestBrief
 import ru.voitos.app.nav.DeepLinks
 
@@ -770,14 +775,20 @@ fun OnboardingScreen(
     var progress by remember { mutableStateOf<OnboardingProgress?>(null) }
     var index by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
+    var banner by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         try {
-            progress = client.onboarding()
-            val firstTodo = progress?.steps?.indexOfFirst { !it.done } ?: 0
-            index = if (firstTodo >= 0) firstTodo else 0
+            val p = client.onboarding()
+            progress = p
+            // Всегда начинаем с первого комикса — можно пересмотреть даже после MAX
+            index = 0
+            if (p.completed || p.rewardGranted) {
+                banner = "Обучение уже пройдено. Можно просто полистать комиксы."
+            }
         } catch (e: Exception) {
             error = e.message
         }
@@ -785,30 +796,46 @@ fun OnboardingScreen(
 
     val steps = progress?.steps.orEmpty()
     val step = steps.getOrNull(index)
+    val total = (progress?.total?.takeIf { it > 0 } ?: steps.size).coerceAtLeast(1)
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад") }
-        Text("Обучение", style = MaterialTheme.typography.headlineSmall)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Обучение", style = MaterialTheme.typography.headlineSmall)
+            TextButton(onClick = onBack) { Text("Закрыть") }
+        }
         progress?.let {
-            Text("${it.doneCount} / ${it.total}")
-            if (it.rewardGranted) {
-                Text("Подарок: месяц подписки начислен", color = MaterialTheme.colorScheme.primary)
-            }
+            Text("Комикс ${index + 1} из $total · пройдено ${it.doneCount}/$total")
+        }
+        banner?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(it, color = MaterialTheme.colorScheme.primary)
         }
         Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (step == null) {
-            Text("Загрузка…")
+            if (error == null) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                Text("Загрузка…")
+            }
         } else {
             Text(step.title, style = MaterialTheme.typography.titleLarge)
             Text(step.caption)
             Spacer(modifier = Modifier.height(8.dp))
             AsyncImage(
-                model = staticUrl(apiBaseUrl, step.imageUrl),
+                model = onboardingImageModel(context, step, apiBaseUrl),
                 contentDescription = step.title,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 160.dp, max = 320.dp),
+                    .heightIn(min = 200.dp, max = 420.dp),
                 contentScale = ContentScale.Fit,
             )
             if (step.done) {
@@ -821,9 +848,21 @@ fun OnboardingScreen(
                         loading = true
                         error = null
                         try {
-                            progress = client.completeOnboardingStep(step.code)
-                            val next = (index + 1).coerceAtMost((progress?.steps?.size ?: 1) - 1)
-                            index = next
+                            val wasComplete = progress?.completed == true || progress?.rewardGranted == true
+                            val res = client.completeOnboardingStep(step.code)
+                            progress = res
+                            if (res.rewardJustGranted || (!wasComplete && res.rewardGranted && res.completed)) {
+                                banner =
+                                    "Готово! Вам автоматически начислен месяц подписки. Спасибо за обучение."
+                            }
+                            val last = (res.steps.size - 1).coerceAtLeast(0)
+                            if (index < last) {
+                                index += 1
+                            } else if (res.completed || res.rewardGranted) {
+                                if (banner.isNullOrBlank()) {
+                                    banner = "Обучение пройдено (${res.doneCount}/${res.total})."
+                                }
+                            }
                         } catch (e: Exception) {
                             error = e.message
                         } finally {
@@ -832,29 +871,60 @@ fun OnboardingScreen(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !loading && !step.done,
-            ) { Text(if (step.done) "Уже пройдено" else "Понял · далее") }
-            RowNav(
-                canPrev = index > 0,
-                canNext = index < steps.lastIndex,
-                onPrev = { index -= 1 },
-                onNext = { index += 1 },
-            )
+                enabled = !loading,
+            ) {
+                Text(
+                    when {
+                        loading -> "…"
+                        !step.done -> "Понял · далее"
+                        index < steps.lastIndex -> "Далее"
+                        else -> "Готово"
+                    },
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                TextButton(
+                    onClick = { if (index > 0) index -= 1 },
+                    enabled = index > 0 && !loading,
+                ) { Text("← Предыдущий") }
+                TextButton(
+                    onClick = { if (index < steps.lastIndex) index += 1 },
+                    enabled = index < steps.lastIndex && !loading,
+                ) { Text("Следующий →") }
+            }
+            TextButton(
+                onClick = onBack,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Закрыть онбординг") }
         }
     }
 }
 
-@Composable
-private fun RowNav(
-    canPrev: Boolean,
-    canNext: Boolean,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
-) {
-    Column {
-        if (canPrev) TextButton(onClick = onPrev) { Text("← Предыдущий") }
-        if (canNext) TextButton(onClick = onNext) { Text("Следующий →") }
+private fun onboardingImageModel(
+    context: android.content.Context,
+    step: OnboardingStep,
+    apiBaseUrl: String,
+): ImageRequest {
+    val assetName = step.asset.ifBlank {
+        step.imageUrl.substringAfterLast('/').ifBlank { "${step.code}.jpg" }
     }
+    val assetPath = "onboarding/$assetName"
+    val fromAsset = try {
+        context.assets.open(assetPath).close()
+        true
+    } catch (_: Exception) {
+        false
+    }
+    val data: Any = if (fromAsset) {
+        "file:///android_asset/$assetPath"
+    } else {
+        staticUrl(apiBaseUrl, step.imageUrl)
+    }
+    return ImageRequest.Builder(context).data(data).crossfade(true).build()
 }
 
 private fun staticUrl(apiBase: String, path: String): String {
