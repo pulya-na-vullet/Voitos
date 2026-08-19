@@ -1,4 +1,4 @@
-"""Создание уведомлений в inbox (FCM — следующим шагом)."""
+"""Создание уведомлений в inbox + отправка FCM (api.push)."""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ DEEP_LINKS: dict[str, str] = {
     "subscription.receipt_approved": "voitos://app/subscription",
     "subscription.receipt_rejected": "voitos://app/subscription",
     "subscription.renewal_4d": "voitos://app/subscription",
+    "subscription.renewal_2d": "voitos://app/subscription",
+    "subscription.renewal_2h": "voitos://app/subscription",
     "profile.verified": "voitos://app/home",
     "wish_ballot.started": "voitos://app/ballots/{id}",
     "manager_survey.started": "voitos://app/manager-survey/{id}",
@@ -55,9 +57,9 @@ def notify_user(
     deep_link: str = "",
     payload: dict[str, Any] | None = None,
 ) -> AppNotification:
-    """Записать событие в inbox. Отправка FCM — позже по push_token устройств."""
+    """Записать событие в inbox и попытаться отправить FCM."""
     link = resolve_deep_link(ntype, entity_id=entity_id, deep_link=deep_link)
-    return AppNotification.objects.create(
+    note = AppNotification.objects.create(
         bot_user=bot_user,
         type=ntype,
         title=title[:255],
@@ -67,3 +69,14 @@ def notify_user(
         entity_id=entity_id,
         payload=payload or {},
     )
+    try:
+        from api.push import dispatch_push
+
+        dispatch_push(note)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "dispatch_push failed notification=%s", note.id
+        )
+    return note

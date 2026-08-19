@@ -172,6 +172,10 @@ MAX_API_BASE_URL = "https://platform-api2.max.ru"
 YANDEX_LLM_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 YANDEX_STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 
+# Mobile push (FCM Legacy). Пустой ключ + FCM_DRY_RUN=true → только лог.
+FCM_SERVER_KEY = env("FCM_SERVER_KEY", default="")
+FCM_DRY_RUN = env.bool("FCM_DRY_RUN", default=True)
+
 # MAX uses TLS certificates from Минцифры. Voitos ships them under certs/.
 # Set MAX_SSL_VERIFY=false only as a temporary workaround on broken Windows trust stores.
 MAX_SSL_VERIFY = env.bool("MAX_SSL_VERIFY", default=True)

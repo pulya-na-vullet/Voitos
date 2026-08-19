@@ -84,6 +84,54 @@ def me_subscription(request):
 
 
 @api_login_required
+@require_http_methods(["GET", "POST"])
+def me_receipts(request):
+    """Список чеков подписки / загрузка нового (base64)."""
+    user = request.bot_user
+    if request.method == "GET":
+        qs = PaymentReceipt.objects.filter(user=user).order_by("-created_at")[:50]
+        items = []
+        for r in qs:
+            items.append(
+                {
+                    "id": r.id,
+                    "status": r.status,
+                    "amount": float(r.amount) if r.amount is not None else None,
+                    "period": r.period_label() if hasattr(r, "period_label") else "",
+                    "created_at": r.created_at.isoformat(),
+                    "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+                    "admin_comment": (r.admin_comment or "")[:500],
+                }
+            )
+        return json_response({"items": items})
+
+    from api.media import decode_base64_payload
+    from subscriptions.service import submit_receipt
+
+    data = parse_json(request)
+    raw_b64 = (data.get("content_base64") or data.get("image_base64") or "").strip()
+    filename = (data.get("filename") or "receipt.jpg").strip()[:120] or "receipt.jpg"
+    image_bytes = decode_base64_payload(raw_b64)
+    if not image_bytes:
+        return json_response({"error": "content_base64_required"}, status=400)
+    try:
+        receipt = submit_receipt(user, image_bytes, filename=filename)
+    except ValueError as exc:
+        return json_response({"error": str(exc)}, status=400)
+    except Exception:
+        return json_response({"error": "upload_failed"}, status=500)
+    return json_response(
+        {
+            "ok": True,
+            "id": receipt.id,
+            "status": receipt.status,
+            "created_at": receipt.created_at.isoformat(),
+        },
+        status=201,
+    )
+
+
+@api_login_required
 @require_GET
 def executor_roles(request):
     roles = ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
@@ -105,11 +153,13 @@ def executor_roles(request):
 
 
 @api_login_required
-@require_GET
+@require_http_methods(["GET", "POST"])
 def work_requests_list(request):
+    if request.method == "POST":
+        return work_requests_create(request)
     qs = (
         WorkRequest.objects.filter(user=request.bot_user)
-        .select_related("role")
+        .select_related("role", "assigned_contractor")
         .order_by("-created_at")[:50]
     )
     return json_response(
@@ -121,6 +171,11 @@ def work_requests_list(request):
                     "role_name": wr.role.name if wr.role_id else "",
                     "description": wr.description or "",
                     "created_at": wr.created_at.isoformat(),
+                    "assigned_executor_name": (
+                        str(wr.assigned_contractor)
+                        if wr.assigned_contractor_id
+                        else None
+                    ),
                 }
                 for wr in qs
             ]
@@ -139,6 +194,9 @@ def work_request_detail(request, pk: int):
     if not wr:
         return json_response({"error": "not_found"}, status=404)
     contractor = wr.assigned_contractor
+    requires_photos = bool(
+        getattr(wr.role, "requires_work_photos", True) if wr.role_id else True
+    )
     return json_response(
         {
             "id": wr.id,
@@ -151,6 +209,8 @@ def work_request_detail(request, pk: int):
             "proposed_slots": wr.proposed_slots or [],
             "needs_confirm_amount": wr.status == "awaiting_client",
             "needs_rating": False,
+            "needs_photos": requires_photos and wr.status == "draft",
+            "photo_count": wr.photos.count(),
         }
     )
 
@@ -161,6 +221,8 @@ def onboarding(request):
     prog = panel_progress(request.bot_user)
     for step in prog["steps"]:
         step["image_url"] = f"/static/{step['image']}"
+    if prog.get("completed_at"):
+        prog["completed_at"] = prog["completed_at"].isoformat()
     return json_response(prog)
 
 
@@ -187,6 +249,8 @@ def onboarding_complete_step(request, code: str):
     prog = panel_progress(user)
     for step in prog["steps"]:
         step["image_url"] = f"/static/{step['image']}"
+    if prog.get("completed_at"):
+        prog["completed_at"] = prog["completed_at"].isoformat()
     return json_response(prog)
 
 
@@ -227,7 +291,7 @@ def notification_read(request, pk: int):
 @api_login_required
 @require_GET
 def collections_list(request):
-    """Stub: список инвайтов — полный wiring в следующем PR."""
+    """Список инвайтов жителя в сборы."""
     try:
         from database.models import ServiceInvite
 
@@ -242,9 +306,9 @@ def collections_list(request):
             items.append(
                 {
                     "id": camp.id if camp else inv.id,
-                    "title": getattr(camp, "title", None) or getattr(camp, "name", "") or "Сбор",
+                    "title": getattr(camp, "title", None) or "Сбор",
                     "category": getattr(camp, "category", "") or "",
-                    "amount_due": float(getattr(inv, "amount", 0) or 0),
+                    "amount_due": float(getattr(inv, "amount_due", 0) or 0),
                     "status": inv.status,
                     "event_at": (
                         camp.event_at.isoformat()
@@ -256,3 +320,229 @@ def collections_list(request):
         return json_response({"items": items})
     except Exception:
         return json_response({"items": []})
+
+
+@api_login_required
+@require_GET
+def collection_detail(request, pk: int):
+    """Детали сбора по campaign id для текущего пользователя."""
+    from database.models import ServiceInvite
+
+    inv = (
+        ServiceInvite.objects.filter(user=request.bot_user, campaign_id=pk)
+        .select_related("campaign")
+        .first()
+    )
+    if not inv:
+        return json_response({"error": "not_found"}, status=404)
+    camp = inv.campaign
+    paid = int(
+        camp.invites.filter(status="paid").count() if camp else 0
+    )
+    total = int(camp.invites.count() if camp else 0)
+    return json_response(
+        {
+            "id": camp.id,
+            "title": camp.title,
+            "category": camp.category or "",
+            "description": camp.description or "",
+            "amount_due": float(inv.amount_due or 0),
+            "amount_paid": float(inv.amount_paid or 0),
+            "status": inv.status,
+            "event_at": camp.event_at.isoformat() if camp.event_at else None,
+            "paid_count": paid,
+            "invite_count": total,
+        }
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_requests_create(request):
+    from database.models import WorkRequestStatus
+
+    data = parse_json(request)
+    role_id = data.get("role_id")
+    description = (data.get("description") or "").strip()
+    if not role_id or len(description) < 5:
+        return json_response({"error": "role_and_description_required"}, status=400)
+    role = ExecutorRole.objects.filter(pk=role_id, is_active=True).first()
+    if not role:
+        return json_response({"error": "role_not_found"}, status=404)
+    requires_photos = bool(getattr(role, "requires_work_photos", True))
+    status = WorkRequestStatus.DRAFT if requires_photos else WorkRequestStatus.PENDING
+    wr = WorkRequest.objects.create(
+        user=request.bot_user,
+        role=role,
+        description=description[:4000],
+        status=status,
+        client_locality=(request.bot_user.locality or "").strip()[:255],
+    )
+    if status == WorkRequestStatus.PENDING:
+        try:
+            from services.work_request_dispatch import try_dispatch_request
+
+            try_dispatch_request(wr)
+        except Exception:
+            pass
+    return json_response(
+        {
+            "id": wr.id,
+            "status": wr.status,
+            "role_name": role.name,
+            "description": wr.description,
+            "created_at": wr.created_at.isoformat(),
+            "needs_photos": requires_photos,
+            "photo_count": 0,
+        },
+        status=201,
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_add_photo(request, pk: int):
+    """Добавить фото к черновику заявки (base64 JSON — проще для KMP)."""
+    from django.core.files.base import ContentFile
+
+    from api.media import decode_base64_payload
+    from database.models import WorkRequestPhoto, WorkRequestStatus
+
+    wr = WorkRequest.objects.filter(pk=pk, user=request.bot_user).first()
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    if wr.status not in {WorkRequestStatus.DRAFT, WorkRequestStatus.PENDING}:
+        return json_response({"error": "not_editable"}, status=400)
+
+    data = parse_json(request)
+    raw_b64 = (data.get("content_base64") or data.get("image_base64") or "").strip()
+    filename = (data.get("filename") or "photo.jpg").strip()[:120] or "photo.jpg"
+    image_bytes = decode_base64_payload(raw_b64)
+    if not image_bytes:
+        return json_response({"error": "content_base64_required"}, status=400)
+
+    photo = WorkRequestPhoto(request=wr)
+    photo.image.save(filename, ContentFile(image_bytes), save=True)
+    return json_response(
+        {
+            "ok": True,
+            "photo_id": photo.id,
+            "photo_count": wr.photos.count(),
+            "status": wr.status,
+        },
+        status=201,
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_submit(request, pk: int):
+    """Черновик → pending + автоподбор (как «готово» в боте)."""
+    from database.models import ActivityKind, ActivityLog, WorkRequestStatus
+
+    wr = (
+        WorkRequest.objects.select_related("role")
+        .filter(pk=pk, user=request.bot_user)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    if wr.status not in {WorkRequestStatus.DRAFT, WorkRequestStatus.PENDING}:
+        return json_response({"error": "already_submitted"}, status=400)
+
+    requires_photos = bool(getattr(wr.role, "requires_work_photos", True))
+    photo_n = wr.photos.count()
+    if requires_photos and photo_n < 1:
+        return json_response({"error": "photos_required"}, status=400)
+
+    if wr.status == WorkRequestStatus.DRAFT:
+        wr.status = WorkRequestStatus.PENDING
+        wr.save(update_fields=["status", "updated_at"])
+
+    ActivityLog.objects.create(
+        user=request.bot_user,
+        kind=ActivityKind.WORK_REQUEST,
+        title=f"Заявка на исполнителя: {wr.role.name}",
+        detail=wr.description[:500],
+        meta={"work_request_id": wr.id, "role": wr.role.code, "via": "api"},
+    )
+    try:
+        from panel.admin_tasks import upsert_task
+        from database.models import AdminTaskKind
+
+        upsert_task(
+            kind=AdminTaskKind.WORK_REQUEST,
+            title=f"Заявка: {wr.role.name} — {request.bot_user}",
+            description=wr.description[:500],
+            user=request.bot_user,
+            action_url=f"/panel/work-requests/{wr.id}/",
+            source_model="WorkRequest",
+            source_id=wr.id,
+            priority=25,
+        )
+    except Exception:
+        pass
+
+    dispatched = False
+    try:
+        from services.work_request_dispatch import try_dispatch_request
+
+        if not (wr.client_locality or "").strip():
+            loc = (request.bot_user.locality or "").strip()
+            if loc:
+                wr.client_locality = loc[:255]
+                wr.save(update_fields=["client_locality", "updated_at"])
+        dispatched = bool(try_dispatch_request(wr))
+    except Exception:
+        pass
+
+    return json_response(
+        {
+            "ok": True,
+            "id": wr.id,
+            "status": wr.status,
+            "photo_count": photo_n,
+            "dispatched": dispatched,
+        }
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_confirm_amount(request, pk: int):
+    """Клиент подтверждает сумму (R24) — та же логика, что ответ в боте."""
+    from decimal import Decimal
+
+    from database.models import PendingAction, WorkRequestStatus
+    from services.work_request_completion import (
+        CLIENT_CONFIRM_PENDING,
+        _apply_client_confirmation,
+        parse_money,
+    )
+
+    user = request.bot_user
+    wr = WorkRequest.objects.filter(pk=pk, user=user).first()
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    if wr.status != WorkRequestStatus.AWAITING_CLIENT:
+        return json_response({"error": "not_awaiting_confirm"}, status=400)
+
+    data = parse_json(request)
+    confirmed = bool(data.get("confirmed"))
+    amount = data.get("amount")
+    if confirmed:
+        money = wr.reported_amount
+        if money is None:
+            return json_response({"error": "no_reported_amount"}, status=400)
+    else:
+        money = parse_money(str(amount)) if amount is not None else None
+        if money is None:
+            return json_response({"error": "amount_required"}, status=400)
+
+    pending, _ = PendingAction.objects.get_or_create(user=user)
+    pending.pending_kind = CLIENT_CONFIRM_PENDING
+    pending.pending_payload = {"work_request_id": wr.id}
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    reply = _apply_client_confirmation(wr, Decimal(money), pending)
+    wr.refresh_from_db()
+    return json_response({"ok": True, "message": reply, "status": wr.status})

@@ -122,6 +122,7 @@ def panel_progress(user: BotUser) -> dict:
         {
             "code": s.code,
             "title": s.title,
+            "caption": s.caption,
             "done": s.code in done,
             "image": f"bot/onboarding/{s.image_name}",
         }

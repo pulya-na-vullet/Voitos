@@ -1,29 +1,28 @@
-# Voitos KMP client (skeleton)
+## Что уже есть
 
-Стек: Kotlin Multiplatform + (Compose Multiplatform / нативный UI).
+- `shared/` — модели, `VoitosApiClient` (Ktor), `DeepLinks`, `PushTokenProvider`
+- `androidApp/` — Login (base URL + health), Inbox, Сборы, Заявки, фото, Подписка (+чек), Обучение (Coil), Confirm
+- Gradle Wrapper: `./gradlew :androidApp:assembleDebug`
+- После логина: `POST /devices` через `DevPushTokenProvider`
+- Inbox API: мастер, сбор, confirm, чек, renewal, unpaid remind
 
-Сервер: Django `/api/v1` — см. `docs/mobile/`.
+## Документы
 
-## Структура
+- [`CHECKLIST.md`](CHECKLIST.md) — как собрать и проверить
+- [`../docs/mobile/`](../docs/mobile/) — OpenAPI / stories / push
 
+## Сборка
+
+```bash
+cd mobile
+./gradlew :androidApp:assembleDebug
 ```
-mobile/
-  shared/          # commonMain: API client, models, deep links
-  androidApp/      # Android entry
-  iosApp/          # iOS entry (позже)
-```
 
-## Первый срез экранов
+Нужны JDK 17+ (проверено на 21) и Android SDK (platform 35).  
+`local.properties` с `sdk.dir=...` создайте локально (в git не коммитится).
 
-1. Login (phone OTP)  
-2. Home + inbox  
-3. Collections (сборы / снег)  
-4. Work requests (назначение мастера, confirm amount)  
-5. Subscription  
-6. Onboarding comics  
+## Firebase
 
-Пуши: FCM, `type` + `deep_link` из `docs/mobile/push-deeplinks.md`.
-
-## Не дублировать в shared
-
-Подписка/grace, матчинг мастеров, комиссия 10%, OCR чеков, награда за онбординг — только API.
+1. Добавить `androidApp/google-services.json`
+2. В `androidApp/build.gradle.kts` раскомментировать plugin + firebase-messaging
+3. Реализовать `PushTokenProvider` через `FirebaseMessaging.getInstance().token`

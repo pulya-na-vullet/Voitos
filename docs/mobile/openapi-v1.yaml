@@ -184,17 +184,21 @@ paths:
     post:
       tags: [subscription]
       security: [{ bearerAuth: [] }]
-      summary: Загрузить чек (multipart)
+      summary: Загрузить чек (base64 JSON)
       requestBody:
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
+              required: [content_base64]
               properties:
-                file: { type: string, format: binary }
+                content_base64: { type: string }
+                filename: { type: string, default: receipt.jpg }
       responses:
         "201":
           description: На проверке
+        "400":
+          description: Bad payload
 
   /executor-roles:
     get:
@@ -266,16 +270,32 @@ paths:
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/Id"
+      summary: Добавить фото к черновику (base64)
       requestBody:
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
+              required: [content_base64]
               properties:
-                file: { type: string, format: binary }
+                content_base64: { type: string }
+                filename: { type: string, default: photo.jpg }
       responses:
         "201":
           description: Photo added
+
+  /work-requests/{id}/submit:
+    post:
+      tags: [work-requests]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      summary: Отправить черновик мастерам (после фото)
+      responses:
+        "200":
+          description: Submitted / dispatched
+        "400":
+          description: photos_required
 
   /work-requests/{id}/confirm-amount:
     post:

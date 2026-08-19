@@ -315,6 +315,19 @@ def approve_receipt(
         schedule_subscription_renewal_reminders(user)
     except Exception:
         logger.exception("Failed to schedule subscription renewal reminders")
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            user,
+            ntype="subscription.receipt_approved",
+            title="Чек принят",
+            body=approved_user_message(receipt),
+            entity_type="receipt",
+            entity_id=receipt.id,
+        )
+    except Exception:
+        logger.exception("app inbox receipt_approved receipt=%s", receipt.id)
     return receipt
 
 
@@ -342,6 +355,19 @@ def reject_receipt(receipt: PaymentReceipt, comment: str = "") -> PaymentReceipt
         task_payment_receipt(receipt)
     except Exception:
         logger.exception("Failed to close admin task for rejected receipt")
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            receipt.user,
+            ntype="subscription.receipt_rejected",
+            title="Чек отклонён",
+            body=rejected_user_message(receipt),
+            entity_type="receipt",
+            entity_id=receipt.id,
+        )
+    except Exception:
+        logger.exception("app inbox receipt_rejected receipt=%s", receipt.id)
     return receipt
 
 

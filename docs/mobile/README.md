@@ -1,6 +1,6 @@
 # Voitos Mobile — план без второй бизнес-логики
 
-Стек клиента: **Kotlin Multiplatform**.  
+Стек клиента: **Kotlin Multiplatform** (ветка `cursor/kmp-e31c`).  
 Мозг: существующий Django (те же `services/`, `bot/`, `subscriptions/`).
 
 | Слой | Роль |
@@ -18,4 +18,11 @@
 3. [`push-deeplinks.md`](push-deeplinks.md) — `notification.type` → экран  
 
 Скелет сервера: пакет `api/` в корне репо.  
-Заготовка клиента: `mobile/`.
+Заготовка клиента: `mobile/` (Login / Inbox / Collections / Confirm).
+
+### Push (FCM)
+
+- События → `api.emit` → inbox (`AppNotification`) → `api.push.dispatch_push`.
+- Токен устройства: `POST /api/v1/devices` (`push_token`, `platform`).
+- Без `FCM_SERVER_KEY` и с `FCM_DRY_RUN=true` — только лог (удобно для тестов).
+- Хуки: сбор offered/remind, мастер assigned, confirm amount, чек approve/reject, renewal −4д/−2д/−2ч.
