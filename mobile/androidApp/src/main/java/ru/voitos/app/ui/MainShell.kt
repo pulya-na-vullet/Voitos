@@ -186,6 +186,15 @@ private fun BottomNavBar(
             onClick = { onSelect(MainTab.CallMaster) },
             modifier = Modifier.weight(1f),
         )
+        if (showWorkTab) {
+            NavItem(
+                label = "Работа",
+                iconRes = R.drawable.ic_nav_work,
+                selected = selected == MainTab.Work,
+                onClick = { onSelect(MainTab.Work) },
+                modifier = Modifier.weight(1f),
+            )
+        }
         NavItem(
             label = "Личный\nкабинет",
             iconRes = R.drawable.voitos_logo_nav,
@@ -196,15 +205,6 @@ private fun BottomNavBar(
             iconAlpha = if (hideCabinetIcon) 0f else 1f,
             onIconPositioned = onCabinetIconPositioned,
         )
-        if (showWorkTab) {
-            NavItem(
-                label = "Работа",
-                iconRes = R.drawable.ic_nav_work,
-                selected = selected == MainTab.Work,
-                onClick = { onSelect(MainTab.Work) },
-                modifier = Modifier.weight(1f),
-            )
-        }
     }
 }
 
