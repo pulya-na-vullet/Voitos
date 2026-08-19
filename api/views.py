@@ -105,8 +105,10 @@ def executor_roles(request):
 
 
 @api_login_required
-@require_GET
+@require_http_methods(["GET", "POST"])
 def work_requests_list(request):
+    if request.method == "POST":
+        return work_requests_create(request)
     qs = (
         WorkRequest.objects.filter(user=request.bot_user)
         .select_related("role")
@@ -244,7 +246,7 @@ def collections_list(request):
                     "id": camp.id if camp else inv.id,
                     "title": getattr(camp, "title", None) or getattr(camp, "name", "") or "Сбор",
                     "category": getattr(camp, "category", "") or "",
-                    "amount_due": float(getattr(inv, "amount", 0) or 0),
+                    "amount_due": float(getattr(inv, "amount_due", 0) or 0),
                     "status": inv.status,
                     "event_at": (
                         camp.event_at.isoformat()
@@ -256,3 +258,86 @@ def collections_list(request):
         return json_response({"items": items})
     except Exception:
         return json_response({"items": []})
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_requests_create(request):
+    from database.models import WorkRequestStatus
+
+    data = parse_json(request)
+    role_id = data.get("role_id")
+    description = (data.get("description") or "").strip()
+    if not role_id or len(description) < 5:
+        return json_response({"error": "role_and_description_required"}, status=400)
+    role = ExecutorRole.objects.filter(pk=role_id, is_active=True).first()
+    if not role:
+        return json_response({"error": "role_not_found"}, status=404)
+    requires_photos = bool(getattr(role, "requires_work_photos", True))
+    status = WorkRequestStatus.DRAFT if requires_photos else WorkRequestStatus.PENDING
+    wr = WorkRequest.objects.create(
+        user=request.bot_user,
+        role=role,
+        description=description[:4000],
+        status=status,
+        client_locality=(request.bot_user.locality or "").strip()[:255],
+    )
+    if status == WorkRequestStatus.PENDING:
+        try:
+            from services.work_request_dispatch import try_dispatch_request
+
+            try_dispatch_request(wr)
+        except Exception:
+            pass
+    return json_response(
+        {
+            "id": wr.id,
+            "status": wr.status,
+            "role_name": role.name,
+            "description": wr.description,
+            "created_at": wr.created_at.isoformat(),
+            "needs_photos": requires_photos,
+        },
+        status=201,
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_confirm_amount(request, pk: int):
+    """Клиент подтверждает сумму (R24) — та же логика, что ответ в боте."""
+    from decimal import Decimal
+
+    from database.models import PendingAction, WorkRequestStatus
+    from services.work_request_completion import (
+        CLIENT_CONFIRM_PENDING,
+        _apply_client_confirmation,
+        parse_money,
+    )
+
+    user = request.bot_user
+    wr = WorkRequest.objects.filter(pk=pk, user=user).first()
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    if wr.status != WorkRequestStatus.AWAITING_CLIENT:
+        return json_response({"error": "not_awaiting_confirm"}, status=400)
+
+    data = parse_json(request)
+    confirmed = bool(data.get("confirmed"))
+    amount = data.get("amount")
+    if confirmed:
+        money = wr.reported_amount
+        if money is None:
+            return json_response({"error": "no_reported_amount"}, status=400)
+    else:
+        money = parse_money(str(amount)) if amount is not None else None
+        if money is None:
+            return json_response({"error": "amount_required"}, status=400)
+
+    pending, _ = PendingAction.objects.get_or_create(user=user)
+    pending.pending_kind = CLIENT_CONFIRM_PENDING
+    pending.pending_payload = {"work_request_id": wr.id}
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    reply = _apply_client_confirmation(wr, Decimal(money), pending)
+    wr.refresh_from_db()
+    return json_response({"ok": True, "message": reply, "status": wr.status})

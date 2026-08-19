@@ -462,6 +462,19 @@ def on_client_confirm_message_sent(msg: ScheduledBotMessage) -> None:
     pending.pending_kind = CLIENT_CONFIRM_PENDING
     pending.pending_payload = {"work_request_id": req_id}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            msg.user,
+            ntype="work_request.confirm_amount",
+            title="Подтвердите сумму",
+            body=(msg.text or "")[:500],
+            entity_type="work_request",
+            entity_id=int(req_id),
+        )
+    except Exception:
+        logger.exception("app inbox confirm_amount WR %s", req_id)
 
 
 def handle_client_confirm_step(user: BotUser, text: str, pending: PendingAction) -> str:

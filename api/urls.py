@@ -16,6 +16,11 @@ urlpatterns = [
     path("executor-roles", views.executor_roles, name="executor_roles"),
     path("work-requests", views.work_requests_list, name="work_requests"),
     path("work-requests/<int:pk>", views.work_request_detail, name="work_request_detail"),
+    path(
+        "work-requests/<int:pk>/confirm-amount",
+        views.work_request_confirm_amount,
+        name="work_request_confirm",
+    ),
     path("collections", views.collections_list, name="collections"),
     path("onboarding", views.onboarding, name="onboarding"),
     path(

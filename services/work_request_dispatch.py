@@ -307,6 +307,19 @@ def notify_client_no_executor(req: WorkRequest, *, send_fn=None) -> bool:
     except Exception:
         logger.exception("Failed to notify client no executor for WR %s", req.id)
         return False
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            req.user,
+            ntype="work_request.no_executor",
+            title="Мастера пока нет",
+            body=text[:500],
+            entity_type="work_request",
+            entity_id=req.id,
+        )
+    except Exception:
+        logger.exception("app inbox no_executor WR %s", req.id)
     req.no_executor_notified_at = timezone.now()
     req.status = WorkRequestStatus.PENDING
     req.dispatch_note = (req.dispatch_note + "\n" if req.dispatch_note else "") + (
@@ -554,6 +567,19 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
             send_fn(req.user, client_text)
         except Exception:
             logger.exception("notify client accept(home) WR %s", req.id)
+        try:
+            from api.emit import emit_app_event
+
+            emit_app_event(
+                req.user,
+                ntype="work_request.assigned",
+                title="Мастер назначен",
+                body=client_text[:500],
+                entity_type="work_request",
+                entity_id=req.id,
+            )
+        except Exception:
+            logger.exception("app inbox assign(home) WR %s", req.id)
         start_master_scheduling(req, send_fn=send_fn)
         return (
             "Заявка ваша. Укажите окна приёма — инструкция уже в чате."
@@ -578,6 +604,19 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
         send_fn(req.user, client_text)
     except Exception:
         logger.exception("notify client accept WR %s", req.id)
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            req.user,
+            ntype="work_request.assigned",
+            title="Мастер назначен",
+            body=client_text[:500],
+            entity_type="work_request",
+            entity_id=req.id,
+        )
+    except Exception:
+        logger.exception("app inbox assign WR %s", req.id)
     try:
         send_fn(c_user, exec_text)
     except Exception:

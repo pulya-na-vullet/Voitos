@@ -732,6 +732,19 @@ def offer_to_users(
             },
         )
         try:
+            from api.emit import emit_app_event
+
+            emit_app_event(
+                user,
+                ntype="collection.offered",
+                title=f"Сбор: {campaign.title}",
+                body=text[:500],
+                entity_type="campaign",
+                entity_id=campaign.id,
+            )
+        except Exception:
+            logger.exception("app inbox collection.offer campaign=%s", campaign.id)
+        try:
             if image_payloads and send_media_fn:
                 send_media_fn(user, text, image_payloads)
                 sent += 1

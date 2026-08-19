@@ -92,3 +92,107 @@ class MobileApiTests(TestCase):
         data = resp.json()
         self.assertEqual(data["total"], 5)
         self.assertEqual(data["done_count"], 0)
+
+
+class AppEmitHookTests(TestCase):
+    """Ключевые стори пишут inbox для KMP/пушей."""
+
+    def setUp(self):
+        self.client_user = BotUser.objects.create(
+            max_user_id="em-c", real_name="Клиент", phone="89001112233", locality="Куюки"
+        )
+        self.exec_user = BotUser.objects.create(
+            max_user_id="em-e", real_name="Мастер", phone="89001112234", locality="Куюки"
+        )
+        from database.models import ExecutorRole, ContractorProfile, ContractorStatus
+
+        self.role = ExecutorRole.objects.create(
+            code="em_elec", name="Электрик", requires_work_photos=True
+        )
+        self.profile = ContractorProfile.objects.create(
+            user=self.exec_user,
+            role=self.role,
+            status=ContractorStatus.VERIFIED,
+            phone="89001112234",
+            locality="Куюки",
+        )
+
+    def test_accept_offer_emits_assigned(self):
+        from database.models import (
+            WorkRequest,
+            WorkRequestOffer,
+            WorkRequestOfferStatus,
+            WorkRequestStatus,
+        )
+        from services.work_request_dispatch import accept_offer
+
+        wr = WorkRequest.objects.create(
+            user=self.client_user,
+            role=self.role,
+            description="Розетка искрит на кухне",
+            status=WorkRequestStatus.OFFERING,
+            client_locality="Куюки",
+        )
+        offer = WorkRequestOffer.objects.create(
+            work_request=wr,
+            contractor=self.profile,
+            status=WorkRequestOfferStatus.OFFERED,
+        )
+        accept_offer(offer, send_fn=lambda *a, **k: None)
+        n = AppNotification.objects.filter(
+            bot_user=self.client_user, type="work_request.assigned"
+        ).first()
+        self.assertIsNotNone(n)
+        self.assertIn(f"work-requests/{wr.id}", n.deep_link)
+
+    def test_collection_offer_emits(self):
+        from decimal import Decimal
+
+        from database.models import ServiceCampaign, ServiceCategory, ServiceGroup, CampaignStatus
+        from services.service import offer_to_users
+
+        g = ServiceGroup.objects.create(name="Двор")
+        g.members.add(self.client_user)
+        camp = ServiceCampaign.objects.create(
+            title="Уборка снега",
+            category=ServiceCategory.SNOW,
+            group=g,
+            status=CampaignStatus.DRAFT,
+            total_amount=Decimal("1000"),
+            amount_per_user=Decimal("100"),
+        )
+        offer_to_users(camp, [self.client_user.id], Decimal("100"), send_fn=lambda *a, **k: None)
+        n = AppNotification.objects.filter(
+            bot_user=self.client_user, type="collection.offered"
+        ).first()
+        self.assertIsNotNone(n)
+        self.assertIn(f"collections/{camp.id}", n.deep_link)
+
+    def test_confirm_amount_api(self):
+        from decimal import Decimal
+
+        from database.models import (
+            WorkRequest,
+            WorkRequestPayMethod,
+            WorkRequestStatus,
+        )
+
+        wr = WorkRequest.objects.create(
+            user=self.client_user,
+            role=self.role,
+            description="Готово",
+            status=WorkRequestStatus.AWAITING_CLIENT,
+            pay_method=WorkRequestPayMethod.CASH,
+            reported_amount=Decimal("2000"),
+            assigned_contractor=self.profile,
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/confirm-amount",
+            data=json.dumps({"confirmed": True}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        wr.refresh_from_db()
+        self.assertEqual(wr.status, "awaiting_commission")
