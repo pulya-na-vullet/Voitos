@@ -39,6 +39,7 @@ import ru.voitos.app.ui.CollectionsScreen
 import ru.voitos.app.ui.ConfirmAmountScreen
 import ru.voitos.app.ui.ExecutorOffersScreen
 import ru.voitos.app.ui.ExecutorRegisterScreen
+import ru.voitos.app.ui.FeedbackScreen
 import ru.voitos.app.ui.LoginScreen
 import ru.voitos.app.ui.MainShell
 import ru.voitos.app.ui.MainTab
@@ -66,6 +67,7 @@ class MainActivity : ComponentActivity() {
         data class WorkRequestPhotos(val id: Int) : Screen()
         data object Subscription : Screen()
         data object Onboarding : Screen()
+        data object Feedback : Screen()
         data object ExecutorRegister : Screen()
         data class Confirm(val id: Int) : Screen()
     }
@@ -254,6 +256,7 @@ class MainActivity : ComponentActivity() {
                                             onOpenSubscription = { screen = Screen.Subscription },
                                             onOpenOnboarding = { screen = Screen.Onboarding },
                                             onRegisterExecutor = { screen = Screen.ExecutorRegister },
+                                            onOpenFeedback = { screen = Screen.Feedback },
                                             onLogout = {
                                                 session.clearSession()
                                                 client.accessToken = null
@@ -323,6 +326,14 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
 
+                            Screen.Feedback -> FeedbackScreen(
+                                client = client,
+                                onBack = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
+
                             is Screen.Confirm -> ConfirmAmountScreen(
                                 client = client,
                                 workRequestId = s.id,
@@ -372,6 +383,7 @@ class MainActivity : ComponentActivity() {
             is DeepLinks.Route.WorkRequest ->
                 if (route.action == "confirm") Screen.Confirm(route.id) else Screen.Main
             is DeepLinks.Route.Subscription -> Screen.Subscription
+            is DeepLinks.Route.Feedback -> Screen.Feedback
             else -> Screen.Main
         }
     }

@@ -41,6 +41,7 @@ fun CabinetScreen(
     onOpenSubscription: () -> Unit,
     onOpenOnboarding: () -> Unit,
     onRegisterExecutor: () -> Unit,
+    onOpenFeedback: () -> Unit,
     onLogout: () -> Unit,
 ) {
     var me by remember { mutableStateOf<Me?>(null) }
@@ -162,6 +163,14 @@ fun CabinetScreen(
             modifier = Modifier.fillMaxWidth(),
             colors = voitosSecondaryButtonColors(),
         ) { Text("Обучение") }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = onOpenFeedback,
+            modifier = Modifier.fillMaxWidth(),
+            colors = voitosSecondaryButtonColors(),
+        ) { Text("ОС") }
 
         Spacer(modifier = Modifier.height(8.dp))
 

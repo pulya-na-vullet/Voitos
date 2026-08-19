@@ -2354,3 +2354,81 @@ def admin_address_scan(request: HttpRequest) -> HttpResponse:
     except Exception as exc:
         messages.error(request, f"Ошибка сканирования: {exc}")
     return redirect("panel:admin_tasks_today")
+
+
+@login_required
+def feedback_list(request: HttpRequest) -> HttpResponse:
+    from database.models import FeedbackKind, FeedbackStatus, FeedbackTicket
+
+    status = (request.GET.get("status") or "").strip()
+    kind = (request.GET.get("kind") or "").strip()
+    date_from = (request.GET.get("date_from") or "").strip()
+    date_to = (request.GET.get("date_to") or "").strip()
+
+    qs = FeedbackTicket.objects.select_related(
+        "user", "manager", "group", "admin_replied_by"
+    ).all()
+    if not is_panel_admin(request.user):
+        scope = scoped_bot_user_ids(request.user)
+        qs = qs.filter(user_id__in=scope)
+
+    if status:
+        qs = qs.filter(status=status)
+    if kind:
+        qs = qs.filter(kind=kind)
+    if date_from:
+        qs = qs.filter(created_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(created_at__date__lte=date_to)
+
+    open_qs = FeedbackTicket.objects.filter(status=FeedbackStatus.OPEN)
+    if not is_panel_admin(request.user):
+        open_qs = open_qs.filter(user_id__in=scoped_bot_user_ids(request.user))
+    open_count = open_qs.count()
+
+    return render(
+        request,
+        "panel/feedback_list.html",
+        {
+            "items": list(qs[:300]),
+            "status": status,
+            "kind": kind,
+            "date_from": date_from,
+            "date_to": date_to,
+            "statuses": FeedbackStatus.choices,
+            "kinds": FeedbackKind.choices,
+            "open_count": open_count,
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def feedback_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    from database.models import FeedbackTicket
+    from services.feedback import answer_feedback_ticket
+
+    ticket = get_object_or_404(
+        FeedbackTicket.objects.select_related(
+            "user", "manager", "group", "admin_replied_by"
+        ),
+        pk=pk,
+    )
+    if ticket.user_id and not can_access_bot_user(request.user, ticket.user):
+        messages.error(request, "Нет доступа к этому обращению.")
+        return redirect("panel:feedback_list")
+
+    if request.method == "POST":
+        reply = (request.POST.get("admin_reply") or "").strip()
+        try:
+            answer_feedback_ticket(ticket, reply=reply, admin_user=request.user)
+            messages.success(request, "Ответ отправлен пользователю.")
+        except ValueError as exc:
+            messages.error(request, str(exc))
+        return redirect("panel:feedback_detail", pk=ticket.id)
+
+    return render(
+        request,
+        "panel/feedback_detail.html",
+        {"ticket": ticket},
+    )

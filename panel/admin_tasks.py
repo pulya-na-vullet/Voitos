@@ -248,6 +248,27 @@ def sync_admin_tasks() -> dict[str, int]:
         task_profile_review(user)
         counts["profiles"] += 1
 
+    from database.models import FeedbackStatus, FeedbackTicket
+
+    counts["feedback"] = 0
+    for ticket in FeedbackTicket.objects.filter(status=FeedbackStatus.OPEN).select_related("user"):
+        upsert_task(
+            kind=AdminTaskKind.FEEDBACK,
+            title=f"ОС #{ticket.id}: {ticket.get_kind_display()}",
+            description=(
+                f"{ticket.user.real_name or ticket.user}\n"
+                f"{ticket.subject}\n"
+                f"{(ticket.body or '')[:280]}"
+            ),
+            user=ticket.user,
+            action_url=f"/panel/feedback/{ticket.id}/",
+            source_model="FeedbackTicket",
+            source_id=ticket.id,
+            priority=18 if ticket.kind == "bug" else 25,
+            meta={"ticket_id": ticket.id, "kind": ticket.kind},
+        )
+        counts["feedback"] += 1
+
     # Close stale source-backed tasks
     for task in AdminTask.objects.filter(
         status=AdminTaskStatus.OPEN,
@@ -276,6 +297,15 @@ def sync_admin_tasks() -> dict[str, int]:
     ):
         u = BotUser.objects.filter(id=task.source_id).first()
         if not u or u.profile_status != ProfileStatus.PENDING_REVIEW:
+            task.mark_done()
+            counts["closed"] += 1
+    for task in AdminTask.objects.filter(
+        status=AdminTaskStatus.OPEN,
+        kind=AdminTaskKind.FEEDBACK,
+        source_model="FeedbackTicket",
+    ):
+        t = FeedbackTicket.objects.filter(id=task.source_id).first()
+        if not t or t.status != FeedbackStatus.OPEN:
             task.mark_done()
             counts["closed"] += 1
     return counts

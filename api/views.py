@@ -523,6 +523,40 @@ def _service_payment_payload() -> dict:
 
 
 @api_login_required
+@require_http_methods(["GET", "POST"])
+def me_feedback(request):
+    """Обращения из приложения: баг / ОС / отзыв о менеджере."""
+    from services.feedback import (
+        create_feedback_ticket,
+        list_user_feedback,
+        manager_context_dict,
+        ticket_to_dict,
+    )
+
+    user = request.bot_user
+    if request.method == "GET":
+        return json_response(
+            {
+                "items": [ticket_to_dict(t) for t in list_user_feedback(user)],
+                "manager": manager_context_dict(user),
+                "notice": "Все обращения рассматриваются администратором.",
+            }
+        )
+    data = parse_json(request)
+    try:
+        ticket = create_feedback_ticket(
+            user,
+            kind=str(data.get("kind") or ""),
+            body=str(data.get("body") or ""),
+            subject=str(data.get("subject") or ""),
+            score=data.get("score"),
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    return json_response({"ok": True, "ticket": ticket_to_dict(ticket)}, status=201)
+
+
+@api_login_required
 @require_GET
 def collections_list(request):
     """Список инвайтов жителя в сборы."""

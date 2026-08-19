@@ -306,3 +306,44 @@ data class ExecutorOfferRespondResult(
     val status: String = "",
     @SerialName("offer_id") val offerId: Int = 0,
 )
+
+@Serializable
+data class FeedbackTicket(
+    val id: Int = 0,
+    val kind: String = "",
+    @SerialName("kind_label") val kindLabel: String = "",
+    val status: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    val subject: String = "",
+    val body: String = "",
+    val score: Int? = null,
+    @SerialName("manager_name") val managerName: String = "",
+    @SerialName("group_name") val groupName: String = "",
+    @SerialName("admin_reply") val adminReply: String = "",
+    @SerialName("admin_replied_at") val adminRepliedAt: String? = null,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
+)
+
+@Serializable
+data class ManagerFeedbackContext(
+    val available: Boolean = false,
+    @SerialName("manager_name") val managerName: String = "",
+    @SerialName("group_name") val groupName: String = "",
+    @SerialName("group_id") val groupId: Int? = null,
+)
+
+@Serializable
+data class FeedbackListResponse(
+    val items: List<FeedbackTicket> = emptyList(),
+    val manager: ManagerFeedbackContext = ManagerFeedbackContext(),
+    val notice: String = "",
+)
+
+@Serializable
+data class FeedbackCreateResult(
+    val ok: Boolean = true,
+    val ticket: FeedbackTicket? = null,
+    val detail: String = "",
+    val error: String = "",
+)

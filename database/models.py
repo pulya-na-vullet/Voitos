@@ -54,6 +54,7 @@ class ActivityKind(models.TextChoices):
     SERVICE_PAID = "service_paid", "Сервисный сбор оплачен"
     SERVICE_NOTICE = "service_notice", "Уведомление по сбору"
     SERVICE_WISH = "service_wish", "Пожелание по группе"
+    FEEDBACK = "feedback", "Обратная связь"
     VOLUNTEER_ASK = "volunteer_ask", "Вопрос о помощи на мероприятии"
     VOLUNTEER_REPLY = "volunteer_reply", "Ответ о помощи на мероприятии"
     CONTRACTOR_REGISTER = "contractor_register", "Регистрация исполнителя"
@@ -166,6 +167,7 @@ class AdminTaskKind(models.TextChoices):
     WORK_REQUEST = "work_request", "Заявка на исполнителя"
     WORK_COMMISSION = "work_commission", "Комиссия исполнителя 10%"
     WISH_BALLOT = "wish_ballot", "Сбор по итогам голосования"
+    FEEDBACK = "feedback", "Обратная связь / баг"
 
 
 class WorkRequestStatus(models.TextChoices):
@@ -1909,6 +1911,89 @@ class AdminTask(models.Model):
         self.status = AdminTaskStatus.DISMISSED
         self.completed_at = timezone.now()
         self.save(update_fields=["status", "completed_at", "updated_at"])
+
+
+class FeedbackKind(models.TextChoices):
+    BUG = "bug", "Баг в приложении"
+    FEEDBACK = "feedback", "Обратная связь"
+    MANAGER = "manager", "ОС по менеджеру"
+
+
+class FeedbackStatus(models.TextChoices):
+    OPEN = "open", "На рассмотрении"
+    ANSWERED = "answered", "Рассмотрено"
+    CLOSED = "closed", "Закрыто"
+
+
+class FeedbackTicket(models.Model):
+    """Обращения из приложения: баг / ОС / отзыв о менеджере района."""
+
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="feedback_tickets",
+        verbose_name="Пользователь",
+    )
+    kind = models.CharField(
+        max_length=16,
+        choices=FeedbackKind.choices,
+        default=FeedbackKind.FEEDBACK,
+        db_index=True,
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=FeedbackStatus.choices,
+        default=FeedbackStatus.OPEN,
+        db_index=True,
+    )
+    subject = models.CharField("Тема", max_length=200, blank=True, default="")
+    body = models.TextField("Текст обращения")
+    score = models.PositiveSmallIntegerField(
+        "Оценка менеджера (1–5)",
+        null=True,
+        blank=True,
+    )
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manager_feedback_tickets",
+        verbose_name="Менеджер",
+    )
+    group = models.ForeignKey(
+        "ServiceGroup",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feedback_tickets",
+        verbose_name="Группа / район",
+    )
+    admin_reply = models.TextField("Ответ администратора", blank=True, default="")
+    admin_replied_at = models.DateTimeField(null=True, blank=True)
+    admin_replied_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="answered_feedback_tickets",
+        verbose_name="Ответил",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Обращение (ОС)"
+        verbose_name_plural = "Обращения (ОС)"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["kind", "status"]),
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"ОС #{self.pk} {self.get_kind_display()} ({self.get_status_display()})"
 
 
 class Reminder(models.Model):

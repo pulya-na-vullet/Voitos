@@ -297,7 +297,7 @@ def save_offer_photos(
     campaign: ServiceCampaign,
     uploads: list[tuple[bytes, str]],
     *,
-    max_photos: int = 2,
+    max_photos: int = 8,
 ) -> list[ServiceCampaignOfferPhoto]:
     """Save up to max_photos task photos attached at campaign launch."""
     existing = campaign.offer_photos.count()
@@ -321,7 +321,7 @@ def campaign_offer_image_payloads(
     campaign: ServiceCampaign,
 ) -> list[tuple[bytes, str]]:
     payloads: list[tuple[bytes, str]] = []
-    for photo in campaign.offer_photos.all()[:2]:
+    for photo in campaign.offer_photos.all()[:8]:
         try:
             with photo.image.open("rb") as fh:
                 payloads.append((fh.read(), Path(photo.image.name).name))

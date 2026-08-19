@@ -27,6 +27,8 @@ import ru.voitos.app.model.ExecutorOfferList
 import ru.voitos.app.model.ExecutorOfferRespondResult
 import ru.voitos.app.model.ExecutorRegisterResult
 import ru.voitos.app.model.ExecutorRoleList
+import ru.voitos.app.model.FeedbackCreateResult
+import ru.voitos.app.model.FeedbackListResponse
 import ru.voitos.app.model.HealthResponse
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.NotificationList
@@ -249,6 +251,35 @@ class VoitosApiClient(
         }.body()
 
     suspend fun onboarding(): OnboardingProgress = authedGet("/onboarding")
+
+    suspend fun feedback(): FeedbackListResponse = authedGet("/me/feedback")
+
+    suspend fun createFeedback(
+        kind: String,
+        body: String,
+        subject: String = "",
+        score: Int? = null,
+    ): FeedbackCreateResult {
+        val response: HttpResponse = http.post("$baseUrl/me/feedback") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("kind", kind)
+                    put("body", body)
+                    put("subject", subject)
+                    if (score != null) put("score", score)
+                },
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err: FeedbackCreateResult = runCatching { response.body<FeedbackCreateResult>() }
+                .getOrElse { FeedbackCreateResult(ok = false, error = "HTTP ${response.status.value}") }
+            val msg = err.detail.ifBlank { err.error }.ifBlank { "Не удалось отправить обращение" }
+            throw IllegalStateException(msg)
+        }
+        return response.body()
+    }
 
     suspend fun completeOnboardingStep(code: String): OnboardingProgress =
         http.post("$baseUrl/onboarding/steps/$code/complete") {

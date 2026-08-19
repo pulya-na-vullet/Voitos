@@ -572,3 +572,49 @@ class AppEmitHookTests(TestCase):
         )
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()["items"]), 1)
+
+    def test_feedback_create_and_list(self):
+        from database.models import FeedbackStatus, FeedbackTicket
+        from services.feedback import answer_feedback_ticket
+
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        empty = self.client.get(
+            "/api/v1/me/feedback",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["items"], [])
+        self.assertIn("рассматриваются", empty.json()["notice"].lower())
+
+        created = self.client.post(
+            "/api/v1/me/feedback",
+            data=json.dumps(
+                {
+                    "kind": "bug",
+                    "subject": "Кнопка",
+                    "body": "Не открывается экран сборов после обновления.",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(created.status_code, 201)
+        ticket_id = created.json()["ticket"]["id"]
+        ticket = FeedbackTicket.objects.get(pk=ticket_id)
+        self.assertEqual(ticket.status, FeedbackStatus.OPEN)
+
+        from django.contrib.auth import get_user_model
+
+        admin = get_user_model().objects.create_superuser(
+            username="fb_admin", password="x", email="a@b.c"
+        )
+        answer_feedback_ticket(ticket, reply="Исправили, обновите приложение.", admin_user=admin)
+
+        listed = self.client.get(
+            "/api/v1/me/feedback",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(listed.status_code, 200)
+        item = listed.json()["items"][0]
+        self.assertEqual(item["status"], "answered")
+        self.assertIn("Исправили", item["admin_reply"])
