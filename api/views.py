@@ -600,6 +600,34 @@ def me_feedback(request):
     return json_response({"ok": True, "ticket": ticket_to_dict(ticket)}, status=201)
 
 
+def _campaign_progress_payload(campaign) -> dict:
+    """Собрано / цель + сколько оплатили из приглашённых."""
+    from database.models import InviteStatus
+    from services.service import campaign_collected
+
+    if campaign is None:
+        return {
+            "paid_count": 0,
+            "invite_count": 0,
+            "collected_amount": 0.0,
+            "total_amount": 0.0,
+            "progress_percent": 0,
+        }
+    invites = list(campaign.invites.all())
+    paid_count = sum(1 for i in invites if i.status == InviteStatus.PAID)
+    invite_count = len(invites)
+    collected = float(campaign_collected(campaign) or 0)
+    total = float(getattr(campaign, "total_amount", 0) or 0)
+    pct = min(100, int(collected * 100 / total)) if total > 0 else 0
+    return {
+        "paid_count": paid_count,
+        "invite_count": invite_count,
+        "collected_amount": collected,
+        "total_amount": total,
+        "progress_percent": pct,
+    }
+
+
 @api_login_required
 @require_GET
 def collections_list(request):
@@ -611,7 +639,11 @@ def collections_list(request):
             ServiceInvite.objects.filter(user=request.bot_user)
             .exclude(status=InviteStatus.CANCELLED)
             .select_related("campaign")
-            .prefetch_related("campaign__offer_photos", "receipts")
+            .prefetch_related(
+                "campaign__offer_photos",
+                "campaign__invites",
+                "receipts",
+            )
             .order_by("-id")[:50]
         )
         pay = _service_payment_payload()
@@ -643,6 +675,7 @@ def collections_list(request):
                     "description": (getattr(camp, "description", None) or "")[:400],
                     "pending_receipts": pending_n,
                     "rejected_receipts": rejected_n,
+                    **_campaign_progress_payload(camp),
                     **pay,
                 }
             )
@@ -660,14 +693,12 @@ def collection_detail(request, pk: int):
     inv = (
         ServiceInvite.objects.filter(user=request.bot_user, campaign_id=pk)
         .select_related("campaign")
-        .prefetch_related("campaign__offer_photos")
+        .prefetch_related("campaign__offer_photos", "campaign__invites")
         .first()
     )
     if not inv:
         return json_response({"error": "not_found"}, status=404)
     camp = inv.campaign
-    paid = int(camp.invites.filter(status=InviteStatus.PAID).count() if camp else 0)
-    total = int(camp.invites.count() if camp else 0)
     pending = int(
         inv.receipts.filter(status=ReceiptStatus.PENDING).count() if hasattr(inv, "receipts") else 0
     )
@@ -689,14 +720,13 @@ def collection_detail(request, pk: int):
         "status": inv.status,
         "campaign_status": camp.status or "",
         "event_at": camp.event_at.isoformat() if camp.event_at else None,
-        "paid_count": paid,
-        "invite_count": total,
         "invite_id": inv.id,
         "can_pay": can_pay,
         "pending_receipts": pending,
         "rejected_receipts": rejected,
         "cover_photo_url": photos[0] if photos else "",
         "photo_urls": photos,
+        **_campaign_progress_payload(camp),
         **_service_payment_payload(),
     }
     return json_response(payload)

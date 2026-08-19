@@ -136,7 +136,7 @@ fun MainShell(
                     }
                 }
             }
-            HorizontalDivider(color = VoitosColors.Line)
+            HorizontalDivider(color = VoitosColors.Accent2.copy(alpha = 0.35f))
             BottomNavBar(
                 selected = selected,
                 onSelect = onSelect,
@@ -183,7 +183,7 @@ private fun BottomNavBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(VoitosColors.Bg.copy(alpha = 0.92f))
+            .background(VoitosColors.Accent2.copy(alpha = 0.14f))
             .padding(horizontal = 2.dp, vertical = 8.dp)
             .height(64.dp),
         verticalAlignment = Alignment.CenterVertically,

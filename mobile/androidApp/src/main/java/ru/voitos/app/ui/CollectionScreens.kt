@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -186,6 +187,14 @@ private fun CollectionListCard(item: CollectionBrief, onClick: () -> Unit) {
                     maxLines = 2,
                 )
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            CollectionProgressBlock(
+                paidCount = item.paidCount,
+                inviteCount = item.inviteCount,
+                collectedAmount = item.collectedAmount,
+                totalAmount = item.totalAmount,
+                progressPercent = item.progressPercent,
+            )
         }
     }
 }
@@ -326,9 +335,13 @@ fun CollectionDetailScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Мероприятие: ${formatEventAt(it)}", color = VoitosColors.Muted)
                 }
-                Text(
-                    "Оплатили: ${c.paidCount} из ${c.inviteCount}",
-                    color = VoitosColors.Muted,
+                Spacer(modifier = Modifier.height(10.dp))
+                CollectionProgressBlock(
+                    paidCount = c.paidCount,
+                    inviteCount = c.inviteCount,
+                    collectedAmount = c.collectedAmount,
+                    totalAmount = c.totalAmount,
+                    progressPercent = c.progressPercent,
                 )
                 if (c.description.isNotBlank()) {
                     Spacer(modifier = Modifier.height(10.dp))
@@ -409,6 +422,59 @@ fun CollectionDetailScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CollectionProgressBlock(
+    paidCount: Int,
+    inviteCount: Int,
+    collectedAmount: Double,
+    totalAmount: Double,
+    progressPercent: Int,
+) {
+    val fraction = when {
+        progressPercent > 0 -> (progressPercent / 100f).coerceIn(0f, 1f)
+        totalAmount > 0 -> (collectedAmount / totalAmount).toFloat().coerceIn(0f, 1f)
+        else -> 0f
+    }
+    val pct = if (progressPercent > 0) {
+        progressPercent.coerceIn(0, 100)
+    } else {
+        (fraction * 100).toInt().coerceIn(0, 100)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Оплатили: $paidCount из ${inviteCount.coerceAtLeast(paidCount)}",
+            color = VoitosColors.Muted,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Text(
+            "${collectedAmount.toInt()} / ${totalAmount.toInt()} ₽ · $pct%",
+            color = VoitosColors.Accent2,
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+    Spacer(modifier = Modifier.height(6.dp))
+    val barFraction = if (fraction <= 0f) 0f else fraction.coerceIn(0.02f, 1f)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(VoitosColors.BgSoft),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(barFraction)
+                .clip(RoundedCornerShape(999.dp))
+                .background(VoitosColors.Accent2),
+        )
     }
 }
 

@@ -92,6 +92,11 @@ data class CollectionBrief(
     @SerialName("payment_status") val paymentStatus: String = "",
     @SerialName("pending_receipts") val pendingReceipts: Int = 0,
     @SerialName("rejected_receipts") val rejectedReceipts: Int = 0,
+    @SerialName("paid_count") val paidCount: Int = 0,
+    @SerialName("invite_count") val inviteCount: Int = 0,
+    @SerialName("collected_amount") val collectedAmount: Double = 0.0,
+    @SerialName("total_amount") val totalAmount: Double = 0.0,
+    @SerialName("progress_percent") val progressPercent: Int = 0,
 )
 
 @Serializable
@@ -113,6 +118,9 @@ data class CollectionDetail(
     @SerialName("event_at") val eventAt: String? = null,
     @SerialName("paid_count") val paidCount: Int = 0,
     @SerialName("invite_count") val inviteCount: Int = 0,
+    @SerialName("collected_amount") val collectedAmount: Double = 0.0,
+    @SerialName("total_amount") val totalAmount: Double = 0.0,
+    @SerialName("progress_percent") val progressPercent: Int = 0,
     @SerialName("invite_id") val inviteId: Int = 0,
     @SerialName("can_pay") val canPay: Boolean = false,
     @SerialName("pending_receipts") val pendingReceipts: Int = 0,
