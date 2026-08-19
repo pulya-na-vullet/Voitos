@@ -35,15 +35,22 @@ def run_reminder_scheduler(stop_event=None, interval_seconds: int = 20) -> None:
 
                 system_text = strip_renewal_marker(reminder.text)
                 text = system_text if system_text is not None else f"Напоминание: {reminder.text}"
+                max_ok = False
                 try:
                     if user.chat_id:
                         client.send_message(text, chat_id=user.chat_id)
                     else:
                         client.send_message(text, user_id=user.max_user_id)
-                    service.mark_sent(reminder)
+                    max_ok = True
                     logger.info("Sent reminder #%s to user %s", reminder.id, user.max_user_id)
                 except Exception:
                     logger.exception("Failed to send reminder #%s", reminder.id)
+                # Продление: inbox/FCM даже если MAX недоступен (мобильный клиент).
+                if max_ok or system_text is not None:
+                    try:
+                        service.mark_sent(reminder)
+                    except Exception:
+                        logger.exception("mark_sent failed reminder #%s", reminder.id)
         except Exception:
             logger.exception("Reminder scheduler loop error")
         time.sleep(interval_seconds)

@@ -73,6 +73,12 @@ class ReminderService:
             detail=detail,
             meta={"id": reminder.id, "repeat": reminder.repeat},
         )
+        try:
+            from subscriptions.renewal_reminders import emit_renewal_app_event
+
+            emit_renewal_app_event(reminder.user, reminder.text)
+        except Exception:
+            pass
 
     def delete_by_query(self, user: BotUser, query: str) -> Reminder | None:
         items = self.list_active(user)

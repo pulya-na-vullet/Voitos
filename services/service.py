@@ -676,6 +676,26 @@ def process_unpaid_reminders(send_fn=None, *, now=None) -> int:
                         detail=campaign.title,
                         meta={"campaign_id": campaign.id, "kind": kind},
                     )
+                    try:
+                        from api.emit import emit_app_event
+
+                        ntype = {
+                            CampaignNoticeKind.REMIND_3D: "collection.remind_3d",
+                            CampaignNoticeKind.REMIND_1D: "collection.remind_1d",
+                            CampaignNoticeKind.REMIND_2H: "collection.remind_2h",
+                        }.get(kind, "collection.remind_3d")
+                        emit_app_event(
+                            inv.user,
+                            ntype=ntype,
+                            title=f"Сбор: {campaign.title}",
+                            body=text_cache[campaign.id][:500],
+                            entity_type="campaign",
+                            entity_id=campaign.id,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "app inbox unpaid reminder campaign=%s", campaign.id
+                        )
                 except Exception:
                     logger.exception(
                         "Failed unpaid reminder %s to %s",

@@ -111,7 +111,7 @@ def work_requests_list(request):
         return work_requests_create(request)
     qs = (
         WorkRequest.objects.filter(user=request.bot_user)
-        .select_related("role")
+        .select_related("role", "assigned_contractor")
         .order_by("-created_at")[:50]
     )
     return json_response(
@@ -123,6 +123,11 @@ def work_requests_list(request):
                     "role_name": wr.role.name if wr.role_id else "",
                     "description": wr.description or "",
                     "created_at": wr.created_at.isoformat(),
+                    "assigned_executor_name": (
+                        str(wr.assigned_contractor)
+                        if wr.assigned_contractor_id
+                        else None
+                    ),
                 }
                 for wr in qs
             ]
@@ -229,7 +234,7 @@ def notification_read(request, pk: int):
 @api_login_required
 @require_GET
 def collections_list(request):
-    """Stub: список инвайтов — полный wiring в следующем PR."""
+    """Список инвайтов жителя в сборы."""
     try:
         from database.models import ServiceInvite
 
@@ -244,7 +249,7 @@ def collections_list(request):
             items.append(
                 {
                     "id": camp.id if camp else inv.id,
-                    "title": getattr(camp, "title", None) or getattr(camp, "name", "") or "Сбор",
+                    "title": getattr(camp, "title", None) or "Сбор",
                     "category": getattr(camp, "category", "") or "",
                     "amount_due": float(getattr(inv, "amount_due", 0) or 0),
                     "status": inv.status,
@@ -258,6 +263,40 @@ def collections_list(request):
         return json_response({"items": items})
     except Exception:
         return json_response({"items": []})
+
+
+@api_login_required
+@require_GET
+def collection_detail(request, pk: int):
+    """Детали сбора по campaign id для текущего пользователя."""
+    from database.models import ServiceInvite
+
+    inv = (
+        ServiceInvite.objects.filter(user=request.bot_user, campaign_id=pk)
+        .select_related("campaign")
+        .first()
+    )
+    if not inv:
+        return json_response({"error": "not_found"}, status=404)
+    camp = inv.campaign
+    paid = int(
+        camp.invites.filter(status="paid").count() if camp else 0
+    )
+    total = int(camp.invites.count() if camp else 0)
+    return json_response(
+        {
+            "id": camp.id,
+            "title": camp.title,
+            "category": camp.category or "",
+            "description": camp.description or "",
+            "amount_due": float(inv.amount_due or 0),
+            "amount_paid": float(inv.amount_paid or 0),
+            "status": inv.status,
+            "event_at": camp.event_at.isoformat() if camp.event_at else None,
+            "paid_count": paid,
+            "invite_count": total,
+        }
+    )
 
 
 @api_login_required

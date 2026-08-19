@@ -54,6 +54,7 @@ data class WorkRequestBrief(
     @SerialName("role_name") val roleName: String = "",
     val description: String = "",
     @SerialName("created_at") val createdAt: String = "",
+    @SerialName("assigned_executor_name") val assignedExecutorName: String? = null,
 )
 
 @Serializable
@@ -74,6 +75,55 @@ data class CollectionBrief(
 @Serializable
 data class CollectionList(
     val items: List<CollectionBrief> = emptyList(),
+)
+
+@Serializable
+data class CollectionDetail(
+    val id: Int,
+    val title: String = "",
+    val category: String = "",
+    val description: String = "",
+    @SerialName("amount_due") val amountDue: Double = 0.0,
+    @SerialName("amount_paid") val amountPaid: Double = 0.0,
+    val status: String = "",
+    @SerialName("event_at") val eventAt: String? = null,
+    @SerialName("paid_count") val paidCount: Int = 0,
+    @SerialName("invite_count") val inviteCount: Int = 0,
+)
+
+@Serializable
+data class SubscriptionInfo(
+    val state: String = "",
+    @SerialName("subscription_until") val subscriptionUntil: String? = null,
+    @SerialName("grace_until") val graceUntil: String? = null,
+    val label: String = "",
+    @SerialName("price_rub") val priceRub: Int = 0,
+    @SerialName("payment_phone") val paymentPhone: String = "",
+    @SerialName("payment_name") val paymentName: String = "",
+    @SerialName("pending_receipts") val pendingReceipts: Int = 0,
+)
+
+@Serializable
+data class ExecutorRole(
+    val id: Int,
+    val code: String = "",
+    val name: String = "",
+    @SerialName("requires_work_photos") val requiresWorkPhotos: Boolean = true,
+)
+
+@Serializable
+data class ExecutorRoleList(
+    val items: List<ExecutorRole> = emptyList(),
+)
+
+@Serializable
+data class WorkRequestCreated(
+    val id: Int,
+    val status: String = "",
+    @SerialName("role_name") val roleName: String = "",
+    val description: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("needs_photos") val needsPhotos: Boolean = false,
 )
 
 @Serializable

@@ -16,10 +16,14 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import ru.voitos.app.VoitosApi
 import ru.voitos.app.model.AuthSession
+import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
+import ru.voitos.app.model.ExecutorRoleList
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.NotificationList
 import ru.voitos.app.model.OnboardingProgress
+import ru.voitos.app.model.SubscriptionInfo
+import ru.voitos.app.model.WorkRequestCreated
 import ru.voitos.app.model.WorkRequestList
 
 /**
@@ -66,6 +70,24 @@ class VoitosApiClient(
     suspend fun workRequests(): WorkRequestList = authedGet("/work-requests")
 
     suspend fun collections(): CollectionList = authedGet("/collections")
+
+    suspend fun collection(id: Int): CollectionDetail = authedGet("/collections/$id")
+
+    suspend fun subscription(): SubscriptionInfo = authedGet("/me/subscription")
+
+    suspend fun executorRoles(): ExecutorRoleList = authedGet("/executor-roles")
+
+    suspend fun createWorkRequest(roleId: Int, description: String): WorkRequestCreated =
+        http.post("$baseUrl/work-requests") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("role_id", roleId)
+                    put("description", description)
+                },
+            )
+        }.body()
 
     suspend fun onboarding(): OnboardingProgress = authedGet("/onboarding")
 

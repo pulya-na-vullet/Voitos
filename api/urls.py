@@ -22,6 +22,7 @@ urlpatterns = [
         name="work_request_confirm",
     ),
     path("collections", views.collections_list, name="collections"),
+    path("collections/<int:pk>", views.collection_detail, name="collection_detail"),
     path("onboarding", views.onboarding, name="onboarding"),
     path(
         "onboarding/steps/<slug:code>/complete",

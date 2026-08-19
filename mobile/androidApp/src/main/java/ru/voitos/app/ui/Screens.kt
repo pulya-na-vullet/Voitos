@@ -129,6 +129,8 @@ fun InboxScreen(
     onOpenDeepLink: (String) -> Unit,
     onOpenCollections: () -> Unit,
     onOpenWorkRequests: () -> Unit,
+    onOpenSubscription: () -> Unit,
+    onNewWorkRequest: () -> Unit,
     onLogout: () -> Unit,
 ) {
     var items by remember { mutableStateOf<List<AppNotification>>(emptyList()) }
@@ -157,6 +159,8 @@ fun InboxScreen(
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = onOpenCollections) { Text("Сборы") }
         TextButton(onClick = onOpenWorkRequests) { Text("Заявки") }
+        TextButton(onClick = onNewWorkRequest) { Text("Вызвать мастера") }
+        TextButton(onClick = onOpenSubscription) { Text("Подписка") }
         TextButton(onClick = onLogout) { Text("Выйти") }
         Spacer(Modifier.height(8.dp))
         if (loading) CircularProgressIndicator()
@@ -166,7 +170,22 @@ fun InboxScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenDeepLink(n.deepLink.ifBlank { DeepLinks.routeForType(n.type, n.entityId).toString() }) },
+                        .clickable {
+                            val fallback = when (DeepLinks.routeForType(n.type, n.entityId)) {
+                                is DeepLinks.Route.Subscription -> "voitos://app/subscription"
+                                is DeepLinks.Route.Collection -> "voitos://app/collections/${n.entityId}"
+                                is DeepLinks.Route.WorkRequest -> {
+                                    val action = (DeepLinks.routeForType(n.type, n.entityId) as DeepLinks.Route.WorkRequest).action
+                                    if (action == "confirm") {
+                                        "voitos://app/work-requests/${n.entityId}/confirm"
+                                    } else {
+                                        "voitos://app/work-requests/${n.entityId}"
+                                    }
+                                }
+                                else -> "voitos://app/home"
+                            }
+                            onOpenDeepLink(n.deepLink.ifBlank { fallback })
+                        },
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(n.title, style = MaterialTheme.typography.titleMedium)
@@ -184,6 +203,7 @@ fun InboxScreen(
 @Composable
 fun CollectionsScreen(
     client: VoitosApiClient,
+    onOpen: (Int) -> Unit = {},
     onBack: () -> Unit,
 ) {
     var items by remember { mutableStateOf<List<CollectionBrief>>(emptyList()) }
@@ -201,7 +221,11 @@ fun CollectionsScreen(
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(items, key = { it.id }) { c ->
-                Card(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpen(c.id) },
+                ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(c.title, style = MaterialTheme.typography.titleMedium)
                         Text("${c.category} · ${c.amountDue} ₽ · ${c.status}")
@@ -241,6 +265,7 @@ fun WorkRequestsScreen(
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("#${wr.id} ${wr.roleName}", style = MaterialTheme.typography.titleMedium)
                         Text(wr.status)
+                        wr.assignedExecutorName?.let { Text("Мастер: $it") }
                         Text(wr.description, style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -319,5 +344,164 @@ fun ConfirmAmountScreen(
         ) { Text("Отправить свою сумму") }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+fun SubscriptionScreen(
+    client: VoitosApiClient,
+    onBack: () -> Unit,
+) {
+    var info by remember { mutableStateOf<ru.voitos.app.model.SubscriptionInfo?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        try {
+            info = client.subscription()
+        } catch (e: Exception) {
+            error = e.message
+        }
+    }
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("← Назад") }
+        Text("Подписка", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(12.dp))
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        info?.let { s ->
+            Text(s.label.ifBlank { s.state }, style = MaterialTheme.typography.titleMedium)
+            Text("Доступ: ${s.state}")
+            s.subscriptionUntil?.let { Text("До: $it") }
+            s.graceUntil?.let { Text("Grace до: $it") }
+            Spacer(Modifier.height(8.dp))
+            Text("Цена: ${s.priceRub} ₽/мес")
+            if (s.paymentPhone.isNotBlank()) {
+                Text("Оплата: ${s.paymentPhone}")
+                if (s.paymentName.isNotBlank()) Text(s.paymentName)
+            }
+            if (s.pendingReceipts > 0) {
+                Text("Чеков на проверке: ${s.pendingReceipts}")
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Отправьте чек через бота или приложение (загрузка — следующим шагом).",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+fun NewWorkRequestScreen(
+    client: VoitosApiClient,
+    onCreated: (Int) -> Unit,
+    onBack: () -> Unit,
+) {
+    var roles by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorRole>>(emptyList()) }
+    var selectedId by remember { mutableStateOf<Int?>(null) }
+    var description by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        try {
+            roles = client.executorRoles().items
+            selectedId = roles.firstOrNull()?.id
+        } catch (e: Exception) {
+            error = e.message
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("← Назад") }
+        Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
+        Text("Роль", style = MaterialTheme.typography.labelLarge)
+        roles.forEach { role ->
+            TextButton(
+                onClick = { selectedId = role.id },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    buildString {
+                        append(if (selectedId == role.id) "✓ " else "")
+                        append(role.name)
+                        if (!role.requiresWorkPhotos) append(" · без фото")
+                    },
+                )
+            }
+        }
+        OutlinedTextField(
+            value = description,
+            onValueChange = { description = it },
+            label = { Text("Что случилось") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = {
+                val rid = selectedId
+                if (rid == null) {
+                    error = "Выберите роль"
+                    return@Button
+                }
+                scope.launch {
+                    loading = true
+                    error = null
+                    try {
+                        val created = client.createWorkRequest(rid, description)
+                        message = if (created.needsPhotos) {
+                            "Заявка #${created.id}: нужны фото работ (через бота пока)"
+                        } else {
+                            "Заявка #${created.id} отправлена мастерам"
+                        }
+                        onCreated(created.id)
+                    } catch (e: Exception) {
+                        error = e.message
+                    } finally {
+                        loading = false
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading && description.length >= 5,
+        ) { Text("Создать заявку") }
+        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+fun CollectionDetailScreen(
+    client: VoitosApiClient,
+    collectionId: Int,
+    onBack: () -> Unit,
+) {
+    var detail by remember { mutableStateOf<ru.voitos.app.model.CollectionDetail?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(collectionId) {
+        try {
+            detail = client.collection(collectionId)
+        } catch (e: Exception) {
+            error = e.message
+        }
+    }
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("← Назад") }
+        Text("Сбор", style = MaterialTheme.typography.headlineSmall)
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        detail?.let { c ->
+            Text(c.title, style = MaterialTheme.typography.titleLarge)
+            Text("${c.category} · ${c.status}")
+            Text("К оплате: ${c.amountDue} ₽")
+            if (c.amountPaid > 0) Text("Оплачено: ${c.amountPaid} ₽")
+            c.eventAt?.let { Text("Событие: $it") }
+            Text("Оплатили: ${c.paidCount} из ${c.inviteCount}")
+            if (c.description.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(c.description)
+            }
+        }
     }
 }

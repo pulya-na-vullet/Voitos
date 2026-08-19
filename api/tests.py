@@ -265,3 +265,105 @@ class AppEmitHookTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         wr.refresh_from_db()
         self.assertEqual(wr.status, "awaiting_commission")
+
+    def test_receipt_approve_emits(self):
+        from decimal import Decimal
+        from unittest.mock import patch
+
+        from database.models import PaymentReceipt, ReceiptStatus
+        from subscriptions.service import approve_receipt, reject_receipt
+
+        with self.settings(MEDIA_ROOT="/tmp/voitos_kmp_receipt"):
+            with patch("subscriptions.service.ocr_image_bytes", return_value=""):
+                from subscriptions.service import submit_receipt
+
+                r = submit_receipt(
+                    self.client_user, b"%PDF-1.4 kmp receipt test", filename="k.pdf"
+                )
+        approve_receipt(r, amount=Decimal("100"), force_duplicate=True)
+        n = AppNotification.objects.filter(
+            bot_user=self.client_user, type="subscription.receipt_approved"
+        ).first()
+        self.assertIsNotNone(n)
+        self.assertIn("subscription", n.deep_link)
+
+        r2 = PaymentReceipt.objects.create(
+            user=self.client_user,
+            status=ReceiptStatus.PENDING,
+            amount=Decimal("100"),
+        )
+        reject_receipt(r2, comment="нечитаемо")
+        n2 = AppNotification.objects.filter(
+            bot_user=self.client_user, type="subscription.receipt_rejected"
+        ).first()
+        self.assertIsNotNone(n2)
+
+    def test_renewal_mark_sent_emits(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from database.models import Reminder
+        from reminders.service import ReminderService
+        from subscriptions.renewal_reminders import RENEWAL_MARKER, payer_renewal_text
+
+        until = timezone.now() + timedelta(days=5)
+        rem = Reminder.objects.create(
+            user=self.client_user,
+            text=payer_renewal_text(until, "за 4 дня"),
+            due_at=timezone.now() - timedelta(minutes=1),
+        )
+        self.assertTrue(rem.text.startswith(RENEWAL_MARKER))
+        ReminderService().mark_sent(rem)
+        n = AppNotification.objects.filter(
+            bot_user=self.client_user, type="subscription.renewal_4d"
+        ).first()
+        self.assertIsNotNone(n)
+
+    def test_collection_detail(self):
+        from decimal import Decimal
+
+        from database.models import (
+            CampaignStatus,
+            ServiceCampaign,
+            ServiceCategory,
+            ServiceGroup,
+            ServiceInvite,
+        )
+
+        g = ServiceGroup.objects.create(name="Двор-2")
+        g.members.add(self.client_user)
+        camp = ServiceCampaign.objects.create(
+            title="Снег",
+            category=ServiceCategory.SNOW,
+            group=g,
+            status=CampaignStatus.ACTIVE,
+            total_amount=Decimal("500"),
+            amount_per_user=Decimal("100"),
+        )
+        ServiceInvite.objects.create(
+            campaign=camp, user=self.client_user, amount_due=Decimal("100")
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.get(
+            f"/api/v1/collections/{camp.id}",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["title"], "Снег")
+        self.assertEqual(resp.json()["amount_due"], 100.0)
+
+    def test_create_work_request_api(self):
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.post(
+            "/api/v1/work-requests",
+            data=json.dumps(
+                {"role_id": self.role.id, "description": "Розетка не работает"}
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertTrue(data["needs_photos"])
+        self.assertEqual(data["status"], "draft")

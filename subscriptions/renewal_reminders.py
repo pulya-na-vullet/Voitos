@@ -32,6 +32,43 @@ def strip_renewal_marker(text: str) -> str | None:
     return None
 
 
+def renewal_ntype_from_text(text: str) -> str | None:
+    """Определить тип mobile-события по тексту системного напоминания."""
+    if not text.startswith(RENEWAL_MARKER) and "Подписка заканчивается" not in text:
+        if RENEWAL_MARKER not in text and "заканчивается" not in text:
+            return None
+    body = text
+    if "за 2 часа" in body:
+        return "subscription.renewal_2h"
+    if "за 2 дня" in body:
+        return "subscription.renewal_2d"
+    if "за 4 дня" in body:
+        return "subscription.renewal_4d"
+    if text.startswith(RENEWAL_MARKER):
+        return "subscription.renewal_4d"
+    return None
+
+
+def emit_renewal_app_event(user: BotUser, reminder_text: str) -> None:
+    """Inbox + FCM при наступлении системного напоминания о продлении."""
+    ntype = renewal_ntype_from_text(reminder_text)
+    if not ntype:
+        return
+    body = strip_renewal_marker(reminder_text) or reminder_text
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            user,
+            ntype=ntype,
+            title="Продление подписки",
+            body=body[:500],
+            entity_type="subscription",
+        )
+    except Exception:
+        logger.exception("emit renewal app event failed user=%s", getattr(user, "id", None))
+
+
 def _until_label(until) -> str:
     return timezone.localtime(until).strftime("%d.%m.%Y %H:%M")
 
