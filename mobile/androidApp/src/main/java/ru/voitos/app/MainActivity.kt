@@ -6,13 +6,26 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import ru.voitos.app.api.VoitosApiClient
+import ru.voitos.app.debug.CrashFileLogger
 import ru.voitos.app.nav.DeepLinks
 import ru.voitos.app.push.DevPushTokenProvider
 import ru.voitos.app.ui.CabinetScreen
@@ -50,174 +63,209 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashFileLogger.install(this)
+
         session = SessionStore(this)
         client = VoitosApiClient(baseUrl = session.baseUrl)
         client.accessToken = session.accessToken
 
+        val lastCrash = CrashFileLogger.consumeLastCrash(this)
         val initial = resolveDeepLink(intent?.data) ?: if (session.isLoggedIn()) {
             Screen.Main
         } else {
             Screen.Login
         }
 
-        setContent {
-            var screen by remember { mutableStateOf<Screen>(initial) }
-            var tab by remember { mutableStateOf(MainTab.Collections) }
-            var playSplash by remember {
-                mutableStateOf(session.isLoggedIn() && session.hasLaunchedBefore)
-            }
-            val scope = rememberCoroutineScope()
+        try {
+            setContent {
+                var screen by remember { mutableStateOf<Screen>(initial) }
+                var tab by remember { mutableStateOf(MainTab.Collections) }
+                // Splash только после первого успешного запуска — меньше риска ANR на холодном старте Huawei.
+                var playSplash by remember {
+                    mutableStateOf(false)
+                }
+                var crashText by remember { mutableStateOf(lastCrash) }
+                val scope = rememberCoroutineScope()
 
-            VoitosTheme {
-                VoitosBackground {
-                    when (val s = screen) {
-                        Screen.Login -> LoginScreen(
-                            initialBaseUrl = session.baseUrl,
-                            initialPhone = session.lastPhone,
-                            initialDebugCode = session.lastDebugCode,
-                            onLoggedIn = { token, name, baseUrl, phone ->
-                                session.baseUrl = baseUrl
-                                session.lastPhone = phone
-                                session.accessToken = token
-                                session.displayName = name
-                                client = VoitosApiClient(baseUrl = baseUrl).also {
-                                    it.accessToken = token
-                                }
-                                scope.launch { registerDevPushToken() }
-                                playSplash = session.hasLaunchedBefore
-                                tab = MainTab.Collections
-                                screen = Screen.Main
-                            },
-                            onDebugPrefs = { url, phone, dbg ->
-                                session.baseUrl = url
-                                session.lastPhone = phone
-                                if (dbg.isNotBlank()) session.lastDebugCode = dbg
-                            },
-                        )
-
-                        Screen.Main -> MainShell(
-                            selected = tab,
-                            onSelect = { tab = it },
-                            playLogoSplash = playSplash,
-                            onSplashFinished = {
-                                playSplash = false
-                                if (!session.hasLaunchedBefore) {
-                                    session.hasLaunchedBefore = true
-                                }
-                            },
-                        ) {
-                            when (tab) {
-                                MainTab.Collections -> CollectionsScreen(
-                                    client = client,
-                                    onOpen = { id -> screen = Screen.CollectionDetail(id) },
-                                    onBack = null,
-                                )
-                                MainTab.WorkRequests -> WorkRequestsScreen(
-                                    client = client,
-                                    onConfirm = { id -> screen = Screen.Confirm(id) },
-                                    onBack = null,
-                                )
-                                MainTab.CallMaster -> NewWorkRequestScreen(
-                                    client = client,
-                                    onCreated = { id, needsPhotos ->
-                                        screen = if (needsPhotos) {
-                                            Screen.WorkRequestPhotos(id)
-                                        } else {
-                                            tab = MainTab.WorkRequests
-                                            Screen.Main
-                                        }
-                                    },
-                                    onBack = null,
-                                )
-                                MainTab.Cabinet -> CabinetScreen(
-                                    client = client,
-                                    onOpenSubscription = { screen = Screen.Subscription },
-                                    onOpenOnboarding = { screen = Screen.Onboarding },
-                                    onRegisterExecutor = { screen = Screen.ExecutorRegister },
-                                    onOpenExecutorOffers = { screen = Screen.ExecutorOffers },
-                                    onLogout = {
-                                        session.clearSession()
-                                        client.accessToken = null
-                                        screen = Screen.Login
-                                    },
-                                )
-                            }
+                VoitosTheme {
+                    VoitosBackground {
+                        if (crashText != null) {
+                            AlertDialog(
+                                onDismissRequest = { crashText = null },
+                                title = { Text("Прошлый краш (без logcat)") },
+                                text = {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 360.dp)
+                                            .verticalScroll(rememberScrollState()),
+                                    ) {
+                                        Text(
+                                            text = crashText.orEmpty(),
+                                            fontSize = 11.sp,
+                                        )
+                                    }
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = { crashText = null }) {
+                                        Text("Закрыть")
+                                    }
+                                },
+                            )
                         }
 
-                        Screen.ExecutorRegister -> ExecutorRegisterScreen(
-                            client = client,
-                            onDone = {
-                                tab = MainTab.Cabinet
-                                screen = Screen.Main
-                            },
-                            onBack = {
-                                tab = MainTab.Cabinet
-                                screen = Screen.Main
-                            },
-                        )
+                        when (val s = screen) {
+                            Screen.Login -> LoginScreen(
+                                initialBaseUrl = session.baseUrl,
+                                initialPhone = session.lastPhone,
+                                initialDebugCode = session.lastDebugCode,
+                                onLoggedIn = { token, name, baseUrl, phone ->
+                                    session.baseUrl = baseUrl
+                                    session.lastPhone = phone
+                                    session.accessToken = token
+                                    session.displayName = name
+                                    client = VoitosApiClient(baseUrl = baseUrl).also {
+                                        it.accessToken = token
+                                    }
+                                    scope.launch { registerDevPushToken() }
+                                    playSplash = session.hasLaunchedBefore
+                                    tab = MainTab.Collections
+                                    screen = Screen.Main
+                                },
+                                onDebugPrefs = { url, phone, dbg ->
+                                    session.baseUrl = url
+                                    session.lastPhone = phone
+                                    if (dbg.isNotBlank()) session.lastDebugCode = dbg
+                                },
+                            )
 
-                        Screen.ExecutorOffers -> ExecutorOffersScreen(
-                            client = client,
-                            onBack = {
-                                tab = MainTab.Cabinet
-                                screen = Screen.Main
-                            },
-                        )
+                            Screen.Main -> MainShell(
+                                selected = tab,
+                                onSelect = { tab = it },
+                                playLogoSplash = playSplash,
+                                onSplashFinished = {
+                                    playSplash = false
+                                    if (!session.hasLaunchedBefore) {
+                                        session.hasLaunchedBefore = true
+                                    }
+                                },
+                            ) {
+                                when (tab) {
+                                    MainTab.Collections -> CollectionsScreen(
+                                        client = client,
+                                        onOpen = { id -> screen = Screen.CollectionDetail(id) },
+                                        onBack = null,
+                                    )
+                                    MainTab.WorkRequests -> WorkRequestsScreen(
+                                        client = client,
+                                        onConfirm = { id -> screen = Screen.Confirm(id) },
+                                        onBack = null,
+                                    )
+                                    MainTab.CallMaster -> NewWorkRequestScreen(
+                                        client = client,
+                                        onCreated = { id, needsPhotos ->
+                                            screen = if (needsPhotos) {
+                                                Screen.WorkRequestPhotos(id)
+                                            } else {
+                                                tab = MainTab.WorkRequests
+                                                Screen.Main
+                                            }
+                                        },
+                                        onBack = null,
+                                    )
+                                    MainTab.Cabinet -> CabinetScreen(
+                                        client = client,
+                                        onOpenSubscription = { screen = Screen.Subscription },
+                                        onOpenOnboarding = { screen = Screen.Onboarding },
+                                        onRegisterExecutor = { screen = Screen.ExecutorRegister },
+                                        onOpenExecutorOffers = { screen = Screen.ExecutorOffers },
+                                        onLogout = {
+                                            session.clearSession()
+                                            client.accessToken = null
+                                            screen = Screen.Login
+                                        },
+                                    )
+                                }
+                            }
 
-                        is Screen.CollectionDetail -> CollectionDetailScreen(
-                            client = client,
-                            collectionId = s.id,
-                            onBack = {
-                                tab = MainTab.Collections
-                                screen = Screen.Main
-                            },
-                        )
+                            Screen.ExecutorRegister -> ExecutorRegisterScreen(
+                                client = client,
+                                onDone = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                                onBack = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
 
-                        is Screen.WorkRequestPhotos -> WorkRequestPhotosScreen(
-                            client = client,
-                            workRequestId = s.id,
-                            onSubmitted = {
-                                tab = MainTab.WorkRequests
-                                screen = Screen.Main
-                            },
-                            onBack = {
-                                tab = MainTab.CallMaster
-                                screen = Screen.Main
-                            },
-                        )
+                            Screen.ExecutorOffers -> ExecutorOffersScreen(
+                                client = client,
+                                onBack = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
 
-                        Screen.Subscription -> SubscriptionScreen(
-                            client = client,
-                            onBack = {
-                                tab = MainTab.Cabinet
-                                screen = Screen.Main
-                            },
-                        )
+                            is Screen.CollectionDetail -> CollectionDetailScreen(
+                                client = client,
+                                collectionId = s.id,
+                                onBack = {
+                                    tab = MainTab.Collections
+                                    screen = Screen.Main
+                                },
+                            )
 
-                        Screen.Onboarding -> OnboardingScreen(
-                            client = client,
-                            apiBaseUrl = session.baseUrl,
-                            onBack = {
-                                tab = MainTab.Cabinet
-                                screen = Screen.Main
-                            },
-                        )
+                            is Screen.WorkRequestPhotos -> WorkRequestPhotosScreen(
+                                client = client,
+                                workRequestId = s.id,
+                                onSubmitted = {
+                                    tab = MainTab.WorkRequests
+                                    screen = Screen.Main
+                                },
+                                onBack = {
+                                    tab = MainTab.CallMaster
+                                    screen = Screen.Main
+                                },
+                            )
 
-                        is Screen.Confirm -> ConfirmAmountScreen(
-                            client = client,
-                            workRequestId = s.id,
-                            onDone = {
-                                tab = MainTab.WorkRequests
-                                screen = Screen.Main
-                            },
-                            onBack = {
-                                tab = MainTab.WorkRequests
-                                screen = Screen.Main
-                            },
-                        )
+                            Screen.Subscription -> SubscriptionScreen(
+                                client = client,
+                                onBack = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
+
+                            Screen.Onboarding -> OnboardingScreen(
+                                client = client,
+                                apiBaseUrl = session.baseUrl,
+                                onBack = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
+
+                            is Screen.Confirm -> ConfirmAmountScreen(
+                                client = client,
+                                workRequestId = s.id,
+                                onDone = {
+                                    tab = MainTab.WorkRequests
+                                    screen = Screen.Main
+                                },
+                                onBack = {
+                                    tab = MainTab.WorkRequests
+                                    screen = Screen.Main
+                                },
+                            )
+                        }
                     }
                 }
             }
+        } catch (t: Throwable) {
+            runCatching { CrashFileLogger.install(this) }
+            throw t
         }
     }
 

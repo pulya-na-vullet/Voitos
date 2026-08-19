@@ -16,11 +16,18 @@ import androidx.compose.ui.unit.dp
 import ru.voitos.app.ui.theme.VoitosColors
 
 fun isVpnActive(context: Context): Boolean {
-    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        ?: return false
-    return cm.allNetworks.any { network ->
-        val caps = cm.getNetworkCapabilities(network) ?: return@any false
-        caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    return try {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        // Без ACCESS_NETWORK_STATE на части OEM (Huawei) — SecurityException → краш на старте.
+        cm.allNetworks.any { network ->
+            val caps = cm.getNetworkCapabilities(network) ?: return@any false
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        }
+    } catch (_: SecurityException) {
+        false
+    } catch (_: Exception) {
+        false
     }
 }
 

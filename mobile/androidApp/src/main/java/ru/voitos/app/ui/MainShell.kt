@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -185,7 +184,7 @@ private fun BottomNavBar(
         )
         NavItem(
             label = "Личный\nкабинет",
-            iconRes = R.drawable.voitos_logo_mono,
+            iconRes = R.drawable.voitos_logo_nav,
             selected = selected == MainTab.Cabinet,
             onClick = { onSelect(MainTab.Cabinet) },
             modifier = Modifier.weight(1f),
@@ -270,37 +269,45 @@ private fun LogoCollapseSplash(
 ) {
     val progress = remember { Animatable(0f) }
     val density = LocalDensity.current
-    val startSizePx = with(density) { 220.dp.toPx() }
+    val startSizePx = with(density) { 160.dp.toPx() }
     val fallbackEnd = with(density) { 28.dp.toPx() }
-    val fallbackEndCx = screenWidthPx * 0.875f
-    val fallbackEndCy = screenHeightPx - with(density) { 40.dp.toPx() }
+    val safeW = screenWidthPx.coerceAtLeast(1f)
+    val safeH = screenHeightPx.coerceAtLeast(1f)
+    val fallbackEndCx = safeW * 0.875f
+    val fallbackEndCy = safeH - with(density) { 40.dp.toPx() }
     val boundsUpdated = rememberUpdatedState(targetBounds)
+    val finishOnce = rememberUpdatedState(onFinished)
 
     var endSizePx by remember { mutableStateOf(fallbackEnd) }
     var endCx by remember { mutableStateOf(fallbackEndCx) }
     var endCy by remember { mutableStateOf(fallbackEndCy) }
 
     LaunchedEffect(Unit) {
-        delay(1000)
-        val bounds = withTimeoutOrNull(1500) {
-            snapshotFlow { boundsUpdated.value }.filterNotNull().first()
+        try {
+            delay(800)
+            val bounds = withTimeoutOrNull(800) {
+                snapshotFlow { boundsUpdated.value }.filterNotNull().first()
+            }
+            if (bounds != null && bounds.width > 1f && bounds.height > 1f) {
+                endSizePx = minOf(bounds.width, bounds.height).coerceAtLeast(1f)
+                endCx = bounds.center.x
+                endCy = bounds.center.y
+            }
+            progress.animateTo(
+                1f,
+                animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+            )
+        } catch (_: Exception) {
+            // Huawei / OEM: любая ошибка анимации не должна держать UI.
+        } finally {
+            finishOnce.value()
         }
-        if (bounds != null) {
-            endSizePx = minOf(bounds.width, bounds.height).coerceAtLeast(1f)
-            endCx = bounds.center.x
-            endCy = bounds.center.y
-        }
-        progress.animateTo(
-            1f,
-            animationSpec = tween(durationMillis = 750, easing = FastOutSlowInEasing),
-        )
-        onFinished()
     }
 
     val t = progress.value
-    val sizePx = startSizePx + (endSizePx - startSizePx) * t
-    val cx = screenWidthPx / 2f + (endCx - screenWidthPx / 2f) * t
-    val cy = screenHeightPx / 2f + (endCy - screenHeightPx / 2f) * t
+    val sizePx = (startSizePx + (endSizePx - startSizePx) * t).coerceAtLeast(1f)
+    val cx = safeW / 2f + (endCx - safeW / 2f) * t
+    val cy = safeH / 2f + (endCy - safeH / 2f) * t
     val bgAlpha = (1f - t).coerceIn(0f, 1f)
 
     Box(
