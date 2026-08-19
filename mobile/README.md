@@ -5,8 +5,9 @@
 ## Что уже есть
 
 - `shared/` — модели, `VoitosApiClient` (Ktor), `DeepLinks`
-- `androidApp/` — skeleton Compose + deep link `voitos://app/...`
-- Inbox на сервере: мастер назначен, нет мастера, confirm amount, сбор предложен
+- `androidApp/` — Login, Inbox, Сборы (+detail), Заявки, Вызов мастера, Подписка, Confirm
+- После логина: `POST /devices` с dev push-токеном (до Firebase SDK)
+- Inbox на сервере: мастер, сбор, confirm, чек approve/reject, renewal, unpaid remind
 
 ## Документы
 
@@ -25,6 +26,7 @@ cd mobile
 
 1. Login (phone OTP)  
 2. Inbox / Home  
-3. Collections  
-4. Work request detail + confirm amount  
-5. Subscription / Onboarding  
+3. Collections + detail  
+4. New work request / confirm amount  
+5. Subscription  
+6. Onboarding comics (API готов) 

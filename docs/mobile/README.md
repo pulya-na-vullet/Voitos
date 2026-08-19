@@ -25,3 +25,4 @@
 - События → `api.emit` → inbox (`AppNotification`) → `api.push.dispatch_push`.
 - Токен устройства: `POST /api/v1/devices` (`push_token`, `platform`).
 - Без `FCM_SERVER_KEY` и с `FCM_DRY_RUN=true` — только лог (удобно для тестов).
+- Хуки: сбор offered/remind, мастер assigned, confirm amount, чек approve/reject, renewal −4д/−2д/−2ч.
