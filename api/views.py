@@ -21,7 +21,15 @@ def health(_request):
     return json_response({"ok": True, "service": "voitos-api-v1"})
 
 
-def _me_payload(user) -> dict:
+def _me_payload(user, request=None) -> dict:
+    avatar_url = ""
+    if request is not None and getattr(user, "avatar", None):
+        avatar_url = _absolute_media_url(request, user.avatar)
+    elif getattr(user, "avatar", None):
+        try:
+            avatar_url = user.avatar.url or ""
+        except Exception:
+            avatar_url = ""
     return {
         "id": user.id,
         "real_name": user.real_name or "",
@@ -32,6 +40,7 @@ def _me_payload(user) -> dict:
         "onboarding_completed": bool(
             user.onboarding_reward_granted or user.onboarding_completed_at
         ),
+        "avatar_url": avatar_url,
     }
 
 
@@ -55,7 +64,33 @@ def me(request):
             if field in data and data[field] is not None:
                 setattr(user, field, str(data[field]).strip()[:255 if field != "address" else 2000])
         user.save()
-    return json_response(_me_payload(user))
+    return json_response(_me_payload(user, request))
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def me_avatar(request):
+    """Загрузка аватара 500×500."""
+    from api.media import decode_base64_payload
+    from services.group_chat import save_user_avatar
+
+    data = parse_json(request)
+    raw_b64 = (data.get("content_base64") or data.get("image_base64") or "").strip()
+    filename = (data.get("filename") or "avatar.jpg").strip()[:120] or "avatar.jpg"
+    image_bytes = decode_base64_payload(raw_b64)
+    if not image_bytes:
+        return json_response(
+            {"error": "content_base64_required", "detail": "Пришлите изображение."},
+            status=400,
+        )
+    try:
+        save_user_avatar(request.bot_user, image_bytes, filename=filename)
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    except Exception:
+        return json_response({"error": "upload_failed", "detail": "Не удалось сохранить аватар."}, status=500)
+    request.bot_user.refresh_from_db()
+    return json_response({"ok": True, **_me_payload(request.bot_user, request)})
 
 
 @api_login_required
@@ -997,3 +1032,54 @@ def work_request_confirm_amount(request, pk: int):
     reply = _apply_client_confirmation(wr, Decimal(money), pending)
     wr.refresh_from_db()
     return json_response({"ok": True, "message": reply, "status": wr.status})
+
+
+@api_login_required
+@require_GET
+def groups_list(request):
+    """Группы, в которых состоит житель (для чата)."""
+    from services.group_chat import group_to_dict, groups_for_user
+
+    items = [group_to_dict(g) for g in groups_for_user(request.bot_user)]
+    return json_response({"items": items})
+
+
+@api_login_required
+@require_http_methods(["GET", "POST"])
+def group_messages(request, group_id: int):
+    """История и отправка сообщений в чат группы."""
+    from services.group_chat import list_messages, post_message, require_group_member
+
+    try:
+        group = require_group_member(request.bot_user, group_id)
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=403)
+
+    if request.method == "GET":
+        after_raw = (request.GET.get("after_id") or "").strip()
+        before_raw = (request.GET.get("before_id") or "").strip()
+        after_id = int(after_raw) if after_raw.isdigit() else None
+        before_id = int(before_raw) if before_raw.isdigit() else None
+        try:
+            items = list_messages(
+                request.bot_user,
+                group,
+                after_id=after_id,
+                before_id=before_id,
+                request=request,
+            )
+        except Exception:
+            return json_response({"items": []})
+        return json_response({"group": {"id": group.id, "name": group.name or ""}, "items": items})
+
+    data = parse_json(request)
+    try:
+        item = post_message(
+            request.bot_user,
+            group,
+            str(data.get("text") or ""),
+            request=request,
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    return json_response({"ok": True, "message": item}, status=201)

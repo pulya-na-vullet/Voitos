@@ -443,6 +443,13 @@ class BotUser(models.Model):
         default=False,
         help_text="После 5/5 историй подписка продлевается на 1 месяц один раз.",
     )
+    avatar = models.ImageField(
+        "Аватар",
+        upload_to="avatars/%Y/%m/",
+        blank=True,
+        null=True,
+        help_text="Квадрат 500×500 (приложение/сервер приводят к размеру).",
+    )
     first_seen_at = models.DateTimeField(auto_now_add=True)
     last_seen_at = models.DateTimeField(auto_now=True)
 
@@ -798,6 +805,37 @@ class ServiceGroup(models.Model):
     @property
     def member_count(self) -> int:
         return self.members.count()
+
+
+class GroupChatMessage(models.Model):
+    """Сообщение в чате соседской ServiceGroup (приложение)."""
+
+    group = models.ForeignKey(
+        ServiceGroup,
+        on_delete=models.CASCADE,
+        related_name="chat_messages",
+        verbose_name="Группа",
+    )
+    author = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="group_chat_messages",
+        verbose_name="Автор",
+    )
+    text = models.TextField("Текст", max_length=4000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Сообщение группового чата"
+        verbose_name_plural = "Сообщения группового чата"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["group", "-created_at"]),
+            models.Index(fields=["group", "id"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"#{self.pk} {self.group_id}: {self.text[:60]}"
 
 
 class WishPeriodStatus(models.TextChoices):
