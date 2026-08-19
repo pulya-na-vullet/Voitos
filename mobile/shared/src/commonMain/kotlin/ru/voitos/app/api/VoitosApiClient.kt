@@ -38,6 +38,7 @@ import ru.voitos.app.model.ReceiptList
 import ru.voitos.app.model.ReceiptUploadResult
 import ru.voitos.app.model.SubscriptionInfo
 import ru.voitos.app.model.WorkRequestCancelResult
+import ru.voitos.app.model.WorkRequestConfirmSlotResult
 import ru.voitos.app.model.WorkRequestCreated
 import ru.voitos.app.model.WorkRequestList
 import ru.voitos.app.model.WorkRequestSubmitResult
@@ -180,6 +181,16 @@ class VoitosApiClient(
             throw e
         }
     }
+
+    suspend fun confirmWorkRequestSlot(
+        workRequestId: Int,
+        slot: String = "",
+    ): WorkRequestConfirmSlotResult =
+        http.post("$baseUrl/work-requests/$workRequestId/confirm-slot") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("slot", slot) })
+        }.body()
 
     /**
      * Старый бэкенд без /me/executor отдаёт HTML 404 → NoTransformationFoundException.

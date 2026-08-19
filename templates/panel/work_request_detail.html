@@ -157,6 +157,27 @@
     <input type="hidden" name="action" value="dispatch">
     <button class="btn secondary" type="submit">Найти мастера</button>
   </form>
+
+  {% if can_reassign %}
+  <form method="post" style="margin-top:12px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--bg-soft);">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="reassign">
+    <p style="margin:0 0 8px;"><strong>Повторно назначить исполнителя</strong></p>
+    <p class="muted" style="margin:0 0 10px;">Сбрасывает текущее назначение и отправляет предложение выбранному мастеру (или автоподбор). Мастера, которые уже отказались, назначить нельзя.</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <select name="contractor_id" style="min-width:260px; padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text);">
+        <option value="">Автоподбор по БД</option>
+        {% for c in reassign_candidates %}
+          <option value="{{ c.id }}" {% if c.declined %}disabled{% endif %}>
+            {{ c.label }}{% if c.declined %} — уже отказался{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+      <button class="btn" type="submit">Назначить</button>
+    </div>
+  </form>
+  {% endif %}
+
   {% if panel_is_manager %}
   <p class="muted" style="margin-top:8px;">Принять комиссию и закрыть как «Выполнена» может только администратор.</p>
   {% endif %}
