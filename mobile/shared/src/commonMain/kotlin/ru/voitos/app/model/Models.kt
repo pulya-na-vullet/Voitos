@@ -124,6 +124,33 @@ data class WorkRequestCreated(
     val description: String = "",
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("needs_photos") val needsPhotos: Boolean = false,
+    @SerialName("photo_count") val photoCount: Int = 0,
+)
+
+@Serializable
+data class PhotoUploadResult(
+    val ok: Boolean = true,
+    @SerialName("photo_id") val photoId: Int = 0,
+    @SerialName("photo_count") val photoCount: Int = 0,
+    val status: String = "",
+)
+
+@Serializable
+data class WorkRequestSubmitResult(
+    val ok: Boolean = true,
+    val id: Int = 0,
+    val status: String = "",
+    @SerialName("photo_count") val photoCount: Int = 0,
+    val dispatched: Boolean = false,
+)
+
+@Serializable
+data class OnboardingStep(
+    val code: String,
+    val title: String = "",
+    val caption: String = "",
+    val done: Boolean = false,
+    @SerialName("image_url") val imageUrl: String = "",
 )
 
 @Serializable
@@ -132,4 +159,6 @@ data class OnboardingProgress(
     val total: Int = 5,
     val completed: Boolean = false,
     @SerialName("reward_granted") val rewardGranted: Boolean = false,
+    @SerialName("completed_at") val completedAt: String? = null,
+    val steps: List<OnboardingStep> = emptyList(),
 )

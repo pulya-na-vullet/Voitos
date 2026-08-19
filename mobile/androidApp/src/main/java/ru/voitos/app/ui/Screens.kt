@@ -1,5 +1,8 @@
 package ru.voitos.app.ui
 
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,19 +23,23 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.AppNotification
 import ru.voitos.app.model.CollectionBrief
+import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.WorkRequestBrief
 import ru.voitos.app.nav.DeepLinks
+import ru.voitos.app.VoitosApi
 
 @Composable
 fun LoginScreen(
@@ -131,6 +138,7 @@ fun InboxScreen(
     onOpenWorkRequests: () -> Unit,
     onOpenSubscription: () -> Unit,
     onNewWorkRequest: () -> Unit,
+    onOpenOnboarding: () -> Unit,
     onLogout: () -> Unit,
 ) {
     var items by remember { mutableStateOf<List<AppNotification>>(emptyList()) }
@@ -161,6 +169,7 @@ fun InboxScreen(
         TextButton(onClick = onOpenWorkRequests) { Text("Заявки") }
         TextButton(onClick = onNewWorkRequest) { Text("Вызвать мастера") }
         TextButton(onClick = onOpenSubscription) { Text("Подписка") }
+        TextButton(onClick = onOpenOnboarding) { Text("Обучение") }
         TextButton(onClick = onLogout) { Text("Выйти") }
         Spacer(Modifier.height(8.dp))
         if (loading) CircularProgressIndicator()
@@ -392,7 +401,7 @@ fun SubscriptionScreen(
 @Composable
 fun NewWorkRequestScreen(
     client: VoitosApiClient,
-    onCreated: (Int) -> Unit,
+    onCreated: (id: Int, needsPhotos: Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     var roles by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorRole>>(emptyList()) }
@@ -452,11 +461,11 @@ fun NewWorkRequestScreen(
                     try {
                         val created = client.createWorkRequest(rid, description)
                         message = if (created.needsPhotos) {
-                            "Заявка #${created.id}: нужны фото работ (через бота пока)"
+                            "Заявка #${created.id}: добавьте фото"
                         } else {
                             "Заявка #${created.id} отправлена мастерам"
                         }
-                        onCreated(created.id)
+                        onCreated(created.id, created.needsPhotos)
                     } catch (e: Exception) {
                         error = e.message
                     } finally {
@@ -504,4 +513,194 @@ fun CollectionDetailScreen(
             }
         }
     }
+}
+
+@Composable
+fun WorkRequestPhotosScreen(
+    client: VoitosApiClient,
+    workRequestId: Int,
+    onSubmitted: () -> Unit,
+    onBack: () -> Unit,
+) {
+    var photoCount by remember { mutableIntStateOf(0) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            loading = true
+            error = null
+            try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("Не удалось прочитать файл")
+                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "photo.jpg"
+                val res = client.addWorkRequestPhoto(workRequestId, b64, name)
+                photoCount = res.photoCount
+                message = "Фото добавлено ($photoCount)"
+            } catch (e: Exception) {
+                error = e.message
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("← Назад") }
+        Text("Фото заявки #$workRequestId", style = MaterialTheme.typography.headlineSmall)
+        Text("Нужно хотя бы одно фото места работ.")
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = { picker.launch("image/*") },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading,
+        ) { Text("Выбрать фото") }
+        Button(
+            onClick = {
+                scope.launch {
+                    loading = true
+                    error = null
+                    try {
+                        // 1×1 JPEG для быстрой проверки API без галереи
+                        val tiny =
+                            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
+                        val res = client.addWorkRequestPhoto(workRequestId, tiny, "dev.jpg")
+                        photoCount = res.photoCount
+                        message = "Dev-фото добавлено ($photoCount)"
+                    } catch (e: Exception) {
+                        error = e.message
+                    } finally {
+                        loading = false
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading,
+        ) { Text("Добавить тестовое фото") }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = {
+                scope.launch {
+                    loading = true
+                    error = null
+                    try {
+                        client.submitWorkRequest(workRequestId)
+                        message = "Заявка отправлена мастерам"
+                        onSubmitted()
+                    } catch (e: Exception) {
+                        error = e.message
+                    } finally {
+                        loading = false
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading && photoCount > 0,
+        ) { Text("Готово — отправить") }
+        if (loading) CircularProgressIndicator()
+        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+fun OnboardingScreen(
+    client: VoitosApiClient,
+    apiBaseUrl: String = VoitosApi.DEFAULT_BASE_URL,
+    onBack: () -> Unit,
+) {
+    var progress by remember { mutableStateOf<OnboardingProgress?>(null) }
+    var index by remember { mutableIntStateOf(0) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        try {
+            progress = client.onboarding()
+            val firstTodo = progress?.steps?.indexOfFirst { !it.done } ?: 0
+            index = if (firstTodo >= 0) firstTodo else 0
+        } catch (e: Exception) {
+            error = e.message
+        }
+    }
+
+    val steps = progress?.steps.orEmpty()
+    val step = steps.getOrNull(index)
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("← Назад") }
+        Text("Обучение", style = MaterialTheme.typography.headlineSmall)
+        progress?.let {
+            Text("${it.doneCount} / ${it.total}")
+            if (it.rewardGranted) {
+                Text("Подарок: месяц подписки начислен", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (step == null) {
+            Text("Загрузка…")
+        } else {
+            Text(step.title, style = MaterialTheme.typography.titleLarge)
+            Text(step.caption)
+            Text(
+                "Картинка: ${staticUrl(apiBaseUrl, step.imageUrl)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (step.done) {
+                Text("✓ просмотрено", color = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        loading = true
+                        error = null
+                        try {
+                            progress = client.completeOnboardingStep(step.code)
+                            val next = (index + 1).coerceAtMost((progress?.steps?.size ?: 1) - 1)
+                            index = next
+                        } catch (e: Exception) {
+                            error = e.message
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading && !step.done,
+            ) { Text(if (step.done) "Уже пройдено" else "Понял · далее") }
+            RowNav(
+                canPrev = index > 0,
+                canNext = index < steps.lastIndex,
+                onPrev = { index -= 1 },
+                onNext = { index += 1 },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RowNav(
+    canPrev: Boolean,
+    canNext: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Column {
+        if (canPrev) TextButton(onClick = onPrev) { Text("← Предыдущий") }
+        if (canNext) TextButton(onClick = onNext) { Text("Следующий →") }
+    }
+}
+
+private fun staticUrl(apiBase: String, path: String): String {
+    if (path.startsWith("http")) return path
+    val root = apiBase.removeSuffix("/api/v1").trimEnd('/')
+    return root + path
 }

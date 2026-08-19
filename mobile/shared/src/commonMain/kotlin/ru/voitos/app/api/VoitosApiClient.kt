@@ -22,9 +22,11 @@ import ru.voitos.app.model.ExecutorRoleList
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.NotificationList
 import ru.voitos.app.model.OnboardingProgress
+import ru.voitos.app.model.PhotoUploadResult
 import ru.voitos.app.model.SubscriptionInfo
 import ru.voitos.app.model.WorkRequestCreated
 import ru.voitos.app.model.WorkRequestList
+import ru.voitos.app.model.WorkRequestSubmitResult
 
 /**
  * Thin Ktor client for /api/v1. Business rules stay on Django.
@@ -89,7 +91,37 @@ class VoitosApiClient(
             )
         }.body()
 
+    suspend fun addWorkRequestPhoto(
+        workRequestId: Int,
+        contentBase64: String,
+        filename: String = "photo.jpg",
+    ): PhotoUploadResult =
+        http.post("$baseUrl/work-requests/$workRequestId/photos") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("content_base64", contentBase64)
+                    put("filename", filename)
+                },
+            )
+        }.body()
+
+    suspend fun submitWorkRequest(workRequestId: Int): WorkRequestSubmitResult =
+        http.post("$baseUrl/work-requests/$workRequestId/submit") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {})
+        }.body()
+
     suspend fun onboarding(): OnboardingProgress = authedGet("/onboarding")
+
+    suspend fun completeOnboardingStep(code: String): OnboardingProgress =
+        http.post("$baseUrl/onboarding/steps/$code/complete") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {})
+        }.body()
 
     suspend fun confirmAmount(workRequestId: Int, confirmed: Boolean, amount: Double? = null) {
         http.post("$baseUrl/work-requests/$workRequestId/confirm-amount") {

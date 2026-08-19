@@ -146,6 +146,9 @@ def work_request_detail(request, pk: int):
     if not wr:
         return json_response({"error": "not_found"}, status=404)
     contractor = wr.assigned_contractor
+    requires_photos = bool(
+        getattr(wr.role, "requires_work_photos", True) if wr.role_id else True
+    )
     return json_response(
         {
             "id": wr.id,
@@ -158,6 +161,8 @@ def work_request_detail(request, pk: int):
             "proposed_slots": wr.proposed_slots or [],
             "needs_confirm_amount": wr.status == "awaiting_client",
             "needs_rating": False,
+            "needs_photos": requires_photos and wr.status == "draft",
+            "photo_count": wr.photos.count(),
         }
     )
 
@@ -168,6 +173,8 @@ def onboarding(request):
     prog = panel_progress(request.bot_user)
     for step in prog["steps"]:
         step["image_url"] = f"/static/{step['image']}"
+    if prog.get("completed_at"):
+        prog["completed_at"] = prog["completed_at"].isoformat()
     return json_response(prog)
 
 
@@ -194,6 +201,8 @@ def onboarding_complete_step(request, code: str):
     prog = panel_progress(user)
     for step in prog["steps"]:
         step["image_url"] = f"/static/{step['image']}"
+    if prog.get("completed_at"):
+        prog["completed_at"] = prog["completed_at"].isoformat()
     return json_response(prog)
 
 
@@ -336,8 +345,126 @@ def work_requests_create(request):
             "description": wr.description,
             "created_at": wr.created_at.isoformat(),
             "needs_photos": requires_photos,
+            "photo_count": 0,
         },
         status=201,
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_add_photo(request, pk: int):
+    """Добавить фото к черновику заявки (base64 JSON — проще для KMP)."""
+    import base64
+
+    from django.core.files.base import ContentFile
+
+    from database.models import WorkRequestPhoto, WorkRequestStatus
+
+    wr = WorkRequest.objects.filter(pk=pk, user=request.bot_user).first()
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    if wr.status not in {WorkRequestStatus.DRAFT, WorkRequestStatus.PENDING}:
+        return json_response({"error": "not_editable"}, status=400)
+
+    data = parse_json(request)
+    raw_b64 = (data.get("content_base64") or data.get("image_base64") or "").strip()
+    filename = (data.get("filename") or "photo.jpg").strip()[:120] or "photo.jpg"
+    if not raw_b64:
+        return json_response({"error": "content_base64_required"}, status=400)
+    # data:image/jpeg;base64,... 
+    if "," in raw_b64 and raw_b64.lower().startswith("data:"):
+        raw_b64 = raw_b64.split(",", 1)[1]
+    try:
+        image_bytes = base64.b64decode(raw_b64, validate=False)
+    except Exception:
+        return json_response({"error": "invalid_base64"}, status=400)
+    if not image_bytes or len(image_bytes) > 12 * 1024 * 1024:
+        return json_response({"error": "invalid_image"}, status=400)
+
+    photo = WorkRequestPhoto(request=wr)
+    photo.image.save(filename, ContentFile(image_bytes), save=True)
+    return json_response(
+        {
+            "ok": True,
+            "photo_id": photo.id,
+            "photo_count": wr.photos.count(),
+            "status": wr.status,
+        },
+        status=201,
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_submit(request, pk: int):
+    """Черновик → pending + автоподбор (как «готово» в боте)."""
+    from database.models import ActivityKind, ActivityLog, WorkRequestStatus
+
+    wr = (
+        WorkRequest.objects.select_related("role")
+        .filter(pk=pk, user=request.bot_user)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    if wr.status not in {WorkRequestStatus.DRAFT, WorkRequestStatus.PENDING}:
+        return json_response({"error": "already_submitted"}, status=400)
+
+    requires_photos = bool(getattr(wr.role, "requires_work_photos", True))
+    photo_n = wr.photos.count()
+    if requires_photos and photo_n < 1:
+        return json_response({"error": "photos_required"}, status=400)
+
+    if wr.status == WorkRequestStatus.DRAFT:
+        wr.status = WorkRequestStatus.PENDING
+        wr.save(update_fields=["status", "updated_at"])
+
+    ActivityLog.objects.create(
+        user=request.bot_user,
+        kind=ActivityKind.WORK_REQUEST,
+        title=f"Заявка на исполнителя: {wr.role.name}",
+        detail=wr.description[:500],
+        meta={"work_request_id": wr.id, "role": wr.role.code, "via": "api"},
+    )
+    try:
+        from panel.admin_tasks import upsert_task
+        from database.models import AdminTaskKind
+
+        upsert_task(
+            kind=AdminTaskKind.WORK_REQUEST,
+            title=f"Заявка: {wr.role.name} — {request.bot_user}",
+            description=wr.description[:500],
+            user=request.bot_user,
+            action_url=f"/panel/work-requests/{wr.id}/",
+            source_model="WorkRequest",
+            source_id=wr.id,
+            priority=25,
+        )
+    except Exception:
+        pass
+
+    dispatched = False
+    try:
+        from services.work_request_dispatch import try_dispatch_request
+
+        if not (wr.client_locality or "").strip():
+            loc = (request.bot_user.locality or "").strip()
+            if loc:
+                wr.client_locality = loc[:255]
+                wr.save(update_fields=["client_locality", "updated_at"])
+        dispatched = bool(try_dispatch_request(wr))
+    except Exception:
+        pass
+
+    return json_response(
+        {
+            "ok": True,
+            "id": wr.id,
+            "status": wr.status,
+            "photo_count": photo_n,
+            "dispatched": dispatched,
+        }
     )
 
 

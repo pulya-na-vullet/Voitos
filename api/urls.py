@@ -21,6 +21,16 @@ urlpatterns = [
         views.work_request_confirm_amount,
         name="work_request_confirm",
     ),
+    path(
+        "work-requests/<int:pk>/photos",
+        views.work_request_add_photo,
+        name="work_request_photos",
+    ),
+    path(
+        "work-requests/<int:pk>/submit",
+        views.work_request_submit,
+        name="work_request_submit",
+    ),
     path("collections", views.collections_list, name="collections"),
     path("collections/<int:pk>", views.collection_detail, name="collection_detail"),
     path("onboarding", views.onboarding, name="onboarding"),

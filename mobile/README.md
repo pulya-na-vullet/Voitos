@@ -4,10 +4,11 @@
 
 ## Что уже есть
 
-- `shared/` — модели, `VoitosApiClient` (Ktor), `DeepLinks`
-- `androidApp/` — Login, Inbox, Сборы (+detail), Заявки, Вызов мастера, Подписка, Confirm
-- После логина: `POST /devices` с dev push-токеном (до Firebase SDK)
-- Inbox на сервере: мастер, сбор, confirm, чек approve/reject, renewal, unpaid remind
+- `shared/` — модели, `VoitosApiClient` (Ktor), `DeepLinks`, `PushTokenProvider`
+- `androidApp/` — Login, Inbox, Сборы, Заявки, фото заявки, Вызов мастера, Подписка, Обучение, Confirm
+- После логина: `POST /devices` через `DevPushTokenProvider` (Firebase — раскомментировать в gradle)
+- Inbox: мастер, сбор, confirm, чек, renewal, unpaid remind
+- API: `POST .../photos` (base64), `POST .../submit`, onboarding steps + caption
 
 ## Документы
 
@@ -22,11 +23,17 @@ cd mobile
 
 Нужен JDK 17+. Полный Gradle sync подтянет Ktor.
 
+## Firebase
+
+1. Добавить `androidApp/google-services.json`
+2. В `androidApp/build.gradle.kts` раскомментировать plugin + firebase-messaging
+3. Реализовать `PushTokenProvider` через `FirebaseMessaging.getInstance().token`
+
 ## Порядок экранов
 
 1. Login (phone OTP)  
 2. Inbox / Home  
 3. Collections + detail  
-4. New work request / confirm amount  
-5. Subscription  
-6. Onboarding comics (API готов) 
+4. New work request → photos → submit  
+5. Subscription / Onboarding comics  
+6. Confirm amount 

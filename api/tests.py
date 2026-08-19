@@ -367,3 +367,60 @@ class AppEmitHookTests(TestCase):
         data = resp.json()
         self.assertTrue(data["needs_photos"])
         self.assertEqual(data["status"], "draft")
+
+    def test_work_request_photo_and_submit(self):
+        import base64
+
+        from database.models import WorkRequest, WorkRequestStatus
+
+        wr = WorkRequest.objects.create(
+            user=self.client_user,
+            role=self.role,
+            description="Нужен электрик срочно",
+            status=WorkRequestStatus.DRAFT,
+            client_locality="Куюки",
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        # minimal jpeg bytes
+        jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkS"
+            "Ew8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJ"
+            "CQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy"
+            "MjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAA"
+            "AAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAA"
+            "AAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQ"
+            "AQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAA"
+            "AAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
+        )
+        b64 = base64.b64encode(jpeg).decode("ascii")
+        with self.settings(MEDIA_ROOT="/tmp/voitos_kmp_wr_photos"):
+            add = self.client.post(
+                f"/api/v1/work-requests/{wr.id}/photos",
+                data=json.dumps({"content_base64": b64, "filename": "t.jpg"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+            )
+            self.assertEqual(add.status_code, 201)
+            self.assertEqual(add.json()["photo_count"], 1)
+            submit = self.client.post(
+                f"/api/v1/work-requests/{wr.id}/submit",
+                data=json.dumps({}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+            )
+        self.assertEqual(submit.status_code, 200)
+        wr.refresh_from_db()
+        self.assertNotEqual(wr.status, WorkRequestStatus.DRAFT)
+        self.assertIn(wr.status, {WorkRequestStatus.PENDING, WorkRequestStatus.OFFERING})
+
+    def test_onboarding_complete_step(self):
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.post(
+            "/api/v1/onboarding/steps/snow/complete",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["done_count"], 1)
+        self.assertTrue(any(s["code"] == "snow" and s["done"] for s in data["steps"]))
+        self.assertIn("caption", data["steps"][0])

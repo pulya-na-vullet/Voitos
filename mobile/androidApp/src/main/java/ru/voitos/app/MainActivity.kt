@@ -15,13 +15,16 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.nav.DeepLinks
+import ru.voitos.app.push.DevPushTokenProvider
 import ru.voitos.app.ui.CollectionDetailScreen
 import ru.voitos.app.ui.CollectionsScreen
 import ru.voitos.app.ui.ConfirmAmountScreen
 import ru.voitos.app.ui.InboxScreen
 import ru.voitos.app.ui.LoginScreen
 import ru.voitos.app.ui.NewWorkRequestScreen
+import ru.voitos.app.ui.OnboardingScreen
 import ru.voitos.app.ui.SubscriptionScreen
+import ru.voitos.app.ui.WorkRequestPhotosScreen
 import ru.voitos.app.ui.WorkRequestsScreen
 
 class MainActivity : ComponentActivity() {
@@ -35,7 +38,9 @@ class MainActivity : ComponentActivity() {
         data class CollectionDetail(val id: Int) : Screen()
         data object WorkRequests : Screen()
         data object NewWorkRequest : Screen()
+        data class WorkRequestPhotos(val id: Int) : Screen()
         data object Subscription : Screen()
+        data object Onboarding : Screen()
         data class Confirm(val id: Int) : Screen()
     }
 
@@ -72,6 +77,7 @@ class MainActivity : ComponentActivity() {
                         onOpenWorkRequests = { screen = Screen.WorkRequests },
                         onOpenSubscription = { screen = Screen.Subscription },
                         onNewWorkRequest = { screen = Screen.NewWorkRequest },
+                        onOpenOnboarding = { screen = Screen.Onboarding },
                         onLogout = {
                             session.clear()
                             client.accessToken = null
@@ -95,11 +101,28 @@ class MainActivity : ComponentActivity() {
                     )
                     Screen.NewWorkRequest -> NewWorkRequestScreen(
                         client = client,
-                        onCreated = { screen = Screen.WorkRequests },
+                        onCreated = { id, needsPhotos ->
+                            screen = if (needsPhotos) {
+                                Screen.WorkRequestPhotos(id)
+                            } else {
+                                Screen.WorkRequests
+                            }
+                        },
                         onBack = { screen = Screen.Inbox },
+                    )
+                    is Screen.WorkRequestPhotos -> WorkRequestPhotosScreen(
+                        client = client,
+                        workRequestId = s.id,
+                        onSubmitted = { screen = Screen.WorkRequests },
+                        onBack = { screen = Screen.NewWorkRequest },
                     )
                     Screen.Subscription -> SubscriptionScreen(
                         client = client,
+                        onBack = { screen = Screen.Inbox },
+                    )
+                    Screen.Onboarding -> OnboardingScreen(
+                        client = client,
+                        apiBaseUrl = session.baseUrl,
                         onBack = { screen = Screen.Inbox },
                     )
                     is Screen.Confirm -> ConfirmAmountScreen(
@@ -119,12 +142,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun registerDevPushToken() {
-        // До Firebase SDK: стабильный dev-токен, чтобы сервер мог dry-run FCM.
-        val token = "dev-${Build.MODEL}-${session.accessToken?.takeLast(8) ?: "anon"}"
+        val provider = DevPushTokenProvider(
+            deviceLabel = Build.MODEL.replace(' ', '-'),
+            sessionSuffix = session.accessToken?.takeLast(8) ?: "anon",
+        )
         try {
-            client.registerDevice(token.take(120), "android")
+            client.registerDevice(provider.currentToken(), "android")
         } catch (_: Exception) {
-            // API может быть недоступен в offline-сборке
         }
     }
 
