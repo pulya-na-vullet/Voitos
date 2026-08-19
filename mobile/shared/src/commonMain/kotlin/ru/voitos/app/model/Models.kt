@@ -85,6 +85,8 @@ data class CollectionBrief(
     @SerialName("payment_phone") val paymentPhone: String = "",
     @SerialName("payment_bank") val paymentBank: String = "",
     @SerialName("payment_status") val paymentStatus: String = "",
+    @SerialName("pending_receipts") val pendingReceipts: Int = 0,
+    @SerialName("rejected_receipts") val rejectedReceipts: Int = 0,
 )
 
 @Serializable
@@ -109,6 +111,7 @@ data class CollectionDetail(
     @SerialName("invite_id") val inviteId: Int = 0,
     @SerialName("can_pay") val canPay: Boolean = false,
     @SerialName("pending_receipts") val pendingReceipts: Int = 0,
+    @SerialName("rejected_receipts") val rejectedReceipts: Int = 0,
     @SerialName("cover_photo_url") val coverPhotoUrl: String = "",
     @SerialName("photo_urls") val photoUrls: List<String> = emptyList(),
     @SerialName("payment_name") val paymentName: String = "",

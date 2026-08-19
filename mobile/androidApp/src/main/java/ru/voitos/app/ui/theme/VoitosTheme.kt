@@ -31,6 +31,11 @@ object VoitosColors {
     val Danger = Color(0xFFF07178)
     val Ok = Color(0xFF7FD99A)
     val Warn = Color(0xFFE6C07B)
+    /** Мягкое «золото» для неоплаченных сборов — заметно, но не кричаще. */
+    val Gold = Color(0xFFD4B45A)
+    val GoldGlow = Color(0x66E8C96A)
+    /** Бордовый для отклонённого чека (не алый/красный). */
+    val Burgundy = Color(0xFFC24B6E)
     val OnAccent = Color(0xFF041018)
 }
 

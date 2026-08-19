@@ -37,8 +37,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -132,11 +135,11 @@ fun CollectionsScreen(
 @Composable
 private fun CollectionListCard(item: CollectionBrief, onClick: () -> Unit) {
     val context = LocalContext.current
-    val statusLabel = when (item.status) {
-        "paid" -> "Оплачено"
-        "declined" -> "Отказ"
-        else -> "Ожидает оплаты"
-    }
+    val status = collectionPaymentStatus(
+        inviteStatus = item.status,
+        pendingReceipts = item.pendingReceipts,
+        rejectedReceipts = item.rejectedReceipts,
+    )
     PanelCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -159,14 +162,21 @@ private fun CollectionListCard(item: CollectionBrief, onClick: () -> Unit) {
         }
         Text(item.title, style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            listOfNotNull(
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val meta = listOfNotNull(
                 item.categoryLabel.ifBlank { item.category }.takeIf { it.isNotBlank() },
                 "${item.amountDue.toInt()} ₽",
-                statusLabel,
-            ).joinToString(" · "),
-            color = VoitosColors.Muted,
-        )
+            ).joinToString(" · ")
+            if (meta.isNotBlank()) {
+                Text(meta, color = VoitosColors.Muted)
+                Text("·", color = VoitosColors.Muted)
+            }
+            CollectionStatusText(status)
+        }
         if (item.description.isNotBlank()) {
             Spacer(modifier = Modifier.height(6.dp))
             Text(
@@ -294,13 +304,23 @@ fun CollectionDetailScreen(
             PanelCard {
                 Text(c.title, style = MaterialTheme.typography.titleLarge, color = VoitosColors.Text)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    listOfNotNull(
-                        c.categoryLabel.ifBlank { c.category }.takeIf { it.isNotBlank() },
-                        inviteStatusLabel(c.status),
-                    ).joinToString(" · "),
-                    color = VoitosColors.Muted,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val cat = c.categoryLabel.ifBlank { c.category }
+                    if (cat.isNotBlank()) {
+                        Text(cat, color = VoitosColors.Muted)
+                        Text("·", color = VoitosColors.Muted)
+                    }
+                    CollectionStatusText(
+                        collectionPaymentStatus(
+                            inviteStatus = c.status,
+                            pendingReceipts = c.pendingReceipts,
+                            rejectedReceipts = c.rejectedReceipts,
+                        ),
+                    )
+                }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     "К оплате: ${c.amountDue.toInt()} ₽",
@@ -354,7 +374,7 @@ fun CollectionDetailScreen(
                 c.pendingReceipts > 0 -> {
                     Text(
                         "Чек на проверке (${c.pendingReceipts}). Можно приложить ещё, если нужно.",
-                        color = VoitosColors.Accent2,
+                        color = VoitosColors.Gold,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
@@ -364,6 +384,22 @@ fun CollectionDetailScreen(
                         colors = voitosPrimaryButtonColors(),
                     ) {
                         Text(if (uploading) "Отправка…" else "Приложить ещё чек")
+                    }
+                }
+                c.rejectedReceipts > 0 && c.canPay -> {
+                    Text(
+                        "Чек отклонён — пришлите корректный ещё раз.",
+                        color = VoitosColors.Burgundy,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { picker.launch("image/*") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !uploading,
+                        colors = voitosPrimaryButtonColors(),
+                    ) {
+                        Text(if (uploading) "Отправка…" else "Приложить чек оплаты")
                     }
                 }
                 c.canPay -> {
@@ -392,11 +428,43 @@ private fun RequisiteLine(label: String, value: String) {
     }
 }
 
-private fun inviteStatusLabel(status: String): String = when (status) {
-    "paid" -> "Оплачено"
-    "declined" -> "Отказ"
-    "cancelled" -> "Отменено"
-    else -> "Ожидает оплаты"
+private data class CollectionPaymentStatus(
+    val label: String,
+    val color: Color,
+    val glow: Boolean = false,
+)
+
+private fun collectionPaymentStatus(
+    inviteStatus: String,
+    pendingReceipts: Int,
+    rejectedReceipts: Int,
+): CollectionPaymentStatus = when {
+    inviteStatus == "paid" -> CollectionPaymentStatus("Оплачено", VoitosColors.Ok)
+    inviteStatus == "declined" -> CollectionPaymentStatus("Отказ", VoitosColors.Muted)
+    inviteStatus == "cancelled" -> CollectionPaymentStatus("Отменено", VoitosColors.Muted)
+    pendingReceipts > 0 -> CollectionPaymentStatus("На проверке", VoitosColors.Gold, glow = true)
+    rejectedReceipts > 0 -> CollectionPaymentStatus("Чек отклонён", VoitosColors.Burgundy)
+    else -> CollectionPaymentStatus("Ожидает оплаты", VoitosColors.Gold, glow = true)
+}
+
+@Composable
+private fun CollectionStatusText(status: CollectionPaymentStatus) {
+    Text(
+        text = status.label,
+        color = status.color,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = if (status.glow) {
+            Modifier.shadow(
+                elevation = 6.dp,
+                shape = RoundedCornerShape(4.dp),
+                ambientColor = VoitosColors.GoldGlow,
+                spotColor = VoitosColors.GoldGlow,
+            )
+        } else {
+            Modifier
+        },
+    )
 }
 
 private fun formatEventAt(raw: String): String {

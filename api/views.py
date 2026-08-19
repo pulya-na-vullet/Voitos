@@ -527,13 +527,13 @@ def _service_payment_payload() -> dict:
 def collections_list(request):
     """Список инвайтов жителя в сборы."""
     try:
-        from database.models import InviteStatus, ServiceInvite
+        from database.models import InviteStatus, ReceiptStatus, ServiceInvite
 
         invites = (
             ServiceInvite.objects.filter(user=request.bot_user)
             .exclude(status=InviteStatus.CANCELLED)
             .select_related("campaign")
-            .prefetch_related("campaign__offer_photos")
+            .prefetch_related("campaign__offer_photos", "receipts")
             .order_by("-id")[:50]
         )
         pay = _service_payment_payload()
@@ -541,6 +541,9 @@ def collections_list(request):
         for inv in invites:
             camp = inv.campaign
             photos = _campaign_photo_urls(request, camp)
+            receipts = list(inv.receipts.all())
+            pending_n = sum(1 for r in receipts if r.status == ReceiptStatus.PENDING)
+            rejected_n = sum(1 for r in receipts if r.status == ReceiptStatus.REJECTED)
             items.append(
                 {
                     "id": camp.id if camp else inv.id,
@@ -560,6 +563,8 @@ def collections_list(request):
                     "cover_photo_url": photos[0] if photos else "",
                     "photo_urls": photos,
                     "description": (getattr(camp, "description", None) or "")[:400],
+                    "pending_receipts": pending_n,
+                    "rejected_receipts": rejected_n,
                     **pay,
                 }
             )
@@ -588,6 +593,9 @@ def collection_detail(request, pk: int):
     pending = int(
         inv.receipts.filter(status=ReceiptStatus.PENDING).count() if hasattr(inv, "receipts") else 0
     )
+    rejected = int(
+        inv.receipts.filter(status=ReceiptStatus.REJECTED).count() if hasattr(inv, "receipts") else 0
+    )
     photos = _campaign_photo_urls(request, camp)
     can_pay = inv.status == InviteStatus.OFFERED and (
         camp.status != "closed" if camp else True
@@ -608,6 +616,7 @@ def collection_detail(request, pk: int):
         "invite_id": inv.id,
         "can_pay": can_pay,
         "pending_receipts": pending,
+        "rejected_receipts": rejected,
         "cover_photo_url": photos[0] if photos else "",
         "photo_urls": photos,
         **_service_payment_payload(),
