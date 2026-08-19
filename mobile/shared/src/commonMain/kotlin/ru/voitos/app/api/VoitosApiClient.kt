@@ -135,6 +135,13 @@ class VoitosApiClient(
             setBody(buildJsonObject {})
         }.body()
 
+    suspend fun cancelWorkRequest(workRequestId: Int): WorkRequestCancelResult =
+        http.post("$baseUrl/work-requests/$workRequestId/cancel") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {})
+        }.body()
+
     suspend fun onboarding(): OnboardingProgress = authedGet("/onboarding")
 
     suspend fun completeOnboardingStep(code: String): OnboardingProgress =

@@ -291,17 +291,31 @@ fun WorkRequestsScreen(
 ) {
     var items by remember { mutableStateOf<List<WorkRequestBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        try {
-            items = client.workRequests().items
-        } catch (e: Exception) {
-            error = e.message
+    var message by remember { mutableStateOf<String?>(null) }
+    var loadingId by remember { mutableStateOf<Int?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun reload() {
+        scope.launch {
+            try {
+                items = client.workRequests().items
+            } catch (e: Exception) {
+                error = e.message
+            }
         }
     }
+
+    LaunchedEffect(Unit) { reload() }
+
+    val cancellable = setOf(
+        "draft", "pending", "offering", "scheduling", "in_progress", "awaiting_client",
+    )
+
     Column(modifier = Modifier.padding(16.dp)) {
         TextButton(onClick = onBack) { Text("← Назад") }
         Text("Заявки", style = MaterialTheme.typography.headlineSmall)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(items, key = { it.id }) { wr ->
                 Card(
@@ -314,6 +328,26 @@ fun WorkRequestsScreen(
                         Text(wr.status)
                         wr.assignedExecutorName?.let { Text("Мастер: $it") }
                         Text(wr.description, style = MaterialTheme.typography.bodySmall)
+                        if (wr.status in cancellable) {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        loadingId = wr.id
+                                        error = null
+                                        try {
+                                            client.cancelWorkRequest(wr.id)
+                                            message = "Заявка #${wr.id} отменена"
+                                            reload()
+                                        } catch (e: Exception) {
+                                            error = e.message
+                                        } finally {
+                                            loadingId = null
+                                        }
+                                    }
+                                },
+                                enabled = loadingId != wr.id,
+                            ) { Text("Отменить заявку") }
+                        }
                     }
                 }
             }
@@ -648,10 +682,17 @@ fun WorkRequestPhotosScreen(
                 val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     ?: throw IllegalStateException("Не удалось прочитать файл")
                 val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "photo.jpg"
+                val mime = context.contentResolver.getType(uri).orEmpty()
+                val ext = when {
+                    mime.contains("png") -> "png"
+                    mime.contains("webp") -> "webp"
+                    mime.contains("heic") || mime.contains("heif") -> "heic"
+                    else -> "jpg"
+                }
+                val name = "gallery_${System.currentTimeMillis()}.$ext"
                 val res = client.addWorkRequestPhoto(workRequestId, b64, name)
                 photoCount = res.photoCount
-                message = "Фото добавлено ($photoCount)"
+                message = "Приложено фото: $photoCount"
             } catch (e: Exception) {
                 error = e.message
             } finally {
@@ -676,12 +717,13 @@ fun WorkRequestPhotosScreen(
                     loading = true
                     error = null
                     try {
-                        // 1×1 JPEG для быстрой проверки API без галереи
+                        // Небольшой валидный JPEG (не 1×1), чтобы в админке было видно
                         val tiny =
-                            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
-                        val res = client.addWorkRequestPhoto(workRequestId, tiny, "dev.jpg")
+                            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxAQEBAQEBAPEBAQDw8PDw8PDw8PFRAVFREWFhUVFRUYHSggGBolGxUVITEhJSkrLi4uFx8zODMtNygtLisBCgoKDg0OGxAQGy0lHyUtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAEAAQMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAAAAQID/8QAFhEBAQEAAAAAAAAAAAAAAAAAAAER/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
+                        val name = "test_${System.currentTimeMillis()}.jpg"
+                        val res = client.addWorkRequestPhoto(workRequestId, tiny, name)
                         photoCount = res.photoCount
-                        message = "Dev-фото добавлено ($photoCount)"
+                        message = "Приложено фото: $photoCount"
                     } catch (e: Exception) {
                         error = e.message
                     } finally {
@@ -693,14 +735,15 @@ fun WorkRequestPhotosScreen(
             enabled = !loading,
         ) { Text("Добавить тестовое фото") }
         Spacer(modifier = Modifier.height(8.dp))
+        Text("Сейчас приложено: $photoCount")
         Button(
             onClick = {
                 scope.launch {
                     loading = true
                     error = null
                     try {
-                        client.submitWorkRequest(workRequestId)
-                        message = "Заявка отправлена мастерам"
+                        val res = client.submitWorkRequest(workRequestId)
+                        message = "Заявка отправлена (фото: ${res.photoCount})"
                         onSubmitted()
                     } catch (e: Exception) {
                         error = e.message

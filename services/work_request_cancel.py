@@ -30,6 +30,19 @@ WORK_FLOW_PENDING_KINDS = frozenset(
     }
 )
 
+# Статусы, в которых клиент может отменить заявку сам
+CLIENT_CANCELLABLE_STATUSES = frozenset(
+    {
+        WorkRequestStatus.DRAFT,
+        WorkRequestStatus.PENDING,
+        WorkRequestStatus.OFFERING,
+        WorkRequestStatus.SCHEDULING,
+        WorkRequestStatus.IN_PROGRESS,
+        WorkRequestStatus.AWAITING_CLIENT,
+        WorkRequestStatus.AWAITING_COMMISSION,
+    }
+)
+
 # Явная отмена без ИИ
 _CANCEL_EXACT = re.compile(
     r"^\s*("
@@ -124,6 +137,65 @@ def _work_request_id_from_pending(pending: PendingAction) -> int | None:
     return None
 
 
+def cancel_client_work_request(
+    user: BotUser,
+    req: WorkRequest,
+    *,
+    note: str = "Отменено клиентом.",
+) -> WorkRequest:
+    """Отменить заявку клиента. Raises ValueError если нельзя."""
+    if req.user_id != user.id:
+        raise ValueError("not_owner")
+    if req.status not in CLIENT_CANCELLABLE_STATUSES:
+        raise ValueError("not_cancellable")
+
+    req.status = WorkRequestStatus.CANCELLED
+    admin_note = (req.admin_note or "").strip()
+    if note and note not in admin_note:
+        admin_note = f"{admin_note}\n{note}".strip() if admin_note else note
+    req.admin_note = admin_note
+    from database.models import WorkRequestCommissionStatus
+
+    req.commission_status = WorkRequestCommissionStatus.NONE
+    req.save(
+        update_fields=[
+            "status",
+            "admin_note",
+            "commission_status",
+            "updated_at",
+        ]
+    )
+    open_offers = list(
+        WorkRequestOffer.objects.filter(
+            work_request=req,
+            status=WorkRequestOfferStatus.OFFERED,
+        ).select_related("contractor")
+    )
+    if open_offers:
+        WorkRequestOffer.objects.filter(
+            pk__in=[o.id for o in open_offers]
+        ).update(status=WorkRequestOfferStatus.CANCELLED)
+        try:
+            for offer in open_offers:
+                pending = PendingAction.objects.filter(
+                    user_id=offer.contractor.user_id
+                ).first()
+                if not pending or pending.pending_kind != "work_request_offer_reply":
+                    continue
+                payload = pending.pending_payload or {}
+                if int(payload.get("work_request_id") or 0) == req.id:
+                    pending.clear_pending()
+        except Exception:
+            logger.exception("clear offer pending after client cancel WR %s", req.id)
+    try:
+        from services.work_request_completion import cancel_scheduled_for_request
+
+        cancel_scheduled_for_request(req)
+    except Exception:
+        logger.exception("cancel scheduled for WR %s", req.id)
+    return req
+
+
 def cancel_work_flow(user: BotUser, pending: PendingAction) -> str:
     """Сбросить pending и при необходимости отменить черновик/раннюю заявку."""
     kind = pending.pending_kind or ""
@@ -138,65 +210,25 @@ def cancel_work_flow(user: BotUser, pending: PendingAction) -> str:
             status=WorkRequestOfferStatus.OFFERED,
         ).first()
         if offer:
-            offer.status = WorkRequestOfferStatus.DECLINED
-            from django.utils import timezone
+            from services.work_request_dispatch import decline_offer
 
-            offer.responded_at = timezone.now()
-            offer.save(update_fields=["status", "responded_at"])
-            try:
-                from services.work_request_dispatch import try_dispatch_request
-
-                try_dispatch_request(offer.work_request)
-            except Exception:
-                logger.exception("dispatch after cancel offer %s", offer.id)
+            return decline_offer(offer)
         return "Ок, предложение отклонено. Заявку передадим другому исполнителю."
 
     req = WorkRequest.objects.filter(pk=req_id).first() if req_id else None
     cancelled_request = False
-    # Ранние стадии заявки: отмена диалога = заявка не оформляется
-    # Любая незавершённая заявка — отменяем целиком (в т.ч. после отчёта исполнителя)
-    if req and req.status in {
-        WorkRequestStatus.DRAFT,
-        WorkRequestStatus.PENDING,
-        WorkRequestStatus.OFFERING,
-        WorkRequestStatus.SCHEDULING,
-        WorkRequestStatus.IN_PROGRESS,
-        WorkRequestStatus.AWAITING_CLIENT,
-        WorkRequestStatus.AWAITING_COMMISSION,
-    }:
-        req.status = WorkRequestStatus.CANCELLED
-        note = "Отменено пользователем в боте."
-        admin_note = (req.admin_note or "").strip()
-        if note not in admin_note:
-            admin_note = f"{admin_note}\n{note}".strip() if admin_note else note
-        req.admin_note = admin_note
-        # Сбросить ожидание комиссии, чтобы исполнитель снова мог брать заказы
-        from database.models import WorkRequestCommissionStatus
-
-        req.commission_status = WorkRequestCommissionStatus.NONE
-        req.save(
-            update_fields=[
-                "status",
-                "admin_note",
-                "commission_status",
-                "updated_at",
-            ]
-        )
-        WorkRequestOffer.objects.filter(
-            work_request=req,
-            status=WorkRequestOfferStatus.OFFERED,
-        ).update(status=WorkRequestOfferStatus.CANCELLED)
+    if req and req.user_id == user.id and req.status in CLIENT_CANCELLABLE_STATUSES:
         try:
-            from services.work_request_completion import cancel_scheduled_for_request
-
-            cancel_scheduled_for_request(req)
-        except Exception:
-            logger.exception("cancel scheduled for WR %s", req.id)
-        cancelled_request = True
+            cancel_client_work_request(
+                user, req, note="Отменено пользователем в боте."
+            )
+            cancelled_request = True
+        except ValueError:
+            cancelled_request = False
 
     if cancelled_request:
         return (
-            "Ок, отменил.\n"
+            "Ок, отменил заявку.\n"
             "Чтобы снова вызвать мастера — напишите «вызвать мастера»."
         )
     return (
@@ -214,3 +246,31 @@ def maybe_cancel_work_flow(
     if not is_cancel_message(text, use_ai=use_ai):
         return None
     return cancel_work_flow(user, pending)
+
+
+def maybe_cancel_open_client_request(
+    user: BotUser, text: str, *, use_ai: bool = True
+) -> str | None:
+    """Отмена активной заявки клиента вне диалога (после отправки / во время поиска)."""
+    if not is_cancel_message(text, use_ai=use_ai):
+        return None
+    req = (
+        WorkRequest.objects.filter(
+            user=user,
+            status__in=CLIENT_CANCELLABLE_STATUSES,
+        )
+        .order_by("-updated_at", "-id")
+        .first()
+    )
+    if not req:
+        return None
+    try:
+        cancel_client_work_request(
+            user, req, note="Отменено клиентом в боте (поиск мастера)."
+        )
+    except ValueError:
+        return None
+    return (
+        f"Ок, заявку #{req.id} отменил. Поиск мастера остановлен.\n"
+        "Чтобы снова вызвать мастера — напишите «вызвать мастера»."
+    )

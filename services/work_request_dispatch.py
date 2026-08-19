@@ -633,6 +633,32 @@ def decline_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
     pending = PendingAction.objects.filter(user=offer.contractor.user).first()
     if pending and pending.pending_kind == WORK_OFFER_PENDING:
         pending.clear_pending()
+
+    req = offer.work_request
+    client_text = (
+        f"Исполнитель по заявке #{req.id} ({req.role.name}) отказался.\n"
+        "Ищем другого мастера.\n\n"
+        "Если поиск займёт слишком долго — напишите «отменить заявку», "
+        "и мы остановим поиск."
+    )
+    try:
+        send_fn(req.user, client_text)
+    except Exception:
+        logger.exception("notify client decline WR %s", req.id)
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            req.user,
+            ntype="work_request.executor_declined",
+            title="Исполнитель отказался",
+            body=client_text[:500],
+            entity_type="work_request",
+            entity_id=req.id,
+        )
+    except Exception:
+        logger.exception("app inbox decline WR %s", req.id)
+
     try_dispatch_request(offer.work_request, send_fn=send_fn)
     return "Отказ принят. Заявка будет предложена другому исполнителю."
 

@@ -402,6 +402,17 @@ class AppEmitHookTests(TestCase):
             )
             self.assertEqual(add.status_code, 201)
             self.assertEqual(add.json()["photo_count"], 1)
+            # второе фото с тем же filename — не должно затереть первое
+            add2 = self.client.post(
+                f"/api/v1/work-requests/{wr.id}/photos",
+                data=json.dumps({"content_base64": b64, "filename": "t.jpg"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+            )
+            self.assertEqual(add2.status_code, 201)
+            self.assertEqual(add2.json()["photo_count"], 2)
+            self.assertNotEqual(add.json()["photo_id"], add2.json()["photo_id"])
+            self.assertEqual(wr.photos.count(), 2)
             submit = self.client.post(
                 f"/api/v1/work-requests/{wr.id}/submit",
                 data=json.dumps({}),
@@ -412,6 +423,29 @@ class AppEmitHookTests(TestCase):
         wr.refresh_from_db()
         self.assertNotEqual(wr.status, WorkRequestStatus.DRAFT)
         self.assertIn(wr.status, {WorkRequestStatus.PENDING, WorkRequestStatus.OFFERING})
+        self.assertEqual(wr.photos.count(), 2)
+
+    def test_work_request_cancel_api(self):
+        from database.models import WorkRequest, WorkRequestStatus
+
+        wr = WorkRequest.objects.create(
+            user=self.client_user,
+            role=self.role,
+            description="Нужен электрик",
+            status=WorkRequestStatus.OFFERING,
+            client_locality="Куюки",
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/cancel",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["status"], "cancelled")
+        wr.refresh_from_db()
+        self.assertEqual(wr.status, WorkRequestStatus.CANCELLED)
 
     def test_onboarding_complete_step(self):
         tok = MobileAuthToken.objects.create(bot_user=self.client_user)

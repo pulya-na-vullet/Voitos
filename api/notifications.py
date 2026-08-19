@@ -18,6 +18,7 @@ DEEP_LINKS: dict[str, str] = {
     "collection.closed": "voitos://app/collections/{id}",
     "work_request.assigned": "voitos://app/work-requests/{id}",
     "work_request.no_executor": "voitos://app/work-requests/{id}",
+    "work_request.executor_declined": "voitos://app/work-requests/{id}",
     "work_request.slots_ready": "voitos://app/work-requests/{id}/slots",
     "work_request.confirm_amount": "voitos://app/work-requests/{id}/confirm",
     "work_request.rate": "voitos://app/work-requests/{id}/rate",
