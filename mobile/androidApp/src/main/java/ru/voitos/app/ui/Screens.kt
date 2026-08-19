@@ -29,7 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier.Modifier
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -46,16 +46,20 @@ import ru.voitos.app.nav.DeepLinks
 
 @Composable
 fun LoginScreen(
-    client: VoitosApiClient,
-    onLoggedIn: (token: String, name: String) -> Unit,
+    initialBaseUrl: String,
+    onLoggedIn: (token: String, name: String, baseUrl: String) -> Unit,
 ) {
+    var baseUrl by remember { mutableStateOf(initialBaseUrl) }
     var phone by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var debugHint by remember { mutableStateOf<String?>(null) }
+    var healthHint by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var step by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
+
+    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl.trim().trimEnd('/'))
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -63,7 +67,39 @@ fun LoginScreen(
     ) {
         Text("Voitos", style = MaterialTheme.typography.headlineLarge)
         Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+        OutlinedTextField(
+            value = baseUrl,
+            onValueChange = { baseUrl = it },
+            label = { Text("API base URL") },
+            supportingText = {
+                Text("Эмулятор: http://10.0.2.2:18765/api/v1 · телефон: http://LAN_IP:18765/api/v1")
+            },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        TextButton(
+            onClick = {
+                scope.launch {
+                    loading = true
+                    error = null
+                    try {
+                        val ok = client().health()
+                        healthHint = if (ok) "Сервер отвечает ✓" else "Сервер ответил без ok"
+                    } catch (e: Exception) {
+                        healthHint = null
+                        error = "Health: ${e.message}"
+                    } finally {
+                        loading = false
+                    }
+                }
+            },
+            enabled = !loading,
+        ) { Text("Проверить сервер") }
+        healthHint?.let {
+            Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = phone,
             onValueChange = { phone = it },
@@ -72,7 +108,7 @@ fun LoginScreen(
             singleLine = true,
         )
         if (step >= 1) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = code,
                 onValueChange = { code = it },
@@ -85,10 +121,10 @@ fun LoginScreen(
             }
         }
         error?.let {
-            Spacer(Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(it, color = MaterialTheme.colorScheme.error)
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         if (loading) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         } else if (step == 0) {
@@ -98,7 +134,7 @@ fun LoginScreen(
                         loading = true
                         error = null
                         try {
-                            val res = client.phoneStart(phone)
+                            val res = client().phoneStart(phone)
                             debugHint = res["debug_code"]?.let { "Dev-код: $it" }
                             step = 1
                         } catch (e: Exception) {
@@ -117,8 +153,8 @@ fun LoginScreen(
                         loading = true
                         error = null
                         try {
-                            val session = client.phoneVerify(phone, code)
-                            onLoggedIn(session.accessToken, session.displayName)
+                            val session = client().phoneVerify(phone, code)
+                            onLoggedIn(session.accessToken, session.displayName, baseUrl.trim().trimEnd('/'))
                         } catch (e: Exception) {
                             error = e.message ?: "Неверный код"
                         } finally {
@@ -144,56 +180,55 @@ fun InboxScreen(
     onOpenOnboarding: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    var items by remember { mutableStateOf<List<AppNotification>>(emptyList()) }
+    var notifications by remember { mutableStateOf<List<AppNotification>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
-    val scope = rememberCoroutineScope()
 
-    fun reload() {
-        scope.launch {
-            loading = true
-            error = null
-            try {
-                items = client.notifications().items
-            } catch (e: Exception) {
-                error = e.message
-            } finally {
-                loading = false
-            }
+    LaunchedEffect(Unit) {
+        loading = true
+        error = null
+        try {
+            notifications = client.notifications().items
+        } catch (e: Exception) {
+            error = e.message
+        } finally {
+            loading = false
         }
     }
 
-    LaunchedEffect(Unit) { reload() }
-
-    Column(Modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.Top,
+    ) {
         Text("Уведомления", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         TextButton(onClick = onOpenCollections) { Text("Сборы") }
         TextButton(onClick = onOpenWorkRequests) { Text("Заявки") }
         TextButton(onClick = onNewWorkRequest) { Text("Вызвать мастера") }
         TextButton(onClick = onOpenSubscription) { Text("Подписка") }
         TextButton(onClick = onOpenOnboarding) { Text("Обучение") }
         TextButton(onClick = onLogout) { Text("Выйти") }
-        Spacer(Modifier.height(8.dp))
-        if (loading) CircularProgressIndicator()
+        Spacer(modifier = Modifier.height(8.dp))
+        if (loading) {
+            CircularProgressIndicator()
+        }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(items, key = { it.id }) { n ->
+            items(notifications, key = { it.id }) { n ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            val fallback = when (DeepLinks.routeForType(n.type, n.entityId)) {
+                            val route = DeepLinks.routeForType(n.type, n.entityId)
+                            val fallback = when (route) {
                                 is DeepLinks.Route.Subscription -> "voitos://app/subscription"
                                 is DeepLinks.Route.Collection -> "voitos://app/collections/${n.entityId}"
-                                is DeepLinks.Route.WorkRequest -> {
-                                    val action = (DeepLinks.routeForType(n.type, n.entityId) as DeepLinks.Route.WorkRequest).action
-                                    if (action == "confirm") {
+                                is DeepLinks.Route.WorkRequest ->
+                                    if (route.action == "confirm") {
                                         "voitos://app/work-requests/${n.entityId}/confirm"
                                     } else {
                                         "voitos://app/work-requests/${n.entityId}"
                                     }
-                                }
                                 else -> "voitos://app/home"
                             }
                             onOpenDeepLink(n.deepLink.ifBlank { fallback })
@@ -303,7 +338,7 @@ fun ConfirmAmountScreen(
         TextButton(onClick = onBack) { Text("← Назад") }
         Text("Подтвердите сумму", style = MaterialTheme.typography.headlineSmall)
         Text("Заявка #$workRequestId")
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = {
                 scope.launch {
@@ -323,7 +358,7 @@ fun ConfirmAmountScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
         ) { Text("Да, сумма верна") }
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = amount,
             onValueChange = { amount = it },
@@ -406,10 +441,13 @@ fun SubscriptionScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.Top,
+    ) {
         TextButton(onClick = onBack) { Text("← Назад") }
         Text("Подписка", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         info?.let { s ->
@@ -417,7 +455,7 @@ fun SubscriptionScreen(
             Text("Доступ: ${s.state}")
             s.subscriptionUntil?.let { Text("До: $it") }
             s.graceUntil?.let { Text("Grace до: $it") }
-            Spacer(Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text("Цена: ${s.priceRub} ₽/мес")
             if (s.paymentPhone.isNotBlank()) {
                 Text("Оплата: ${s.paymentPhone}")
@@ -426,7 +464,7 @@ fun SubscriptionScreen(
             if (s.pendingReceipts > 0) {
                 Text("Чеков на проверке: ${s.pendingReceipts}")
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = { picker.launch("image/*") },
                 modifier = Modifier.fillMaxWidth(),
@@ -455,7 +493,7 @@ fun SubscriptionScreen(
             ) { Text("Тестовый чек (dev)") }
         }
         if (receipts.isNotEmpty()) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             Text("История чеков", style = MaterialTheme.typography.titleMedium)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(receipts, key = { it.id }) { r ->
@@ -496,7 +534,7 @@ fun NewWorkRequestScreen(
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         TextButton(onClick = onBack) { Text("← Назад") }
         Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text("Роль", style = MaterialTheme.typography.labelLarge)
         roles.forEach { role ->
             TextButton(
@@ -519,7 +557,7 @@ fun NewWorkRequestScreen(
             modifier = Modifier.fillMaxWidth(),
             minLines = 3,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Button(
             onClick = {
                 val rid = selectedId
@@ -580,7 +618,7 @@ fun CollectionDetailScreen(
             c.eventAt?.let { Text("Событие: $it") }
             Text("Оплатили: ${c.paidCount} из ${c.inviteCount}")
             if (c.description.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(c.description)
             }
         }
@@ -626,7 +664,7 @@ fun WorkRequestPhotosScreen(
         TextButton(onClick = onBack) { Text("← Назад") }
         Text("Фото заявки #$workRequestId", style = MaterialTheme.typography.headlineSmall)
         Text("Нужно хотя бы одно фото места работ.")
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = { picker.launch("image/*") },
             modifier = Modifier.fillMaxWidth(),
@@ -654,7 +692,7 @@ fun WorkRequestPhotosScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
         ) { Text("Добавить тестовое фото") }
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Button(
             onClick = {
                 scope.launch {
@@ -714,14 +752,14 @@ fun OnboardingScreen(
                 Text("Подарок: месяц подписки начислен", color = MaterialTheme.colorScheme.primary)
             }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (step == null) {
             Text("Загрузка…")
         } else {
             Text(step.title, style = MaterialTheme.typography.titleLarge)
             Text(step.caption)
-            Spacer(Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             AsyncImage(
                 model = staticUrl(apiBaseUrl, step.imageUrl),
                 contentDescription = step.title,
@@ -733,7 +771,7 @@ fun OnboardingScreen(
             if (step.done) {
                 Text("✓ просмотрено", color = MaterialTheme.colorScheme.primary)
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = {
                     scope.launch {

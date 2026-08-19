@@ -1,40 +1,28 @@
-# Voitos KMP (ветка `cursor/kmp-e31c`)
-
-Нативный клиент без дублирования логики бота. Сервер: Django `/api/v1`.
-
 ## Что уже есть
 
 - `shared/` — модели, `VoitosApiClient` (Ktor), `DeepLinks`, `PushTokenProvider`
-- `androidApp/` — Login, Inbox, Сборы, Заявки, фото заявки, Вызов мастера, Подписка (+чек), Обучение (Coil), Confirm
-- После логина: `POST /devices` через `DevPushTokenProvider` (Firebase — раскомментировать в gradle)
-- Inbox: мастер, сбор, confirm, чек, renewal, unpaid remind
-- API: photos/submit заявки, `GET|POST /me/receipts`, onboarding steps + caption
+- `androidApp/` — Login (base URL + health), Inbox, Сборы, Заявки, фото, Подписка (+чек), Обучение (Coil), Confirm
+- Gradle Wrapper: `./gradlew :androidApp:assembleDebug`
+- После логина: `POST /devices` через `DevPushTokenProvider`
+- Inbox API: мастер, сбор, confirm, чек, renewal, unpaid remind
 
 ## Документы
 
-См. [`../docs/mobile/`](../docs/mobile/)
+- [`CHECKLIST.md`](CHECKLIST.md) — как собрать и проверить
+- [`../docs/mobile/`](../docs/mobile/) — OpenAPI / stories / push
 
-## Открыть в IDE
+## Сборка
 
 ```bash
 cd mobile
-# Android Studio → Open → mobile/
+./gradlew :androidApp:assembleDebug
 ```
 
-Нужен JDK 17+. Полный Gradle sync подтянет Ktor + Coil.
+Нужны JDK 17+ (проверено на 21) и Android SDK (platform 35).  
+`local.properties` с `sdk.dir=...` создайте локально (в git не коммитится).
 
 ## Firebase
 
 1. Добавить `androidApp/google-services.json`
 2. В `androidApp/build.gradle.kts` раскомментировать plugin + firebase-messaging
 3. Реализовать `PushTokenProvider` через `FirebaseMessaging.getInstance().token`
-
-## Порядок экранов
-
-1. Login (phone OTP)  
-2. Inbox / Home  
-3. Collections + detail  
-4. New work request → photos → submit  
-5. Subscription + upload receipt  
-6. Onboarding comics (Coil)  
-7. Confirm amount 

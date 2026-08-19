@@ -5,10 +5,30 @@ plugins {
 }
 
 kotlin {
-    androidTarget()
-    iosX64()
-    iosArm64()
-    iosSimulatorArm64()
+    androidTarget {
+        compilations.all {
+            compileTaskProvider.configure {
+                compilerOptions {
+                    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+                }
+            }
+        }
+    }
+
+    val hostOs = System.getProperty("os.name").orEmpty()
+    val isMac = hostOs.contains("Mac", ignoreCase = true)
+    if (isMac) {
+        listOf(
+            iosX64(),
+            iosArm64(),
+            iosSimulatorArm64(),
+        ).forEach { target ->
+            target.binaries.framework {
+                baseName = "shared"
+                isStatic = true
+            }
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {
@@ -21,8 +41,10 @@ kotlin {
         androidMain.dependencies {
             implementation("io.ktor:ktor-client-okhttp:3.0.1")
         }
-        iosMain.dependencies {
-            implementation("io.ktor:ktor-client-darwin:3.0.1")
+        if (isMac) {
+            iosMain.dependencies {
+                implementation("io.ktor:ktor-client-darwin:3.0.1")
+            }
         }
     }
 }
@@ -32,5 +54,9 @@ android {
     compileSdk = 35
     defaultConfig {
         minSdk = 26
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }

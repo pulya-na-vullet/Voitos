@@ -4,6 +4,12 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class HealthResponse(
+    val ok: Boolean = false,
+    val service: String = "",
+)
+
+@Serializable
 data class AuthSession(
     @SerialName("access_token") val accessToken: String,
     @SerialName("bot_user_id") val botUserId: Int,

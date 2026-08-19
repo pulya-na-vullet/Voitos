@@ -29,7 +29,7 @@ import ru.voitos.app.ui.WorkRequestsScreen
 
 class MainActivity : ComponentActivity() {
     private lateinit var session: SessionStore
-    private lateinit var client: VoitosApiClient
+    private var client: VoitosApiClient = VoitosApiClient()
 
     private sealed class Screen {
         data object Login : Screen()
@@ -61,10 +61,15 @@ class MainActivity : ComponentActivity() {
             val scope = rememberCoroutineScope()
             MaterialTheme {
                 when (val s = screen) {
-                    Screen.Login -> LoginScreen(client) { token, name ->
+                    Screen.Login -> LoginScreen(
+                        initialBaseUrl = session.baseUrl,
+                    ) { token, name, baseUrl ->
+                        session.baseUrl = baseUrl
                         session.accessToken = token
                         session.displayName = name
-                        client.accessToken = token
+                        client = VoitosApiClient(baseUrl = baseUrl).also {
+                            it.accessToken = token
+                        }
                         scope.launch { registerDevPushToken() }
                         screen = Screen.Inbox
                     }

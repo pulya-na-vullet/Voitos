@@ -11,6 +11,7 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -19,6 +20,7 @@ import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
 import ru.voitos.app.model.ExecutorRoleList
+import ru.voitos.app.model.HealthResponse
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.NotificationList
 import ru.voitos.app.model.OnboardingProgress
@@ -35,13 +37,13 @@ import ru.voitos.app.model.WorkRequestSubmitResult
  */
 class VoitosApiClient(
     private val baseUrl: String = VoitosApi.DEFAULT_BASE_URL,
-    private val http: HttpClient = defaultClient(),
 ) {
     var accessToken: String? = null
+    private val http: HttpClient = defaultClient()
 
     suspend fun health(): Boolean {
-        val body: Map<String, Boolean> = http.get("$baseUrl/health").body()
-        return body["ok"] == true
+        val body: HealthResponse = http.get("$baseUrl/health").body()
+        return body.ok
     }
 
     suspend fun phoneStart(phone: String): Map<String, String?> =
