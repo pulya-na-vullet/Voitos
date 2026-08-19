@@ -107,19 +107,28 @@ fun ExecutorRegisterScreen(
 
         when (step) {
             0 -> {
-                Text("Кем работаете? Выберите роль", color = VoitosColors.Text)
-                Spacer(modifier = Modifier.height(8.dp))
-                roles.forEachIndexed { i, r ->
-                    TextButton(
-                        onClick = {
-                            role = r
+                Text("Выберите роль", color = VoitosColors.Muted)
+                Spacer(modifier = Modifier.height(12.dp))
+                RoleTileGrid(
+                    roles = roles,
+                    selectedId = role?.id,
+                    onSelect = { id ->
+                        role = roles.find { it.id == id }
+                    },
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        if (role == null) {
+                            error = "Выберите роль"
+                        } else {
+                            error = null
                             step = 1
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("${i + 1}. ${r.name}", color = VoitosColors.Text)
-                    }
-                }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                ) { Text("Далее") }
             }
             1 -> {
                 val r = role
