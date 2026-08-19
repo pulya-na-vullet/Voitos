@@ -2,6 +2,7 @@ package ru.voitos.app.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
@@ -192,6 +193,11 @@ class VoitosApiClient(
 
     companion object {
         fun defaultClient(): HttpClient = HttpClient {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 20_000
+                connectTimeoutMillis = 10_000
+                socketTimeoutMillis = 20_000
+            }
             install(ContentNegotiation) {
                 json(
                     Json {

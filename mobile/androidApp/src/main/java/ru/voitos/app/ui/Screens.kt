@@ -52,19 +52,26 @@ import ru.voitos.app.nav.DeepLinks
 @Composable
 fun LoginScreen(
     initialBaseUrl: String,
-    onLoggedIn: (token: String, name: String, baseUrl: String) -> Unit,
+    initialPhone: String = "",
+    initialDebugCode: String = "",
+    onLoggedIn: (token: String, name: String, baseUrl: String, phone: String) -> Unit,
+    onDebugPrefs: (baseUrl: String, phone: String, debugCode: String) -> Unit = { _, _, _ -> },
 ) {
     var baseUrl by remember { mutableStateOf(initialBaseUrl) }
-    var phone by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf(initialPhone) }
+    var code by remember { mutableStateOf(initialDebugCode) }
     var debugHint by remember { mutableStateOf<String?>(null) }
     var healthHint by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    var step by remember { mutableStateOf(0) }
+    var step by remember { mutableStateOf(if (initialPhone.isNotBlank()) 0 else 0) }
     val scope = rememberCoroutineScope()
 
     fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl.trim().trimEnd('/'))
+
+    fun persistDebug(debugCode: String = "") {
+        onDebugPrefs(baseUrl.trim().trimEnd('/'), phone.trim(), debugCode)
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -75,7 +82,10 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
             value = baseUrl,
-            onValueChange = { baseUrl = it },
+            onValueChange = {
+                baseUrl = it
+                persistDebug()
+            },
             label = { Text("API base URL") },
             supportingText = {
                 Text("Эмулятор: http://10.0.2.2:18765/api/v1 · телефон: http://LAN_IP:18765/api/v1")
@@ -93,7 +103,7 @@ fun LoginScreen(
                         healthHint = if (ok) "Сервер отвечает ✓" else "Сервер ответил без ok"
                     } catch (e: Exception) {
                         healthHint = null
-                        error = "Health: ${e.message}"
+                        error = friendlyNetworkError(e)
                     } finally {
                         loading = false
                     }
@@ -107,7 +117,10 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = phone,
-            onValueChange = { phone = it },
+            onValueChange = {
+                phone = it
+                persistDebug()
+            },
             label = { Text("Телефон") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
@@ -139,11 +152,17 @@ fun LoginScreen(
                         loading = true
                         error = null
                         try {
+                            persistDebug()
                             val res = client().phoneStart(phone)
-                            debugHint = res["debug_code"]?.let { "Dev-код: $it" }
+                            val dbg = res["debug_code"].orEmpty()
+                            if (dbg.isNotBlank()) {
+                                code = dbg
+                                debugHint = "Dev-код: $dbg"
+                                persistDebug(dbg)
+                            }
                             step = 1
                         } catch (e: Exception) {
-                            error = e.message ?: "Ошибка"
+                            error = friendlyNetworkError(e)
                         } finally {
                             loading = false
                         }
@@ -158,10 +177,16 @@ fun LoginScreen(
                         loading = true
                         error = null
                         try {
+                            persistDebug(code)
                             val session = client().phoneVerify(phone, code)
-                            onLoggedIn(session.accessToken, session.displayName, baseUrl.trim().trimEnd('/'))
+                            onLoggedIn(
+                                session.accessToken,
+                                session.displayName,
+                                baseUrl.trim().trimEnd('/'),
+                                phone.trim(),
+                            )
                         } catch (e: Exception) {
-                            error = e.message ?: "Неверный код"
+                            error = friendlyNetworkError(e, fallback = "Неверный код")
                         } finally {
                             loading = false
                         }
@@ -171,6 +196,24 @@ fun LoginScreen(
             ) { Text("Войти") }
             TextButton(onClick = { step = 0 }) { Text("Изменить номер") }
         }
+    }
+}
+
+/** Понятный текст вместо Socket timeout / ConnectException. */
+fun friendlyNetworkError(e: Throwable, fallback: String = "Ошибка сети"): String {
+    val msg = (e.message ?: "").lowercase()
+    val cause = (e.cause?.message ?: "").lowercase()
+    val all = "$msg $cause"
+    return when {
+        "timeout" in all || "timed out" in all ->
+            "Сервер не ответил вовремя. Проверьте, что бэкенд запущен и телефон в той же Wi‑Fi, " +
+                "а в URL указан актуальный IP компьютера (не 10.0.2.2 на реальном телефоне)."
+        "failed to connect" in all || "connection refused" in all || "connectexception" in all ->
+            "Нет связи с сервером. Запущен ли Voitos на этом IP:порту? Телефон и ПК в одной сети?"
+        "unable to resolve" in all || "unknownhost" in all ->
+            "Не удалось найти хост. Проверьте API base URL."
+        msg.isNotBlank() -> e.message ?: fallback
+        else -> fallback
     }
 }
 
@@ -195,7 +238,7 @@ fun InboxScreen(
         try {
             notifications = client.notifications().items
         } catch (e: Exception) {
-            error = e.message
+            error = friendlyNetworkError(e)
         } finally {
             loading = false
         }
@@ -264,7 +307,7 @@ fun CollectionsScreen(
         try {
             items = client.collections().items
         } catch (e: Exception) {
-            error = e.message
+            error = friendlyNetworkError(e)
         }
     }
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -307,7 +350,7 @@ fun WorkRequestsScreen(
             try {
                 items = client.workRequests().items
             } catch (e: Exception) {
-                error = e.message
+                error = friendlyNetworkError(e)
             }
         }
     }

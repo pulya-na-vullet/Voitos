@@ -69,18 +69,27 @@ class MainActivity : ComponentActivity() {
                     when (val s = screen) {
                         Screen.Login -> LoginScreen(
                             initialBaseUrl = session.baseUrl,
-                        ) { token, name, baseUrl ->
-                            session.baseUrl = baseUrl
-                            session.accessToken = token
-                            session.displayName = name
-                            client = VoitosApiClient(baseUrl = baseUrl).also {
-                                it.accessToken = token
-                            }
-                            scope.launch { registerDevPushToken() }
-                            playSplash = session.hasLaunchedBefore
-                            tab = MainTab.Collections
-                            screen = Screen.Main
-                        }
+                            initialPhone = session.lastPhone,
+                            initialDebugCode = session.lastDebugCode,
+                            onLoggedIn = { token, name, baseUrl, phone ->
+                                session.baseUrl = baseUrl
+                                session.lastPhone = phone
+                                session.accessToken = token
+                                session.displayName = name
+                                client = VoitosApiClient(baseUrl = baseUrl).also {
+                                    it.accessToken = token
+                                }
+                                scope.launch { registerDevPushToken() }
+                                playSplash = session.hasLaunchedBefore
+                                tab = MainTab.Collections
+                                screen = Screen.Main
+                            },
+                            onDebugPrefs = { url, phone, dbg ->
+                                session.baseUrl = url
+                                session.lastPhone = phone
+                                if (dbg.isNotBlank()) session.lastDebugCode = dbg
+                            },
+                        )
 
                         Screen.Main -> MainShell(
                             selected = tab,
@@ -121,7 +130,7 @@ class MainActivity : ComponentActivity() {
                                     onOpenSubscription = { screen = Screen.Subscription },
                                     onOpenOnboarding = { screen = Screen.Onboarding },
                                     onLogout = {
-                                        session.clear()
+                                        session.clearSession()
                                         client.accessToken = null
                                         screen = Screen.Login
                                     },

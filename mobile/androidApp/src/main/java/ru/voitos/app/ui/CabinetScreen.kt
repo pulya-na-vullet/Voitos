@@ -48,7 +48,7 @@ fun CabinetScreen(
             me = client.me()
             sub = client.subscription()
         } catch (e: Exception) {
-            error = e.message
+            error = friendlyNetworkError(e)
         } finally {
             loading = false
         }
