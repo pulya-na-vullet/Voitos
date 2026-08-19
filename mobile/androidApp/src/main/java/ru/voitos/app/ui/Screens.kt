@@ -215,7 +215,10 @@ fun friendlyNetworkError(e: Throwable, fallback: String = "Ошибка сети
             "Нет связи с сервером. Запущен ли Voitos на этом IP:порту? Телефон и ПК в одной сети?"
         "unable to resolve" in all || "unknownhost" in all ->
             "Не удалось найти хост. Проверьте API base URL."
-        msg.isNotBlank() -> e.message ?: fallback
+        "notransformationfound" in all || "expected response body" in all ->
+            "Сервер вернул неожиданный ответ (часто HTML 404). Обновите код бэкенда и перезапустите app.py."
+        msg.isNotBlank() && msg.length < 220 -> e.message ?: fallback
+        msg.isNotBlank() -> fallback
         else -> fallback
     }
 }
@@ -349,19 +352,37 @@ fun WorkRequestsScreen(
     onConfirm: (Int) -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
-    var items by remember { mutableStateOf<List<WorkRequestBrief>>(emptyList()) }
+    var clientItems by remember { mutableStateOf<List<WorkRequestBrief>>(emptyList()) }
+    var executorProfiles by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorProfileBrief>>(emptyList()) }
+    var offers by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorOfferBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
     var loadingId by remember { mutableStateOf<Int?>(null) }
+    var busyOfferId by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
 
     fun reload() {
         scope.launch {
-            try {
-                items = client.workRequests().items
-            } catch (e: Exception) {
-                error = friendlyNetworkError(e)
+            loading = true
+            error = null
+            val errors = mutableListOf<String>()
+            clientItems = runCatching { client.workRequests().items }.getOrElse {
+                errors += friendlyNetworkError(it)
+                emptyList()
             }
+            val meEx = runCatching { client.executorMe() }.getOrNull()
+            executorProfiles = meEx?.profiles.orEmpty()
+            offers = if (meEx?.isExecutor == true) {
+                runCatching { client.executorOffers().items }.getOrElse {
+                    errors += friendlyNetworkError(it)
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+            error = errors.firstOrNull()
+            loading = false
         }
     }
 
@@ -371,45 +392,160 @@ fun WorkRequestsScreen(
         "draft", "pending", "offering", "scheduling", "in_progress", "awaiting_client",
     )
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        if (onBack != null) {
-            TextButton(onClick = onBack) { Text("← Назад") }
+    fun offersForProfile(profile: ru.voitos.app.model.ExecutorProfileBrief): List<ru.voitos.app.model.ExecutorOfferBrief> {
+        return offers.filter { offer ->
+            when {
+                profile.roleId > 0 && offer.roleId > 0 -> offer.roleId == profile.roleId
+                else -> offer.roleName.equals(profile.roleName, ignoreCase = true)
+            }
         }
-        Text("Заявки", style = MaterialTheme.typography.headlineSmall)
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(items, key = { it.id }) { wr ->
-                Card(
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            if (onBack != null) {
+                TextButton(onClick = onBack) { Text("← Назад") }
+            }
+            Text("Заявки", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+            error?.let { Text(it, color = VoitosColors.Danger) }
+            message?.let { Text(it, color = VoitosColors.Ok) }
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(top = 8.dp),
+                    color = VoitosColors.Accent,
+                )
+            }
+        }
+
+        if (executorProfiles.isNotEmpty()) {
+            item {
+                Text(
+                    "Как исполнитель",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = VoitosColors.Accent2,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            items(executorProfiles, key = { "ex-${it.id}" }) { profile ->
+                val roleOffers = offersForProfile(profile)
+                PanelCard {
+                    Text(profile.roleName, style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+                    Text(
+                        profile.statusLabel.ifBlank { profile.status },
+                        color = VoitosColors.Muted,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (roleOffers.isEmpty()) {
+                        Text(
+                            "Нет заявок для данного типа исполнителя",
+                            color = VoitosColors.Muted,
+                        )
+                    } else {
+                        roleOffers.forEach { offer ->
+                            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                                Text(
+                                    "#${offer.workRequestId}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = VoitosColors.Text,
+                                )
+                                Text(offer.locality.ifBlank { "НП не указан" }, color = VoitosColors.Muted)
+                                if (offer.address.isNotBlank()) {
+                                    Text(offer.address, color = VoitosColors.Muted)
+                                }
+                                Text(offer.description, color = VoitosColors.Text)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch {
+                                                busyOfferId = offer.offerId
+                                                error = null
+                                                try {
+                                                    val res = client.respondExecutorOffer(offer.offerId, accept = true)
+                                                    message = res.message
+                                                    reload()
+                                                } catch (e: Exception) {
+                                                    error = friendlyNetworkError(e)
+                                                } finally {
+                                                    busyOfferId = null
+                                                }
+                                            }
+                                        },
+                                        enabled = busyOfferId != offer.offerId,
+                                    ) { Text("Беру", color = VoitosColors.Accent) }
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch {
+                                                busyOfferId = offer.offerId
+                                                error = null
+                                                try {
+                                                    val res = client.respondExecutorOffer(offer.offerId, accept = false)
+                                                    message = res.message
+                                                    reload()
+                                                } catch (e: Exception) {
+                                                    error = friendlyNetworkError(e)
+                                                } finally {
+                                                    busyOfferId = null
+                                                }
+                                            }
+                                        },
+                                        enabled = busyOfferId != offer.offerId,
+                                    ) { Text("Отказ", color = VoitosColors.Danger) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Text(
+                if (executorProfiles.isNotEmpty()) "Как клиент" else "Мои заявки",
+                style = MaterialTheme.typography.titleMedium,
+                color = VoitosColors.Accent2,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
+        if (!loading && clientItems.isEmpty()) {
+            item {
+                Text("Пока нет ваших заявок", color = VoitosColors.Muted)
+            }
+        }
+
+        items(clientItems, key = { "wr-${it.id}" }) { wr ->
+            PanelCard {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onConfirm(wr.id) },
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("#${wr.id} ${wr.roleName}", style = MaterialTheme.typography.titleMedium)
-                        Text(wr.status)
-                        wr.assignedExecutorName?.let { Text("Мастер: $it") }
-                        Text(wr.description, style = MaterialTheme.typography.bodySmall)
-                        if (wr.status in cancellable) {
-                            TextButton(
-                                onClick = {
-                                    scope.launch {
-                                        loadingId = wr.id
-                                        error = null
-                                        try {
-                                            client.cancelWorkRequest(wr.id)
-                                            message = "Заявка #${wr.id} отменена"
-                                            reload()
-                                        } catch (e: Exception) {
-                                            error = friendlyNetworkError(e)
-                                        } finally {
-                                            loadingId = null
-                                        }
+                    Text("#${wr.id} ${wr.roleName}", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+                    Text(wr.status, color = VoitosColors.Muted)
+                    wr.assignedExecutorName?.let { Text("Мастер: $it", color = VoitosColors.Muted) }
+                    Text(wr.description, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Text)
+                    if (wr.status in cancellable) {
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    loadingId = wr.id
+                                    error = null
+                                    try {
+                                        client.cancelWorkRequest(wr.id)
+                                        message = "Заявка #${wr.id} отменена"
+                                        reload()
+                                    } catch (e: Exception) {
+                                        error = friendlyNetworkError(e)
+                                    } finally {
+                                        loadingId = null
                                     }
-                                },
-                                enabled = loadingId != wr.id,
-                            ) { Text("Отменить заявку") }
-                        }
+                                }
+                            },
+                            enabled = loadingId != wr.id,
+                        ) { Text("Отменить заявку", color = VoitosColors.Danger) }
                     }
                 }
             }

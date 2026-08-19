@@ -9,8 +9,10 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -160,7 +162,23 @@ class VoitosApiClient(
         }
     }
 
-    suspend fun executorMe(): ExecutorMe = authedGet("/me/executor")
+    /**
+     * Старый бэкенд без /me/executor отдаёт HTML 404 → NoTransformationFoundException.
+     * Для UI кабинета считаем это «не исполнитель», а не фатальной ошибкой.
+     */
+    suspend fun executorMe(): ExecutorMe {
+        val response: HttpResponse = http.get("$baseUrl/me/executor") { applyAuth() }
+        if (response.status.value == 404) {
+            return ExecutorMe(isExecutor = false)
+        }
+        if (!response.status.isSuccess()) {
+            val code = response.status.value
+            throw IllegalStateException(
+                "Сервер вернул $code на /me/executor. Обновите бэкенд и перезапустите app.py.",
+            )
+        }
+        return response.body()
+    }
 
     suspend fun registerExecutor(
         roleId: Int,
@@ -193,7 +211,18 @@ class VoitosApiClient(
             )
         }.body()
 
-    suspend fun executorOffers(): ExecutorOfferList = authedGet("/executor/offers")
+    suspend fun executorOffers(): ExecutorOfferList {
+        val response: HttpResponse = http.get("$baseUrl/executor/offers") { applyAuth() }
+        if (response.status.value == 404) {
+            return ExecutorOfferList()
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                "Сервер вернул ${response.status.value} на /executor/offers. Обновите бэкенд.",
+            )
+        }
+        return response.body()
+    }
 
     suspend fun respondExecutorOffer(offerId: Int, accept: Boolean): ExecutorOfferRespondResult =
         http.post("$baseUrl/executor/offers/$offerId/respond") {

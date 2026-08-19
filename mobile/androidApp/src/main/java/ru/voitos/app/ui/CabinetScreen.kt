@@ -47,15 +47,24 @@ fun CabinetScreen(
     LaunchedEffect(Unit) {
         loading = true
         error = null
-        try {
-            me = client.me()
-            sub = client.subscription()
-            executor = client.executorMe()
-        } catch (e: Exception) {
-            error = friendlyNetworkError(e)
-        } finally {
-            loading = false
+        val errors = mutableListOf<String>()
+        me = runCatching { client.me() }.getOrElse {
+            errors += friendlyNetworkError(it, "Не удалось загрузить профиль")
+            null
         }
+        sub = runCatching { client.subscription() }.getOrNull()
+        executor = runCatching { client.executorMe() }.getOrElse {
+            // 404 / старый бэкенд → не исполнитель; прочие ошибки не валят весь кабинет
+            val msg = it.message.orEmpty()
+            if ("404" in msg || "me/executor" in msg.lowercase()) {
+                ExecutorMe(isExecutor = false)
+            } else {
+                errors += "Исполнитель: ${friendlyNetworkError(it)}"
+                null
+            }
+        }
+        error = errors.firstOrNull()
+        loading = false
     }
 
     Column(

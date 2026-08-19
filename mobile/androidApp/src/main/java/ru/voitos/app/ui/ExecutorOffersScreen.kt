@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.ExecutorOfferBrief
+import ru.voitos.app.model.ExecutorProfileBrief
 import ru.voitos.app.ui.theme.VoitosColors
 
 @Composable
@@ -36,19 +36,29 @@ fun ExecutorOffersScreen(
     client: VoitosApiClient,
     onBack: () -> Unit,
 ) {
-    var items by remember { mutableStateOf<List<ExecutorOfferBrief>>(emptyList()) }
+    var profiles by remember { mutableStateOf<List<ExecutorProfileBrief>>(emptyList()) }
+    var offers by remember { mutableStateOf<List<ExecutorOfferBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var busyId by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
 
+    fun offersFor(profile: ExecutorProfileBrief): List<ExecutorOfferBrief> =
+        offers.filter { offer ->
+            when {
+                profile.roleId > 0 && offer.roleId > 0 -> offer.roleId == profile.roleId
+                else -> offer.roleName.equals(profile.roleName, ignoreCase = true)
+            }
+        }
+
     fun reload() {
         scope.launch {
             loading = true
             error = null
             try {
-                items = client.executorOffers().items
+                profiles = client.executorMe().profiles
+                offers = client.executorOffers().items
             } catch (e: Exception) {
                 error = friendlyNetworkError(e)
             } finally {
@@ -62,69 +72,84 @@ fun ExecutorOffersScreen(
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
         Text("Заявки для меня", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        Text("Открытые предложения мастеру", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(8.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
         message?.let { Text(it, color = VoitosColors.Ok) }
         if (loading) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         }
-        if (!loading && items.isEmpty()) {
-            Text("Сейчас нет открытых заявок для вас", color = VoitosColors.Muted)
-        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(items, key = { it.offerId }) { offer ->
+            if (!loading && profiles.isEmpty()) {
+                item {
+                    Text("Вы ещё не зарегистрированы как исполнитель", color = VoitosColors.Muted)
+                }
+            }
+            items(profiles, key = { it.id }) { profile ->
+                val roleOffers = offersFor(profile)
                 PanelCard {
-                    Text(
-                        "#${offer.workRequestId} ${offer.roleName}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = VoitosColors.Text,
-                    )
-                    Text(offer.locality.ifBlank { "НП не указан" }, color = VoitosColors.Muted)
-                    if (offer.address.isNotBlank()) {
-                        Text(offer.address, color = VoitosColors.Muted)
-                    }
-                    Text(offer.description, color = VoitosColors.Text)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    busyId = offer.offerId
-                                    error = null
-                                    try {
-                                        val res = client.respondExecutorOffer(offer.offerId, accept = true)
-                                        message = res.message
-                                        reload()
-                                    } catch (e: Exception) {
-                                        error = friendlyNetworkError(e)
-                                    } finally {
-                                        busyId = null
-                                    }
+                    Text(profile.roleName, style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (roleOffers.isEmpty()) {
+                        Text(
+                            "Нет заявок для данного типа исполнителя",
+                            color = VoitosColors.Muted,
+                        )
+                    } else {
+                        roleOffers.forEach { offer ->
+                            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                                Text(
+                                    "#${offer.workRequestId}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = VoitosColors.Text,
+                                )
+                                Text(offer.locality.ifBlank { "НП не указан" }, color = VoitosColors.Muted)
+                                if (offer.address.isNotBlank()) {
+                                    Text(offer.address, color = VoitosColors.Muted)
                                 }
-                            },
-                            enabled = busyId != offer.offerId,
-                            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
-                        ) { Text("Беру") }
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    busyId = offer.offerId
-                                    error = null
-                                    try {
-                                        val res = client.respondExecutorOffer(offer.offerId, accept = false)
-                                        message = res.message
-                                        reload()
-                                    } catch (e: Exception) {
-                                        error = friendlyNetworkError(e)
-                                    } finally {
-                                        busyId = null
-                                    }
+                                Text(offer.description, color = VoitosColors.Text)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                busyId = offer.offerId
+                                                error = null
+                                                try {
+                                                    val res = client.respondExecutorOffer(offer.offerId, accept = true)
+                                                    message = res.message
+                                                    reload()
+                                                } catch (e: Exception) {
+                                                    error = friendlyNetworkError(e)
+                                                } finally {
+                                                    busyId = null
+                                                }
+                                            }
+                                        },
+                                        enabled = busyId != offer.offerId,
+                                        colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                                    ) { Text("Беру") }
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                busyId = offer.offerId
+                                                error = null
+                                                try {
+                                                    val res = client.respondExecutorOffer(offer.offerId, accept = false)
+                                                    message = res.message
+                                                    reload()
+                                                } catch (e: Exception) {
+                                                    error = friendlyNetworkError(e)
+                                                } finally {
+                                                    busyId = null
+                                                }
+                                            }
+                                        },
+                                        enabled = busyId != offer.offerId,
+                                        colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.BgSoft),
+                                    ) { Text("Отказ") }
                                 }
-                            },
-                            enabled = busyId != offer.offerId,
-                            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.BgSoft),
-                        ) { Text("Отказ") }
+                            }
+                        }
                     }
                 }
             }

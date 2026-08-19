@@ -172,6 +172,7 @@ def me_executor(request):
         items.append(
             {
                 "id": p.id,
+                "role_id": p.role_id or 0,
                 "role_name": p.role.name if p.role_id else p.equipment_type,
                 "role_code": p.equipment_type or (p.role.code if p.role_id else ""),
                 "status": p.status,
@@ -238,6 +239,7 @@ def executor_offers(request):
             {
                 "offer_id": offer.id,
                 "work_request_id": wr.id,
+                "role_id": wr.role_id or 0,
                 "role_name": wr.role.name if wr.role_id else "",
                 "description": (wr.description or "")[:800],
                 "locality": (wr.client_locality or wr.user.locality or "")[:255],

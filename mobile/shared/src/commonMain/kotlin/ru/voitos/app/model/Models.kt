@@ -208,6 +208,7 @@ data class OnboardingProgress(
 @Serializable
 data class ExecutorProfileBrief(
     val id: Int,
+    @SerialName("role_id") val roleId: Int = 0,
     @SerialName("role_name") val roleName: String = "",
     @SerialName("role_code") val roleCode: String = "",
     val status: String = "",
@@ -235,6 +236,7 @@ data class ExecutorRegisterResult(
 data class ExecutorOfferBrief(
     @SerialName("offer_id") val offerId: Int,
     @SerialName("work_request_id") val workRequestId: Int = 0,
+    @SerialName("role_id") val roleId: Int = 0,
     @SerialName("role_name") val roleName: String = "",
     val description: String = "",
     val locality: String = "",

@@ -101,7 +101,6 @@ fun ExecutorRegisterScreen(
     ) {
         TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
         Text("Стать исполнителем", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        Text("Тот же порядок, что в боте MAX", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
         message?.let { Text(it, color = VoitosColors.Ok) }
