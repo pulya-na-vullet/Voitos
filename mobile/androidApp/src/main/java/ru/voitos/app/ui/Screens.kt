@@ -168,7 +168,7 @@ fun InboxScreen(
                         .fillMaxWidth()
                         .clickable { onOpenDeepLink(n.deepLink.ifBlank { DeepLinks.routeForType(n.type, n.entityId).toString() }) },
                 ) {
-                    Column(Modifier.padding(12.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Text(n.title, style = MaterialTheme.typography.titleMedium)
                         if (n.body.isNotBlank()) {
                             Text(n.body, style = MaterialTheme.typography.bodySmall)
