@@ -11,7 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,7 +21,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ru.voitos.app.api.VoitosApiClient
@@ -83,57 +81,54 @@ fun CabinetScreen(
         VpnDebugBanner()
         Spacer(modifier = Modifier.height(8.dp))
         if (loading) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = VoitosColors.Accent,
-            )
+            VoitosListSkeleton(rows = 3)
         }
-        error?.let { Text(it, color = VoitosColors.Danger) }
+        error?.let { NetworkErrorText(it) }
 
-        PanelCard {
-            Text("Профиль", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
-            Spacer(modifier = Modifier.height(8.dp))
-            val m = me
-            if (m != null) {
-                InfoLine("Имя", m.realName.ifBlank { "—" })
-                InfoLine("Телефон", m.phone.ifBlank { "—" })
-                InfoLine("Населённый пункт", m.locality.ifBlank { "—" })
-                InfoLine("Адрес", m.address.ifBlank { "—" })
-                InfoLine("Статус", m.profileStatus.ifBlank { "—" })
-            } else if (!loading) {
-                Text("Не удалось загрузить профиль", color = VoitosColors.Muted)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        PanelCard {
-            Text("Подписка", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
-            Spacer(modifier = Modifier.height(8.dp))
-            val s = sub
-            if (s != null) {
-                InfoLine("Статус", s.label.ifBlank { s.state })
-                InfoLine("Действует до", formatUntil(s.subscriptionUntil))
-                s.graceUntil?.let { InfoLine("Grace до", formatUntil(it)) }
-                if (s.priceRub > 0) {
-                    InfoLine("Цена", "${s.priceRub} ₽/мес")
+        if (!loading) {
+            PanelCard {
+                Text("Профиль", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+                Spacer(modifier = Modifier.height(8.dp))
+                val m = me
+                if (m != null) {
+                    InfoLine("Имя", m.realName.ifBlank { "—" })
+                    InfoLine("Телефон", m.phone.ifBlank { "—" })
+                    InfoLine("Населённый пункт", m.locality.ifBlank { "—" })
+                    InfoLine("Адрес", m.address.ifBlank { "—" })
+                    InfoLine("Статус", m.profileStatus.ifBlank { "—" })
+                } else {
+                    Text("Не удалось загрузить профиль", color = VoitosColors.Muted)
                 }
-                FamilySubscriptionBlock(s)
-            } else if (!loading) {
-                Text("Нет данных о подписке", color = VoitosColors.Muted)
             }
-        }
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-        PanelCard {
-            Text("Исполнитель", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
-            Spacer(modifier = Modifier.height(8.dp))
-            val ex = executor
-            if (ex == null && !loading) {
-                Text("Нет данных", color = VoitosColors.Muted)
-            } else if (ex != null) {
-                if (ex.isExecutor && ex.profiles.isNotEmpty()) {
+            PanelCard {
+                Text("Подписка", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+                Spacer(modifier = Modifier.height(8.dp))
+                val s = sub
+                if (s != null) {
+                    InfoLine("Статус", s.label.ifBlank { s.state })
+                    InfoLine("Действует до", formatUntil(s.subscriptionUntil))
+                    s.graceUntil?.let { InfoLine("Grace до", formatUntil(it)) }
+                    if (s.priceRub > 0) {
+                        InfoLine("Цена", "${s.priceRub} ₽/мес")
+                    }
+                    FamilySubscriptionBlock(s)
+                } else {
+                    Text("Нет данных о подписке", color = VoitosColors.Muted)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            PanelCard {
+                Text("Исполнитель", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+                Spacer(modifier = Modifier.height(8.dp))
+                val ex = executor
+                if (ex == null) {
+                    Text("Нет данных", color = VoitosColors.Muted)
+                } else if (ex.isExecutor && ex.profiles.isNotEmpty()) {
                     ExecutorProfilesBlock(ex.profiles)
                     if (ex.openOffersCount > 0) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -146,41 +141,41 @@ fun CabinetScreen(
                     Text("Нет — вы пока не исполнитель", color = VoitosColors.Muted)
                 }
             }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Button(
+                onClick = onOpenSubscription,
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosPrimaryButtonColors(),
+            ) { Text("Подписка") }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onOpenOnboarding,
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosSecondaryButtonColors(),
+            ) { Text("Обучение") }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onOpenFeedback,
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosSecondaryButtonColors(),
+            ) { Text("ОС") }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onRegisterExecutor,
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosSecondaryButtonColors(),
+            ) { Text("Зарегистрироваться исполнителем") }
+
+            Spacer(modifier = Modifier.height(8.dp))
         }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Button(
-            onClick = onOpenSubscription,
-            modifier = Modifier.fillMaxWidth(),
-            colors = voitosPrimaryButtonColors(),
-        ) { Text("Подписка") }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = onOpenOnboarding,
-            modifier = Modifier.fillMaxWidth(),
-            colors = voitosSecondaryButtonColors(),
-        ) { Text("Обучение") }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = onOpenFeedback,
-            modifier = Modifier.fillMaxWidth(),
-            colors = voitosSecondaryButtonColors(),
-        ) { Text("ОС") }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = onRegisterExecutor,
-            modifier = Modifier.fillMaxWidth(),
-            colors = voitosSecondaryButtonColors(),
-        ) { Text("Зарегистрироваться исполнителем") }
-
-        Spacer(modifier = Modifier.height(8.dp))
 
         TextButton(
             onClick = onLogout,

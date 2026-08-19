@@ -353,22 +353,51 @@ fun LoginScreen(
 fun friendlyNetworkError(e: Throwable, fallback: String = "Ошибка сети"): String {
     val msg = (e.message ?: "").lowercase()
     val cause = (e.cause?.message ?: "").lowercase()
-    val all = "$msg $cause"
+    val className = (e::class.simpleName ?: "").lowercase()
+    val causeClass = (e.cause?.let { it::class.simpleName } ?: "").lowercase()
+    val all = "$msg $cause $className $causeClass"
     return when {
-        "timeout" in all || "timed out" in all ->
-            "Сервер не ответил вовремя. Проверьте, что бэкенд запущен и телефон в той же Wi‑Fi, " +
-                "а в URL указан актуальный IP компьютера (не 10.0.2.2 на реальном телефоне)."
-        "failed to connect" in all || "connection refused" in all || "connectexception" in all ->
-            "Нет связи с сервером. Запущен ли Voitos на этом IP:порту? Телефон и ПК в одной сети?"
-        "unable to resolve" in all || "unknownhost" in all ->
-            "Не удалось найти хост. Проверьте API base URL."
+        isServerUnavailable(all) -> "Проводятся технические работы"
+        "timeout" in all || "timed out" in all || "sockettimeout" in all ->
+            "Проводятся технические работы"
         "notransformationfound" in all || "expected response body" in all ->
-            "Сервер вернул неожиданный ответ (часто HTML 404). Обновите код бэкенда и перезапустите app.py."
-        msg.isNotBlank() && msg.length < 220 -> e.message ?: fallback
-        msg.isNotBlank() -> fallback
+            "Сервер вернул неожиданный ответ. Обновите приложение и бэкенд."
+        msg.isNotBlank() && msg.length < 160 &&
+            "http" !in msg && "exception" !in msg && "error" !in msg ->
+            e.message ?: fallback
         else -> fallback
     }
 }
+
+fun isServerUnavailableError(e: Throwable): Boolean {
+    val msg = (e.message ?: "").lowercase()
+    val cause = (e.cause?.message ?: "").lowercase()
+    val className = (e::class.simpleName ?: "").lowercase()
+    val causeClass = (e.cause?.let { it::class.simpleName } ?: "").lowercase()
+    return isServerUnavailable("$msg $cause $className $causeClass")
+}
+
+@Composable
+fun NetworkErrorText(error: String, modifier: Modifier = Modifier) {
+    if (error == "Проводятся технические работы") {
+        VoitosMaintenanceMessage(modifier = modifier)
+    } else {
+        Text(error, color = VoitosColors.Danger, modifier = modifier)
+    }
+}
+
+private fun isServerUnavailable(all: String): Boolean =
+    "failed to connect" in all ||
+        "connection refused" in all ||
+        "connectexception" in all ||
+        "connection reset" in all ||
+        "network is unreachable" in all ||
+        "no address associated" in all ||
+        "unable to resolve" in all ||
+        "unknownhost" in all ||
+        "unreachable" in all ||
+        "software caused connection abort" in all ||
+        "cleartext" in all && "not permitted" in all
 
 @Composable
 fun InboxScreen(
@@ -411,9 +440,10 @@ fun InboxScreen(
         TextButton(onClick = onLogout) { Text("Выйти", color = VoitosColors.Danger) }
         Spacer(modifier = Modifier.height(8.dp))
         if (loading) {
-            CircularProgressIndicator(color = VoitosColors.Accent)
+            VoitosListSkeleton(rows = 3)
         }
-        error?.let { Text(it, color = VoitosColors.Danger) }
+        error?.let { NetworkErrorText(it) }
+        if (!loading) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(notifications, key = { it.id }) { n ->
                 Card(
@@ -448,6 +478,7 @@ fun InboxScreen(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -497,23 +528,21 @@ fun WorkRequestsScreen(
                 color = VoitosColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )
-            error?.let { Text(it, color = VoitosColors.Danger) }
+            error?.let { NetworkErrorText(it) }
             message?.let { Text(it, color = VoitosColors.Ok) }
             if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(top = 8.dp),
-                    color = VoitosColors.Accent,
-                )
+                VoitosListSkeleton(rows = 3)
             }
         }
 
-        if (!loading && clientItems.isEmpty()) {
+        if (!loading && clientItems.isEmpty() && error == null) {
             item {
                 Text("Пока нет ваших заявок", color = VoitosColors.Muted)
             }
         }
 
-        items(clientItems, key = { "wr-${it.id}" }) { wr ->
+        if (!loading) {
+            items(clientItems, key = { "wr-${it.id}" }) { wr ->
             PanelCard {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
@@ -624,6 +653,7 @@ fun WorkRequestsScreen(
                         ) { Text("Отменить заявку", color = VoitosColors.Danger) }
                     }
                 }
+            }
             }
         }
     }
