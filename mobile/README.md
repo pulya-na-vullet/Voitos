@@ -5,10 +5,10 @@
 ## Что уже есть
 
 - `shared/` — модели, `VoitosApiClient` (Ktor), `DeepLinks`, `PushTokenProvider`
-- `androidApp/` — Login, Inbox, Сборы, Заявки, фото заявки, Вызов мастера, Подписка, Обучение, Confirm
+- `androidApp/` — Login, Inbox, Сборы, Заявки, фото заявки, Вызов мастера, Подписка (+чек), Обучение (Coil), Confirm
 - После логина: `POST /devices` через `DevPushTokenProvider` (Firebase — раскомментировать в gradle)
 - Inbox: мастер, сбор, confirm, чек, renewal, unpaid remind
-- API: `POST .../photos` (base64), `POST .../submit`, onboarding steps + caption
+- API: photos/submit заявки, `GET|POST /me/receipts`, onboarding steps + caption
 
 ## Документы
 
@@ -21,7 +21,7 @@ cd mobile
 # Android Studio → Open → mobile/
 ```
 
-Нужен JDK 17+. Полный Gradle sync подтянет Ktor.
+Нужен JDK 17+. Полный Gradle sync подтянет Ktor + Coil.
 
 ## Firebase
 
@@ -35,5 +35,6 @@ cd mobile
 2. Inbox / Home  
 3. Collections + detail  
 4. New work request → photos → submit  
-5. Subscription / Onboarding comics  
-6. Confirm amount 
+5. Subscription + upload receipt  
+6. Onboarding comics (Coil)  
+7. Confirm amount 
