@@ -55,27 +55,54 @@ fun LoginScreen(
     initialBaseUrl: String,
     initialPhone: String = "",
     initialDebugCode: String = "",
+    recentBaseUrls: List<String> = emptyList(),
     onLoggedIn: (token: String, name: String, baseUrl: String, phone: String) -> Unit,
     onDebugPrefs: (baseUrl: String, phone: String, debugCode: String) -> Unit = { _, _, _ -> },
+    onSaveServer: (baseUrl: String) -> Unit = {},
 ) {
-    var baseUrl by remember { mutableStateOf(initialBaseUrl) }
+    val initialHp = remember(initialBaseUrl) { ru.voitos.app.DevServerSettings.parse(initialBaseUrl) }
+    var host by remember { mutableStateOf(initialHp.host) }
+    var portText by remember { mutableStateOf(initialHp.port.toString()) }
     var phone by remember { mutableStateOf(initialPhone) }
     var code by remember { mutableStateOf(initialDebugCode) }
     var debugHint by remember { mutableStateOf<String?>(null) }
     var healthHint by remember { mutableStateOf<String?>(null) }
+    var savedHint by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    var step by remember { mutableStateOf(if (initialPhone.isNotBlank()) 0 else 0) }
+    var step by remember { mutableStateOf(0) }
+    var recent by remember { mutableStateOf(recentBaseUrls) }
     val scope = rememberCoroutineScope()
 
-    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl.trim().trimEnd('/'))
+    fun currentBaseUrl(): String {
+        val port = portText.toIntOrNull() ?: 18765
+        return ru.voitos.app.DevServerSettings.HostPort(
+            host = host.trim().ifBlank { "10.0.2.2" },
+            port = port,
+        ).toBaseUrl()
+    }
+
+    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = currentBaseUrl())
 
     fun persistDebug(debugCode: String = "") {
-        onDebugPrefs(baseUrl.trim().trimEnd('/'), phone.trim(), debugCode)
+        onDebugPrefs(currentBaseUrl(), phone.trim(), debugCode)
+    }
+
+    fun applySavedUrl(url: String) {
+        val hp = ru.voitos.app.DevServerSettings.parse(url)
+        host = hp.host
+        portText = hp.port.toString()
+        persistDebug()
+        onSaveServer(currentBaseUrl())
+        savedHint = "Сохранено: ${currentBaseUrl()}"
+        recent = listOf(currentBaseUrl()) + recent.filter { it != currentBaseUrl() }
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Text("Voitos", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.secondary)
@@ -83,39 +110,93 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(8.dp))
         VpnDebugBanner()
         Spacer(modifier = Modifier.height(8.dp))
+        Text("Сервер в локальной сети", color = VoitosColors.Accent2, style = MaterialTheme.typography.titleSmall)
         OutlinedTextField(
-            value = baseUrl,
+            value = host,
             onValueChange = {
-                baseUrl = it
+                host = it
                 persistDebug()
+                savedHint = null
             },
-            label = { Text("API base URL") },
-            supportingText = {
-                Text("Эмулятор: http://10.0.2.2:18765/api/v1 · телефон: http://LAN_IP:18765/api/v1")
-            },
+            label = { Text("IP / хост ПК") },
+            placeholder = { Text("192.168.101.9") },
+            supportingText = { Text("Сохраняется на устройстве; при смене Wi‑Fi просто поправьте IP") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
-        TextButton(
-            onClick = {
-                scope.launch {
-                    loading = true
-                    error = null
-                    try {
-                        val ok = client().health()
-                        healthHint = if (ok) "Сервер отвечает ✓" else "Сервер ответил без ok"
-                    } catch (e: Exception) {
-                        healthHint = null
-                        error = friendlyNetworkError(e)
-                    } finally {
-                        loading = false
-                    }
-                }
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedTextField(
+            value = portText,
+            onValueChange = {
+                portText = it.filter { ch -> ch.isDigit() }.take(5)
+                persistDebug()
+                savedHint = null
             },
-            enabled = !loading,
-        ) { Text("Проверить сервер") }
+            label = { Text("Порт") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Text(
+            currentBaseUrl(),
+            style = MaterialTheme.typography.bodySmall,
+            color = VoitosColors.Muted,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = {
+                    val url = currentBaseUrl()
+                    persistDebug()
+                    onSaveServer(url)
+                    savedHint = "Сохранено ✓ $url"
+                    recent = listOf(url) + recent.filter { it != url }
+                },
+                modifier = Modifier.weight(1f),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = VoitosColors.Accent,
+                ),
+            ) { Text("Сохранить адрес") }
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        loading = true
+                        error = null
+                        try {
+                            persistDebug()
+                            onSaveServer(currentBaseUrl())
+                            val ok = client().health()
+                            healthHint = if (ok) "Сервер отвечает ✓" else "Сервер ответил без ok"
+                        } catch (e: Exception) {
+                            healthHint = null
+                            error = friendlyNetworkError(e)
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                enabled = !loading,
+            ) { Text("Проверить") }
+        }
+        savedHint?.let {
+            Text(it, color = VoitosColors.Ok, style = MaterialTheme.typography.bodySmall)
+        }
         healthHint?.let {
             Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+        }
+        if (recent.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Недавние", color = VoitosColors.Muted, style = MaterialTheme.typography.labelMedium)
+            recent.take(5).forEach { url ->
+                val hp = ru.voitos.app.DevServerSettings.parse(url)
+                TextButton(
+                    onClick = { applySavedUrl(url) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("${hp.host}:${hp.port}", color = VoitosColors.Accent2)
+                }
+            }
         }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
@@ -156,6 +237,7 @@ fun LoginScreen(
                         error = null
                         try {
                             persistDebug()
+                            onSaveServer(currentBaseUrl())
                             val res = client().phoneStart(phone)
                             val dbg = res["debug_code"].orEmpty()
                             if (dbg.isNotBlank()) {
@@ -181,11 +263,12 @@ fun LoginScreen(
                         error = null
                         try {
                             persistDebug(code)
+                            onSaveServer(currentBaseUrl())
                             val session = client().phoneVerify(phone, code)
                             onLoggedIn(
                                 session.accessToken,
                                 session.displayName,
-                                baseUrl.trim().trimEnd('/'),
+                                currentBaseUrl(),
                                 phone.trim(),
                             )
                         } catch (e: Exception) {
