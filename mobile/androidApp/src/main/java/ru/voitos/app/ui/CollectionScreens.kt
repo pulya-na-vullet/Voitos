@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -51,6 +52,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.CollectionBrief
@@ -62,6 +64,7 @@ import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
 fun CollectionsScreen(
     client: VoitosApiClient,
     onOpen: (Int) -> Unit = {},
+    onOpenChat: () -> Unit = {},
     onBack: (() -> Unit)? = null,
     refreshKey: Int = 0,
 ) {
@@ -70,26 +73,39 @@ fun CollectionsScreen(
     var loading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val listState = rememberLazyListState()
 
-    fun reload() {
+    fun reload(silent: Boolean = false) {
         scope.launch {
-            loading = true
-            error = null
+            if (!silent) {
+                loading = true
+                error = null
+            }
             try {
                 items = client.collections().items
+                if (silent) error = null
             } catch (e: Exception) {
-                error = friendlyNetworkError(e)
+                if (!silent || items.isEmpty()) {
+                    error = friendlyNetworkError(e)
+                }
             } finally {
-                loading = false
+                if (!silent) loading = false
             }
         }
     }
 
-    LaunchedEffect(refreshKey) { reload() }
+    LaunchedEffect(refreshKey) { reload(silent = items.isNotEmpty()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            reload(silent = true)
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) reload()
+            if (event == Lifecycle.Event.ON_RESUME) reload(silent = items.isNotEmpty())
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -106,8 +122,8 @@ fun CollectionsScreen(
                 }
                 Text("Сборы", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
             }
-            TextButton(onClick = { reload() }) {
-                Text("Обновить", color = VoitosColors.Accent2)
+            TextButton(onClick = onOpenChat) {
+                Text("Чат", color = VoitosColors.Accent2)
             }
         }
         error?.let { NetworkErrorText(it) }
@@ -121,8 +137,9 @@ fun CollectionsScreen(
                 modifier = Modifier.padding(top = 12.dp),
             )
         }
-        if (!loading) {
+        if (items.isNotEmpty()) {
             LazyColumn(
+                state = listState,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize().padding(top = 8.dp),
             ) {

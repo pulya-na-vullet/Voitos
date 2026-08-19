@@ -362,6 +362,16 @@ fun friendlyNetworkError(e: Throwable, fallback: String = "Ошибка сети
             "Проводятся технические работы"
         "notransformationfound" in all || "expected response body" in all ->
             "Сервер вернул неожиданный ответ. Обновите приложение и бэкенд."
+        // Понятные сообщения от API / подготовки аватара
+        e.message.orEmpty().let { m ->
+            m.isNotBlank() && m.length < 200 && (
+                "аватар" in m.lowercase() ||
+                    "изображен" in m.lowercase() ||
+                    "фото" in m.lowercase() ||
+                    "обновите бэкенд" in m.lowercase() ||
+                    "пришлите" in m.lowercase()
+                )
+        } -> e.message ?: fallback
         msg.isNotBlank() && msg.length < 160 &&
             "http" !in msg && "exception" !in msg && "error" !in msg ->
             e.message ?: fallback

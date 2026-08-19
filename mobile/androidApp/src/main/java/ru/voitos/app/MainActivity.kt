@@ -40,6 +40,7 @@ import ru.voitos.app.ui.ConfirmAmountScreen
 import ru.voitos.app.ui.ExecutorOffersScreen
 import ru.voitos.app.ui.ExecutorRegisterScreen
 import ru.voitos.app.ui.FeedbackScreen
+import ru.voitos.app.ui.GroupChatScreen
 import ru.voitos.app.ui.LoginScreen
 import ru.voitos.app.ui.MainShell
 import ru.voitos.app.ui.MainTab
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
         data object Subscription : Screen()
         data object Onboarding : Screen()
         data object Feedback : Screen()
+        data object GroupChat : Screen()
         data object ExecutorRegister : Screen()
         data class Confirm(val id: Int) : Screen()
     }
@@ -231,6 +233,7 @@ class MainActivity : ComponentActivity() {
                                         MainTab.Collections -> CollectionsScreen(
                                             client = client,
                                             onOpen = { id -> screen = Screen.CollectionDetail(id) },
+                                            onOpenChat = { screen = Screen.GroupChat },
                                             onBack = null,
                                             refreshKey = collectionsRefresh,
                                         )
@@ -330,6 +333,14 @@ class MainActivity : ComponentActivity() {
                                 client = client,
                                 onBack = {
                                     tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
+
+                            Screen.GroupChat -> GroupChatScreen(
+                                client = client,
+                                onBack = {
+                                    tab = MainTab.Collections
                                     screen = Screen.Main
                                 },
                             )

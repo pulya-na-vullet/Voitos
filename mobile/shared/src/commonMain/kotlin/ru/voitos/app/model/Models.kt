@@ -18,14 +18,41 @@ data class AuthSession(
 
 @Serializable
 data class Me(
-    val id: Int,
+    val id: Int = 0,
     @SerialName("real_name") val realName: String = "",
     val phone: String = "",
     val address: String = "",
     val locality: String = "",
     @SerialName("profile_status") val profileStatus: String = "",
     @SerialName("onboarding_completed") val onboardingCompleted: Boolean = false,
+    @SerialName("avatar_url") val avatarUrl: String = "",
 )
+
+@Serializable
+data class AvatarUploadResult(
+    val ok: Boolean = true,
+    val id: Int = 0,
+    @SerialName("real_name") val realName: String = "",
+    val phone: String = "",
+    val address: String = "",
+    val locality: String = "",
+    @SerialName("profile_status") val profileStatus: String = "",
+    @SerialName("onboarding_completed") val onboardingCompleted: Boolean = false,
+    @SerialName("avatar_url") val avatarUrl: String = "",
+    val detail: String = "",
+    val error: String = "",
+) {
+    fun toMe(): Me = Me(
+        id = id,
+        realName = realName,
+        phone = phone,
+        address = address,
+        locality = locality,
+        profileStatus = profileStatus,
+        onboardingCompleted = onboardingCompleted,
+        avatarUrl = avatarUrl,
+    )
+}
 
 @Serializable
 data class AccessInfo(
@@ -374,3 +401,43 @@ data class FeedbackCreateResult(
     val detail: String = "",
     val error: String = "",
 )
+
+@Serializable
+data class ServiceGroupBrief(
+    val id: Int = 0,
+    val name: String = "",
+    val description: String = "",
+    @SerialName("member_count") val memberCount: Int = 0,
+)
+
+@Serializable
+data class ServiceGroupList(
+    val items: List<ServiceGroupBrief> = emptyList(),
+)
+
+@Serializable
+data class GroupChatMessage(
+    val id: Int = 0,
+    @SerialName("group_id") val groupId: Int = 0,
+    val text: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("author_id") val authorId: Int? = null,
+    @SerialName("author_name") val authorName: String = "",
+    @SerialName("author_avatar_url") val authorAvatarUrl: String = "",
+    @SerialName("is_mine") val isMine: Boolean = false,
+)
+
+@Serializable
+data class GroupChatMessagesResponse(
+    val group: ServiceGroupBrief = ServiceGroupBrief(),
+    val items: List<GroupChatMessage> = emptyList(),
+)
+
+@Serializable
+data class GroupChatSendResult(
+    val ok: Boolean = true,
+    val message: GroupChatMessage? = null,
+    val detail: String = "",
+    val error: String = "",
+)
+
