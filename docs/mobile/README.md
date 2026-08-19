@@ -1,6 +1,6 @@
 # Voitos Mobile — план без второй бизнес-логики
 
-Стек клиента: **Kotlin Multiplatform**.  
+Стек клиента: **Kotlin Multiplatform** (ветка `cursor/kmp-e31c`).  
 Мозг: существующий Django (те же `services/`, `bot/`, `subscriptions/`).
 
 | Слой | Роль |
