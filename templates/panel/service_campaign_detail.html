@@ -398,12 +398,20 @@
           <td>
             {% if r.image %}<a href="{{ r.image.url }}" target="_blank">файл</a>{% endif %}
             {% if r.status == 'pending' %}
-            <form method="post" action="{% url 'panel:service_receipt_approve' r.id %}" style="display:inline;">{% csrf_token %}
+            <form method="post" action="{% url 'panel:service_receipt_approve' r.id %}" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:6px 0;">
+              {% csrf_token %}
               <input type="hidden" name="next" value="{{ request.path }}">
+              <input type="number" name="amount" min="0.01" step="0.01" required
+                     value="{{ r.amount|default_if_none:'' }}"
+                     placeholder="Сумма, ₽"
+                     title="Сумма, которую распознали / принимаете по чеку"
+                     style="width:110px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
               <button class="btn small" type="submit">Принять</button>
             </form>
-            <form method="post" action="{% url 'panel:service_receipt_reject' r.id %}" style="display:inline;">{% csrf_token %}
+            <form method="post" action="{% url 'panel:service_receipt_reject' r.id %}" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+              {% csrf_token %}
               <input type="hidden" name="next" value="{{ request.path }}">
+              <input type="text" name="comment" placeholder="Причина" style="width:140px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
               <button class="btn danger small" type="submit">Отклонить</button>
             </form>
             {% endif %}

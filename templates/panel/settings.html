@@ -88,6 +88,10 @@
       <input type="text" name="service_payee_status" value="{{ cfg.service_payee_status }}">
     </div>
     <div class="form-row">
+      <label>Сервис: банк для перевода</label>
+      <input type="text" name="service_payee_bank" value="{{ cfg.service_payee_bank }}" placeholder="Сбер, Т-Банк…">
+    </div>
+    <div class="form-row">
       <label>Лимит налоговой, ₽</label>
       <input type="number" name="service_tax_limit" value="{{ cfg.service_tax_limit }}" min="1" step="1">
     </div>

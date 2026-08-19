@@ -52,11 +52,15 @@ UNPAID_REMINDER_TEXT = (
 
 def service_payment_requisites() -> str:
     cfg = AppSettings.load()
-    return (
-        f"Получатель: {cfg.service_payee_name}\n"
-        f"Телефон: {cfg.service_payee_phone}\n"
-        f"Статус: {cfg.service_payee_status}"
-    )
+    bank = (getattr(cfg, "service_payee_bank", None) or "").strip()
+    lines = [
+        f"Получатель: {cfg.service_payee_name}",
+        f"Телефон: {cfg.service_payee_phone}",
+    ]
+    if bank:
+        lines.append(f"Банк: {bank}")
+    lines.append(f"Статус: {cfg.service_payee_status}")
+    return "\n".join(lines)
 
 
 def progress_bar(percent: int, width: int = 10) -> str:
@@ -293,7 +297,7 @@ def save_offer_photos(
     campaign: ServiceCampaign,
     uploads: list[tuple[bytes, str]],
     *,
-    max_photos: int = 2,
+    max_photos: int = 8,
 ) -> list[ServiceCampaignOfferPhoto]:
     """Save up to max_photos task photos attached at campaign launch."""
     existing = campaign.offer_photos.count()
@@ -317,7 +321,7 @@ def campaign_offer_image_payloads(
     campaign: ServiceCampaign,
 ) -> list[tuple[bytes, str]]:
     payloads: list[tuple[bytes, str]] = []
-    for photo in campaign.offer_photos.all()[:2]:
+    for photo in campaign.offer_photos.all()[:8]:
         try:
             with photo.image.open("rb") as fh:
                 payloads.append((fh.read(), Path(photo.image.name).name))
@@ -1056,6 +1060,7 @@ def approve_service_receipt(
     receipt: ServiceReceipt,
     comment: str = "",
     send_fn=None,
+    amount: Decimal | None = None,
 ) -> ServiceReceipt:
     with transaction.atomic():
         receipt = (
@@ -1065,9 +1070,13 @@ def approve_service_receipt(
         )
         if receipt.status == ReceiptStatus.APPROVED:
             return receipt
-        amount = Decimal(receipt.amount or 0)
+        if amount is None:
+            amount = receipt.amount
+        if amount is None:
+            raise ValueError("Укажите сумму, которую распознали / принимаете по чеку.")
+        amount = Decimal(amount)
         if amount <= 0:
-            raise ValueError("Нельзя принять чек без суммы.")
+            raise ValueError("Сумма должна быть больше нуля.")
 
         invite = (
             type(receipt.invite)
@@ -1082,6 +1091,7 @@ def approve_service_receipt(
             invite.paid_at = timezone.now()
         invite.save()
 
+        receipt.amount = amount
         receipt.status = ReceiptStatus.APPROVED
         receipt.admin_comment = comment
         receipt.reviewed_at = timezone.now()

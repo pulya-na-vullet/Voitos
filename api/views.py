@@ -78,9 +78,48 @@ def me_subscription(request):
             "pending_receipts": PaymentReceipt.objects.filter(
                 user=user, status="pending"
             ).count(),
+            "family": _family_subscription_payload(user),
         }
     )
     return json_response(payload)
+
+
+def _family_member_item(u, *, relation: str) -> dict:
+    return {
+        "id": u.id,
+        "name": str(u).strip() or (u.phone or f"#{u.id}"),
+        "phone": (u.phone or "").strip(),
+        "relation": relation,
+    }
+
+
+def _family_subscription_payload(user) -> dict:
+    """Кто на семейной подписке: я плательщик → члены; я на чужой → плательщик и остальные."""
+    dependents = list(
+        user.family_dependents.all().order_by("real_name", "display_name", "id")
+    )
+    payer = user.family_payer
+    members: list[dict] = []
+    if dependents:
+        for d in dependents:
+            members.append(_family_member_item(d, relation="member"))
+        return {
+            "is_payer": True,
+            "payer_name": "",
+            "members": members,
+        }
+    if payer is not None:
+        members.append(_family_member_item(payer, relation="payer"))
+        for d in payer.family_dependents.exclude(id=user.id).order_by(
+            "real_name", "display_name", "id"
+        ):
+            members.append(_family_member_item(d, relation="member"))
+        return {
+            "is_payer": False,
+            "payer_name": str(payer).strip(),
+            "members": members,
+        }
+    return {"is_payer": False, "payer_name": "", "members": []}
 
 
 @api_login_required
@@ -145,10 +184,140 @@ def executor_roles(request):
                     "requires_work_photos": bool(
                         getattr(r, "requires_work_photos", True)
                     ),
+                    "is_equipment": bool(getattr(r, "is_equipment", False)),
+                    "requires_qualification_docs": bool(
+                        getattr(r, "requires_qualification_docs", False)
+                    ),
                 }
                 for r in roles
             ]
         }
+    )
+
+
+@api_login_required
+@require_GET
+def me_executor(request):
+    """Является ли пользователь исполнителем + его роли."""
+    from database.models import ContractorProfile
+
+    profiles = list(
+        ContractorProfile.objects.filter(user=request.bot_user)
+        .select_related("role")
+        .order_by("id")
+    )
+    items = []
+    for p in profiles:
+        items.append(
+            {
+                "id": p.id,
+                "role_id": p.role_id or 0,
+                "role_name": p.role.name if p.role_id else p.equipment_type,
+                "role_code": p.equipment_type or (p.role.code if p.role_id else ""),
+                "status": p.status,
+                "status_label": p.get_status_display(),
+                "locality": p.locality or "",
+                "phone": p.phone or "",
+            }
+        )
+    return json_response(
+        {
+            "is_executor": bool(items),
+            "profiles": items,
+            "open_offers_count": _open_offers_qs(request.bot_user).count(),
+        }
+    )
+
+
+def _open_offers_qs(user):
+    from database.models import WorkRequestOffer, WorkRequestOfferStatus
+
+    return (
+        WorkRequestOffer.objects.filter(
+            contractor__user=user,
+            status=WorkRequestOfferStatus.OFFERED,
+        )
+        .select_related(
+            "work_request",
+            "work_request__role",
+            "work_request__user",
+            "contractor",
+        )
+        .order_by("-offered_at", "-id")
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def executor_register(request):
+    from bot.contractor_registration import submit_contractor_registration_api
+
+    data = parse_json(request)
+    try:
+        profile, message = submit_contractor_registration_api(request.bot_user, data)
+    except ValueError as exc:
+        return json_response({"error": str(exc)}, status=400)
+    return json_response(
+        {
+            "ok": True,
+            "id": profile.id,
+            "status": profile.status,
+            "message": message,
+        },
+        status=201,
+    )
+
+
+@api_login_required
+@require_GET
+def executor_offers(request):
+    items = []
+    for offer in _open_offers_qs(request.bot_user)[:50]:
+        wr = offer.work_request
+        items.append(
+            {
+                "offer_id": offer.id,
+                "work_request_id": wr.id,
+                "role_id": wr.role_id or 0,
+                "role_name": wr.role.name if wr.role_id else "",
+                "description": (wr.description or "")[:800],
+                "locality": (wr.client_locality or wr.user.locality or "")[:255],
+                "address": (wr.user.address or "")[:500],
+                "status": offer.status,
+                "respond_deadline": (
+                    offer.respond_deadline.isoformat() if offer.respond_deadline else None
+                ),
+            }
+        )
+    return json_response({"items": items})
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def executor_offer_respond(request, pk: int):
+    from database.models import WorkRequestOffer, WorkRequestOfferStatus
+    from services.work_request_dispatch import accept_offer, decline_offer
+
+    offer = (
+        WorkRequestOffer.objects.select_related(
+            "work_request", "work_request__role", "contractor", "contractor__user"
+        )
+        .filter(pk=pk, contractor__user=request.bot_user)
+        .first()
+    )
+    if not offer:
+        return json_response({"error": "not_found"}, status=404)
+    if offer.status != WorkRequestOfferStatus.OFFERED:
+        return json_response({"error": "already_handled"}, status=400)
+    data = parse_json(request)
+    accept = bool(data.get("accept") or data.get("yes"))
+    if accept:
+        msg = accept_offer(offer)
+    else:
+        msg = decline_offer(offer)
+    offer.refresh_from_db()
+    return json_response(
+        {"ok": True, "message": msg, "status": offer.status, "offer_id": offer.id}
     )
 
 
@@ -318,33 +487,119 @@ def notification_read(request, pk: int):
     return json_response({"ok": True})
 
 
+def _absolute_media_url(request, file_field) -> str:
+    if not file_field:
+        return ""
+    try:
+        url = file_field.url
+    except Exception:
+        return ""
+    if not url:
+        return ""
+    if str(url).startswith("http://") or str(url).startswith("https://"):
+        return str(url)
+    return request.build_absolute_uri(url)
+
+
+def _campaign_photo_urls(request, campaign) -> list[str]:
+    urls: list[str] = []
+    if not campaign:
+        return urls
+    for photo in campaign.offer_photos.all().order_by("id")[:12]:
+        u = _absolute_media_url(request, photo.image)
+        if u:
+            urls.append(u)
+    return urls
+
+
+def _service_payment_payload() -> dict:
+    cfg = AppSettings.load()
+    return {
+        "payment_name": (cfg.service_payee_name or "").strip(),
+        "payment_phone": (cfg.service_payee_phone or "").strip(),
+        "payment_bank": (getattr(cfg, "service_payee_bank", None) or "").strip(),
+        "payment_status": (cfg.service_payee_status or "").strip(),
+    }
+
+
+@api_login_required
+@require_http_methods(["GET", "POST"])
+def me_feedback(request):
+    """Обращения из приложения: баг / ОС / отзыв о менеджере."""
+    from services.feedback import (
+        create_feedback_ticket,
+        list_user_feedback,
+        manager_context_dict,
+        ticket_to_dict,
+    )
+
+    user = request.bot_user
+    if request.method == "GET":
+        return json_response(
+            {
+                "items": [ticket_to_dict(t) for t in list_user_feedback(user)],
+                "manager": manager_context_dict(user),
+                "notice": "Все обращения рассматриваются администратором.",
+            }
+        )
+    data = parse_json(request)
+    try:
+        ticket = create_feedback_ticket(
+            user,
+            kind=str(data.get("kind") or ""),
+            body=str(data.get("body") or ""),
+            subject=str(data.get("subject") or ""),
+            score=data.get("score"),
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    return json_response({"ok": True, "ticket": ticket_to_dict(ticket)}, status=201)
+
+
 @api_login_required
 @require_GET
 def collections_list(request):
     """Список инвайтов жителя в сборы."""
     try:
-        from database.models import ServiceInvite
+        from database.models import InviteStatus, ReceiptStatus, ServiceInvite
 
         invites = (
             ServiceInvite.objects.filter(user=request.bot_user)
+            .exclude(status=InviteStatus.CANCELLED)
             .select_related("campaign")
+            .prefetch_related("campaign__offer_photos", "receipts")
             .order_by("-id")[:50]
         )
+        pay = _service_payment_payload()
         items = []
         for inv in invites:
             camp = inv.campaign
+            photos = _campaign_photo_urls(request, camp)
+            receipts = list(inv.receipts.all())
+            pending_n = sum(1 for r in receipts if r.status == ReceiptStatus.PENDING)
+            rejected_n = sum(1 for r in receipts if r.status == ReceiptStatus.REJECTED)
             items.append(
                 {
                     "id": camp.id if camp else inv.id,
                     "title": getattr(camp, "title", None) or "Сбор",
                     "category": getattr(camp, "category", "") or "",
+                    "category_label": (
+                        camp.get_category_display() if camp else ""
+                    ),
                     "amount_due": float(getattr(inv, "amount_due", 0) or 0),
                     "status": inv.status,
+                    "campaign_status": getattr(camp, "status", "") or "",
                     "event_at": (
                         camp.event_at.isoformat()
                         if camp and getattr(camp, "event_at", None)
                         else None
                     ),
+                    "cover_photo_url": photos[0] if photos else "",
+                    "photo_urls": photos,
+                    "description": (getattr(camp, "description", None) or "")[:400],
+                    "pending_receipts": pending_n,
+                    "rejected_receipts": rejected_n,
+                    **pay,
                 }
             )
         return json_response({"items": items})
@@ -356,7 +611,59 @@ def collections_list(request):
 @require_GET
 def collection_detail(request, pk: int):
     """Детали сбора по campaign id для текущего пользователя."""
-    from database.models import ServiceInvite
+    from database.models import InviteStatus, ReceiptStatus, ServiceInvite
+
+    inv = (
+        ServiceInvite.objects.filter(user=request.bot_user, campaign_id=pk)
+        .select_related("campaign")
+        .prefetch_related("campaign__offer_photos")
+        .first()
+    )
+    if not inv:
+        return json_response({"error": "not_found"}, status=404)
+    camp = inv.campaign
+    paid = int(camp.invites.filter(status=InviteStatus.PAID).count() if camp else 0)
+    total = int(camp.invites.count() if camp else 0)
+    pending = int(
+        inv.receipts.filter(status=ReceiptStatus.PENDING).count() if hasattr(inv, "receipts") else 0
+    )
+    rejected = int(
+        inv.receipts.filter(status=ReceiptStatus.REJECTED).count() if hasattr(inv, "receipts") else 0
+    )
+    photos = _campaign_photo_urls(request, camp)
+    can_pay = inv.status == InviteStatus.OFFERED and (
+        camp.status != "closed" if camp else True
+    )
+    payload = {
+        "id": camp.id,
+        "title": camp.title,
+        "category": camp.category or "",
+        "category_label": camp.get_category_display(),
+        "description": camp.description or "",
+        "amount_due": float(inv.amount_due or 0),
+        "amount_paid": float(inv.amount_paid or 0),
+        "status": inv.status,
+        "campaign_status": camp.status or "",
+        "event_at": camp.event_at.isoformat() if camp.event_at else None,
+        "paid_count": paid,
+        "invite_count": total,
+        "invite_id": inv.id,
+        "can_pay": can_pay,
+        "pending_receipts": pending,
+        "rejected_receipts": rejected,
+        "cover_photo_url": photos[0] if photos else "",
+        "photo_urls": photos,
+        **_service_payment_payload(),
+    }
+    return json_response(payload)
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def collection_receipt(request, pk: int):
+    """Загрузить чек оплаты сбора (base64)."""
+    from database.models import InviteStatus, ServiceInvite
+    from services.service import submit_service_receipt
 
     inv = (
         ServiceInvite.objects.filter(user=request.bot_user, campaign_id=pk)
@@ -365,24 +672,33 @@ def collection_detail(request, pk: int):
     )
     if not inv:
         return json_response({"error": "not_found"}, status=404)
-    camp = inv.campaign
-    paid = int(
-        camp.invites.filter(status="paid").count() if camp else 0
-    )
-    total = int(camp.invites.count() if camp else 0)
+    if inv.status == InviteStatus.PAID:
+        return json_response({"error": "already_paid", "message": "Сбор уже оплачен"}, status=400)
+    data = parse_json(request)
+    from api.media import decode_base64_payload
+
+    image_bytes = decode_base64_payload(data.get("content_base64") or "")
+    if not image_bytes:
+        return json_response({"error": "bad_image"}, status=400)
+    filename = (data.get("filename") or "receipt.jpg").strip()[:120] or "receipt.jpg"
+    try:
+        receipt = submit_service_receipt(
+            request.bot_user,
+            image_bytes,
+            invite=inv,
+            filename=filename,
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc)}, status=400)
     return json_response(
         {
-            "id": camp.id,
-            "title": camp.title,
-            "category": camp.category or "",
-            "description": camp.description or "",
-            "amount_due": float(inv.amount_due or 0),
-            "amount_paid": float(inv.amount_paid or 0),
-            "status": inv.status,
-            "event_at": camp.event_at.isoformat() if camp.event_at else None,
-            "paid_count": paid,
-            "invite_count": total,
-        }
+            "ok": True,
+            "id": receipt.id,
+            "status": receipt.status,
+            "message": "Чек отправлен на проверку",
+            "created_at": receipt.created_at.isoformat(),
+        },
+        status=201,
     )
 
 

@@ -27,6 +27,7 @@
     </div>
     <nav class="nav">
       <a href="{% url 'panel:admin_tasks_today' %}" class="{% if request.resolver_match.url_name == 'admin_tasks_today' or request.resolver_match.url_name == 'admin_task_done' or request.resolver_match.url_name == 'admin_address_scan' %}active{% endif %}">Задачи</a>
+      <a href="{% url 'panel:feedback_list' %}" class="{% if request.resolver_match.url_name == 'feedback_list' or request.resolver_match.url_name == 'feedback_detail' %}active{% endif %}">ОС / баги</a>
       <a href="{% url 'panel:users' %}" class="{% if request.resolver_match.url_name == 'users' %}active{% endif %}">Жители</a>
       {% if panel_is_admin %}
       <a href="{% url 'panel:receipts' %}" class="{% if request.resolver_match.url_name == 'receipts' or request.resolver_match.url_name == 'user_receipts' or request.resolver_match.url_name == 'receipt_approve' or request.resolver_match.url_name == 'receipt_reject' or request.resolver_match.url_name == 'receipt_delete' %}active{% endif %}">Подписки</a>

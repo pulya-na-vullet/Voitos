@@ -906,6 +906,9 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             request.POST.get("service_payee_status", cfg.service_payee_status).strip()
             or cfg.service_payee_status
         )
+        cfg.service_payee_bank = (
+            request.POST.get("service_payee_bank", getattr(cfg, "service_payee_bank", "")).strip()
+        )
         try:
             cfg.service_tax_limit = Decimal(
                 request.POST.get("service_tax_limit") or cfg.service_tax_limit or "2400000"
@@ -2074,13 +2077,30 @@ def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, "Нет доступа.")
         return redirect(panel_home_url_name(request.user))
     comment = request.POST.get("comment", "").strip()
+    raw_amount = (request.POST.get("amount") or "").strip().replace(",", ".")
     try:
-        approve_service_receipt(receipt, comment=comment, send_fn=_notify_user)
+        amount = Decimal(raw_amount) if raw_amount else None
+    except InvalidOperation:
+        amount = None
+        messages.error(request, "Некорректная сумма по чеку.")
+        return redirect_after_post(
+            request, fallback=f"/panel/services/campaigns/{receipt.campaign_id}/"
+        )
+    try:
+        approve_service_receipt(
+            receipt,
+            comment=comment,
+            amount=amount,
+            send_fn=_notify_user,
+        )
         receipt.refresh_from_db()
         receipt.invite.refresh_from_db()
         receipt.campaign.refresh_from_db()
         _notify_user(receipt.user, approved_service_message(receipt))
-        messages.success(request, f"Сервис-чек #{pk} принят.")
+        messages.success(
+            request,
+            f"Сервис-чек #{pk} принят: {receipt.amount} ₽.",
+        )
         if receipt.campaign.status == CampaignStatus.CLOSED:
             messages.info(request, "Цель сбора достигнута — рассылка «Сбор закрыт.»")
         tax_warn = AppSettings.load().tax_limit_warning()
@@ -2334,3 +2354,81 @@ def admin_address_scan(request: HttpRequest) -> HttpResponse:
     except Exception as exc:
         messages.error(request, f"Ошибка сканирования: {exc}")
     return redirect("panel:admin_tasks_today")
+
+
+@login_required
+def feedback_list(request: HttpRequest) -> HttpResponse:
+    from database.models import FeedbackKind, FeedbackStatus, FeedbackTicket
+
+    status = (request.GET.get("status") or "").strip()
+    kind = (request.GET.get("kind") or "").strip()
+    date_from = (request.GET.get("date_from") or "").strip()
+    date_to = (request.GET.get("date_to") or "").strip()
+
+    qs = FeedbackTicket.objects.select_related(
+        "user", "manager", "group", "admin_replied_by"
+    ).all()
+    if not is_panel_admin(request.user):
+        scope = scoped_bot_user_ids(request.user)
+        qs = qs.filter(user_id__in=scope)
+
+    if status:
+        qs = qs.filter(status=status)
+    if kind:
+        qs = qs.filter(kind=kind)
+    if date_from:
+        qs = qs.filter(created_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(created_at__date__lte=date_to)
+
+    open_qs = FeedbackTicket.objects.filter(status=FeedbackStatus.OPEN)
+    if not is_panel_admin(request.user):
+        open_qs = open_qs.filter(user_id__in=scoped_bot_user_ids(request.user))
+    open_count = open_qs.count()
+
+    return render(
+        request,
+        "panel/feedback_list.html",
+        {
+            "items": list(qs[:300]),
+            "status": status,
+            "kind": kind,
+            "date_from": date_from,
+            "date_to": date_to,
+            "statuses": FeedbackStatus.choices,
+            "kinds": FeedbackKind.choices,
+            "open_count": open_count,
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def feedback_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    from database.models import FeedbackTicket
+    from services.feedback import answer_feedback_ticket
+
+    ticket = get_object_or_404(
+        FeedbackTicket.objects.select_related(
+            "user", "manager", "group", "admin_replied_by"
+        ),
+        pk=pk,
+    )
+    if ticket.user_id and not can_access_bot_user(request.user, ticket.user):
+        messages.error(request, "Нет доступа к этому обращению.")
+        return redirect("panel:feedback_list")
+
+    if request.method == "POST":
+        reply = (request.POST.get("admin_reply") or "").strip()
+        try:
+            answer_feedback_ticket(ticket, reply=reply, admin_user=request.user)
+            messages.success(request, "Ответ отправлен пользователю.")
+        except ValueError as exc:
+            messages.error(request, str(exc))
+        return redirect("panel:feedback_detail", pk=ticket.id)
+
+    return render(
+        request,
+        "panel/feedback_detail.html",
+        {"ticket": ticket},
+    )

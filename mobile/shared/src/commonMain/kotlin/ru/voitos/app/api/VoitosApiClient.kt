@@ -2,16 +2,18 @@ package ru.voitos.app.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -19,7 +21,14 @@ import ru.voitos.app.VoitosApi
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
+import ru.voitos.app.model.CollectionReceiptResult
+import ru.voitos.app.model.ExecutorMe
+import ru.voitos.app.model.ExecutorOfferList
+import ru.voitos.app.model.ExecutorOfferRespondResult
+import ru.voitos.app.model.ExecutorRegisterResult
 import ru.voitos.app.model.ExecutorRoleList
+import ru.voitos.app.model.FeedbackCreateResult
+import ru.voitos.app.model.FeedbackListResponse
 import ru.voitos.app.model.HealthResponse
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.NotificationList
@@ -28,6 +37,7 @@ import ru.voitos.app.model.PhotoUploadResult
 import ru.voitos.app.model.ReceiptList
 import ru.voitos.app.model.ReceiptUploadResult
 import ru.voitos.app.model.SubscriptionInfo
+import ru.voitos.app.model.WorkRequestCancelResult
 import ru.voitos.app.model.WorkRequestCreated
 import ru.voitos.app.model.WorkRequestList
 import ru.voitos.app.model.WorkRequestSubmitResult
@@ -78,6 +88,22 @@ class VoitosApiClient(
     suspend fun collections(): CollectionList = authedGet("/collections")
 
     suspend fun collection(id: Int): CollectionDetail = authedGet("/collections/$id")
+
+    suspend fun uploadCollectionReceipt(
+        collectionId: Int,
+        contentBase64: String,
+        filename: String = "receipt.jpg",
+    ): CollectionReceiptResult =
+        http.post("$baseUrl/collections/$collectionId/receipt") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("content_base64", contentBase64)
+                    put("filename", filename)
+                },
+            )
+        }.body()
 
     suspend fun subscription(): SubscriptionInfo = authedGet("/me/subscription")
 
@@ -135,14 +161,125 @@ class VoitosApiClient(
             setBody(buildJsonObject {})
         }.body()
 
-    suspend fun cancelWorkRequest(workRequestId: Int): WorkRequestCancelResult =
-        http.post("$baseUrl/work-requests/$workRequestId/cancel") {
+    suspend fun cancelWorkRequest(workRequestId: Int): WorkRequestCancelResult {
+        return try {
+            http.post("$baseUrl/work-requests/$workRequestId/cancel") {
+                applyAuth()
+                contentType(ContentType.Application.Json)
+                setBody(buildJsonObject {})
+            }.body()
+        } catch (e: Exception) {
+            val msg = (e.message ?: "") + " " + (e.cause?.message ?: "")
+            if ("404" in msg || "Not Found" in msg) {
+                throw IllegalStateException(
+                    "Сервер вернул 404 на отмену заявки. Обновите бэкенд " +
+                        "(нужен /api/v1/work-requests/{id}/cancel) и перезапустите app.py.",
+                    e,
+                )
+            }
+            throw e
+        }
+    }
+
+    /**
+     * Старый бэкенд без /me/executor отдаёт HTML 404 → NoTransformationFoundException.
+     * Для UI кабинета считаем это «не исполнитель», а не фатальной ошибкой.
+     */
+    suspend fun executorMe(): ExecutorMe {
+        val response: HttpResponse = http.get("$baseUrl/me/executor") { applyAuth() }
+        if (response.status.value == 404) {
+            return ExecutorMe(isExecutor = false)
+        }
+        if (!response.status.isSuccess()) {
+            val code = response.status.value
+            throw IllegalStateException(
+                "Сервер вернул $code на /me/executor. Обновите бэкенд и перезапустите app.py.",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun registerExecutor(
+        roleId: Int,
+        equipmentLabel: String,
+        plateNumber: String = "",
+        phone: String,
+        locality: String,
+        bankName: String,
+        payoutPhone: String = "",
+        qualBase64: String = "",
+        qualFilename: String = "doc.jpg",
+    ): ExecutorRegisterResult =
+        http.post("$baseUrl/executor/register") {
             applyAuth()
             contentType(ContentType.Application.Json)
-            setBody(buildJsonObject {})
+            setBody(
+                buildJsonObject {
+                    put("role_id", roleId)
+                    put("equipment_label", equipmentLabel)
+                    put("plate_number", plateNumber)
+                    put("phone", phone)
+                    put("locality", locality)
+                    put("bank_name", bankName)
+                    put("payout_phone", payoutPhone)
+                    if (qualBase64.isNotBlank()) {
+                        put("qual_base64", qualBase64)
+                        put("qual_filename", qualFilename)
+                    }
+                },
+            )
+        }.body()
+
+    suspend fun executorOffers(): ExecutorOfferList {
+        val response: HttpResponse = http.get("$baseUrl/executor/offers") { applyAuth() }
+        if (response.status.value == 404) {
+            return ExecutorOfferList()
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                "Сервер вернул ${response.status.value} на /executor/offers. Обновите бэкенд.",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun respondExecutorOffer(offerId: Int, accept: Boolean): ExecutorOfferRespondResult =
+        http.post("$baseUrl/executor/offers/$offerId/respond") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("accept", accept) })
         }.body()
 
     suspend fun onboarding(): OnboardingProgress = authedGet("/onboarding")
+
+    suspend fun feedback(): FeedbackListResponse = authedGet("/me/feedback")
+
+    suspend fun createFeedback(
+        kind: String,
+        body: String,
+        subject: String = "",
+        score: Int? = null,
+    ): FeedbackCreateResult {
+        val response: HttpResponse = http.post("$baseUrl/me/feedback") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("kind", kind)
+                    put("body", body)
+                    put("subject", subject)
+                    if (score != null) put("score", score)
+                },
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err: FeedbackCreateResult = runCatching { response.body<FeedbackCreateResult>() }
+                .getOrElse { FeedbackCreateResult(ok = false, error = "HTTP ${response.status.value}") }
+            val msg = err.detail.ifBlank { err.error }.ifBlank { "Не удалось отправить обращение" }
+            throw IllegalStateException(msg)
+        }
+        return response.body()
+    }
 
     suspend fun completeOnboardingStep(code: String): OnboardingProgress =
         http.post("$baseUrl/onboarding/steps/$code/complete") {
@@ -191,6 +328,11 @@ class VoitosApiClient(
 
     companion object {
         fun defaultClient(): HttpClient = HttpClient {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 20_000
+                connectTimeoutMillis = 10_000
+                socketTimeoutMillis = 20_000
+            }
             install(ContentNegotiation) {
                 json(
                     Json {

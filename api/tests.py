@@ -54,6 +54,36 @@ class MobileApiTests(TestCase):
         resp = self.client.get("/api/v1/me")
         self.assertEqual(resp.status_code, 401)
 
+    def test_me_subscription_family_members(self):
+        dependent = BotUser.objects.create(
+            max_user_id="app_family2",
+            phone="89625507833",
+            real_name="Член семьи",
+            profile_status=ProfileStatus.VERIFIED,
+            family_payer=self.user,
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.user)
+        resp = self.client.get(
+            "/api/v1/me/subscription",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIn("family", body)
+        self.assertTrue(body["family"]["is_payer"])
+        names = [m["name"] for m in body["family"]["members"]]
+        self.assertIn("Член семьи", names)
+
+        tok2 = MobileAuthToken.objects.create(bot_user=dependent)
+        resp2 = self.client.get(
+            "/api/v1/me/subscription",
+            HTTP_AUTHORIZATION=f"Bearer {tok2.token}",
+        )
+        self.assertEqual(resp2.status_code, 200)
+        fam = resp2.json()["family"]
+        self.assertFalse(fam["is_payer"])
+        self.assertEqual(fam["payer_name"], "Тест")
+
     def test_notifications_inbox(self):
         tok = MobileAuthToken.objects.create(bot_user=self.user)
         n = notify_user(
@@ -365,6 +395,10 @@ class AppEmitHookTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["title"], "Снег")
         self.assertEqual(resp.json()["amount_due"], 100.0)
+        self.assertIn("payment_phone", resp.json())
+        self.assertIn("payment_bank", resp.json())
+        self.assertIn("photo_urls", resp.json())
+        self.assertTrue(resp.json()["can_pay"])
 
     def test_create_work_request_api(self):
         tok = MobileAuthToken.objects.create(bot_user=self.client_user)
@@ -538,3 +572,49 @@ class AppEmitHookTests(TestCase):
         )
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()["items"]), 1)
+
+    def test_feedback_create_and_list(self):
+        from database.models import FeedbackStatus, FeedbackTicket
+        from services.feedback import answer_feedback_ticket
+
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        empty = self.client.get(
+            "/api/v1/me/feedback",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["items"], [])
+        self.assertIn("рассматриваются", empty.json()["notice"].lower())
+
+        created = self.client.post(
+            "/api/v1/me/feedback",
+            data=json.dumps(
+                {
+                    "kind": "bug",
+                    "subject": "Кнопка",
+                    "body": "Не открывается экран сборов после обновления.",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(created.status_code, 201)
+        ticket_id = created.json()["ticket"]["id"]
+        ticket = FeedbackTicket.objects.get(pk=ticket_id)
+        self.assertEqual(ticket.status, FeedbackStatus.OPEN)
+
+        from django.contrib.auth import get_user_model
+
+        admin = get_user_model().objects.create_superuser(
+            username="fb_admin", password="x", email="a@b.c"
+        )
+        answer_feedback_ticket(ticket, reply="Исправили, обновите приложение.", admin_user=admin)
+
+        listed = self.client.get(
+            "/api/v1/me/feedback",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(listed.status_code, 200)
+        item = listed.json()["items"][0]
+        self.assertEqual(item["status"], "answered")
+        self.assertIn("Исправили", item["admin_reply"])

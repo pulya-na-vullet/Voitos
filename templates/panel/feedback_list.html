@@ -1,0 +1,81 @@
+{% extends "panel/base.html" %}
+{% block title %}Обращения (ОС) — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Обращения из приложения</h1>
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+    {% if open_count %}<span class="badge bad">На рассмотрении: {{ open_count }}</span>{% endif %}
+    <a class="btn secondary small" href="{% url 'panel:admin_tasks_today' %}">← Задачи</a>
+  </div>
+</div>
+
+<form method="get" class="card" style="margin-bottom:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+  <label style="display:flex; flex-direction:column; gap:4px;">
+    <span class="muted">Статус ответа</span>
+    <select name="status" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+      <option value="">Все</option>
+      {% for value, label in statuses %}
+        <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="display:flex; flex-direction:column; gap:4px;">
+    <span class="muted">Тип</span>
+    <select name="kind" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+      <option value="">Все</option>
+      {% for value, label in kinds %}
+        <option value="{{ value }}" {% if kind == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="display:flex; flex-direction:column; gap:4px;">
+    <span class="muted">С даты</span>
+    <input type="date" name="date_from" value="{{ date_from }}" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+  </label>
+  <label style="display:flex; flex-direction:column; gap:4px;">
+    <span class="muted">По дату</span>
+    <input type="date" name="date_to" value="{{ date_to }}" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+  </label>
+  <button class="btn small" type="submit">Применить</button>
+  <a class="btn secondary small" href="{% url 'panel:feedback_list' %}">Сбросить</a>
+</form>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Когда</th>
+        <th>Кто</th>
+        <th>Тип</th>
+        <th>Тема</th>
+        <th>Статус</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.id }}</td>
+        <td class="mono">{{ item.created_at|date:"d.m.Y H:i" }}</td>
+        <td><a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></td>
+        <td>{{ item.get_kind_display }}{% if item.score %} · {{ item.score }}/5{% endif %}</td>
+        <td>{{ item.subject|default:item.body|truncatechars:60 }}</td>
+        <td>
+          {% if item.status == "open" %}
+            <span class="badge bad">{{ item.get_status_display }}</span>
+          {% elif item.status == "answered" %}
+            <span class="badge">{{ item.get_status_display }}</span>
+          {% else %}
+            <span class="badge">{{ item.get_status_display }}</span>
+          {% endif %}
+        </td>
+        <td><a class="btn small" href="{% url 'panel:feedback_detail' item.id %}">Открыть</a></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="7" class="muted">Обращений нет по выбранным фильтрам.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Без явной темы часть OEM (Huawei) падает на cold start Compose Activity. -->
+    <style name="Theme.Voitos" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0B1015</item>
+        <item name="android:statusBarColor">#0B1015</item>
+        <item name="android:navigationBarColor">#0B1015</item>
+        <item name="android:windowFullscreen">false</item>
+    </style>
+</resources>

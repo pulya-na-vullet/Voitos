@@ -8,11 +8,13 @@ object DeepLinks {
     private val WR = Regex("""voitos://app/work-requests/(\d+)(?:/(confirm|slots|rate|survey))?""")
     private val COL = Regex("""voitos://app/collections/(\d+)""")
     private val VOL = Regex("""voitos://app/volunteer/(\d+)""")
+    private val FB = Regex("""voitos://app/feedback(?:/(\d+))?""")
 
     sealed class Route {
         data object Home : Route()
         data object Subscription : Route()
         data object Profile : Route()
+        data object Feedback : Route()
         data class WorkRequest(val id: Int, val action: String? = null) : Route()
         data class Collection(val id: Int) : Route()
         data class Volunteer(val askId: Int) : Route()
@@ -26,6 +28,9 @@ object DeepLinks {
             link.contains("/subscription") -> return Route.Subscription
             link.contains("/profile") -> return Route.Profile
             link.contains("/home") -> return Route.Home
+        }
+        FB.matchEntire(link)?.let {
+            return Route.Feedback
         }
         WR.matchEntire(link)?.let { m ->
             return Route.WorkRequest(m.groupValues[1].toInt(), m.groupValues.getOrNull(2)?.ifBlank { null })
@@ -61,6 +66,7 @@ object DeepLinks {
         "subscription.renewal_2d",
         "subscription.renewal_2h",
         "subscription.onboarding_reward" -> Route.Subscription
+        "feedback.answered" -> Route.Feedback
         else -> Route.Home
     }
 }

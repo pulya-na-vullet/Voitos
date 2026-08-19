@@ -1,0 +1,63 @@
+{% extends "panel/base.html" %}
+{% block title %}ОС #{{ ticket.id }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Обращение #{{ ticket.id }}</h1>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn secondary small" href="{% url 'panel:feedback_list' %}">← К списку</a>
+    <a class="btn secondary small" href="{% url 'panel:admin_tasks_today' %}">Задачи</a>
+  </div>
+</div>
+
+<div class="card" style="max-width:820px;">
+  <p><strong>Житель:</strong>
+    <a href="{% url 'panel:user_dashboard' ticket.user_id %}">{{ ticket.user }}</a>
+  </p>
+  <p><strong>Тип:</strong> {{ ticket.get_kind_display }}</p>
+  <p><strong>Статус:</strong>
+    {% if ticket.status == "open" %}
+      <span class="badge bad">{{ ticket.get_status_display }}</span>
+    {% else %}
+      <span class="badge">{{ ticket.get_status_display }}</span>
+    {% endif %}
+  </p>
+  <p><strong>Создано:</strong> <span class="mono">{{ ticket.created_at|date:"d.m.Y H:i" }}</span></p>
+  {% if ticket.subject %}<p><strong>Тема:</strong> {{ ticket.subject }}</p>{% endif %}
+  {% if ticket.kind == "manager" %}
+    <p><strong>Менеджер:</strong>
+      {% if ticket.manager %}{{ ticket.manager.get_full_name|default:ticket.manager.username }}{% else %}—{% endif %}
+      {% if ticket.group %} · {{ ticket.group.name }}{% endif %}
+      {% if ticket.score %} · оценка {{ ticket.score }}/5{% endif %}
+    </p>
+  {% endif %}
+  <p><strong>Текст обращения:</strong></p>
+  <div style="white-space:pre-wrap; padding:12px; border-radius:10px; background:var(--bg-soft); border:1px solid var(--line);">{{ ticket.body }}</div>
+
+  {% if ticket.admin_reply %}
+    <hr style="margin:18px 0; border:none; border-top:1px solid var(--line);">
+    <p><strong>Ответ администратора</strong>
+      {% if ticket.admin_replied_at %}
+        <span class="muted">· {{ ticket.admin_replied_at|date:"d.m.Y H:i" }}
+        {% if ticket.admin_replied_by %} · {{ ticket.admin_replied_by }}{% endif %}</span>
+      {% endif %}
+    </p>
+    <div style="white-space:pre-wrap; padding:12px; border-radius:10px; background:var(--bg-soft); border:1px solid var(--line);">{{ ticket.admin_reply }}</div>
+  {% endif %}
+
+  {% if ticket.status == "open" or not ticket.admin_reply %}
+  <hr style="margin:18px 0; border:none; border-top:1px solid var(--line);">
+  <form method="post">
+    {% csrf_token %}
+    <label style="display:block; margin-bottom:8px;">
+      <strong>Ответ пользователю</strong>
+      <span class="muted"> — будет виден в приложении в логе обращений</span>
+    </label>
+    <textarea name="admin_reply" rows="5" required placeholder="Кратко опишите решение или комментарий…"
+      style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text); resize:vertical;">{{ ticket.admin_reply }}</textarea>
+    <div style="margin-top:10px;">
+      <button class="btn" type="submit">Отметить рассмотренным и отправить ответ</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
