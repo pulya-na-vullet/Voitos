@@ -1,11 +1,15 @@
 package ru.voitos.app.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TextFieldColors
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
@@ -13,8 +17,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.LocalTextStyle
 
 /** Цвета как в static/panel/app.css */
 object VoitosColors {
@@ -34,11 +36,12 @@ object VoitosColors {
 
 private val VoitosDarkScheme = darkColorScheme(
     primary = VoitosColors.Accent,
-    onPrimary = VoitosColors.OnAccent,
+    // Светлый текст на акцентных кнопках (иначе Material даёт почти чёрный).
+    onPrimary = VoitosColors.Text,
     secondary = VoitosColors.Accent2,
-    onSecondary = VoitosColors.OnAccent,
+    onSecondary = VoitosColors.Text,
     tertiary = VoitosColors.Accent2,
-    onTertiary = VoitosColors.OnAccent,
+    onTertiary = VoitosColors.Text,
     background = VoitosColors.Bg,
     onBackground = VoitosColors.Text,
     surface = VoitosColors.Panel,
@@ -102,6 +105,38 @@ fun voitosOutlinedFieldColors(): TextFieldColors = OutlinedTextFieldDefaults.col
     unfocusedPlaceholderColor = VoitosColors.Muted,
     focusedSupportingTextColor = VoitosColors.Muted,
     unfocusedSupportingTextColor = VoitosColors.Muted,
+)
+
+@Composable
+fun voitosPrimaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
+    containerColor = VoitosColors.Accent,
+    contentColor = VoitosColors.Text,
+    disabledContainerColor = VoitosColors.Panel,
+    disabledContentColor = VoitosColors.Muted,
+)
+
+@Composable
+fun voitosSecondaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
+    containerColor = VoitosColors.BgSoft,
+    contentColor = VoitosColors.Text,
+    disabledContainerColor = VoitosColors.Panel,
+    disabledContentColor = VoitosColors.Muted,
+)
+
+@Composable
+fun voitosAccent2ButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
+    containerColor = VoitosColors.Accent2,
+    contentColor = VoitosColors.Text,
+    disabledContainerColor = VoitosColors.Panel,
+    disabledContentColor = VoitosColors.Muted,
+)
+
+@Composable
+fun voitosDangerButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
+    containerColor = VoitosColors.BgSoft,
+    contentColor = VoitosColors.Danger,
+    disabledContainerColor = VoitosColors.Panel,
+    disabledContentColor = VoitosColors.Muted,
 )
 
 @Composable

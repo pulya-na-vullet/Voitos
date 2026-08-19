@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +52,9 @@ import ru.voitos.app.model.OnboardingStep
 import ru.voitos.app.model.WorkRequestBrief
 import ru.voitos.app.nav.DeepLinks
 import ru.voitos.app.ui.theme.VoitosColors
+import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
+import ru.voitos.app.ui.theme.voitosSecondaryButtonColors
+import ru.voitos.app.ui.theme.voitosAccent2ButtonColors
 
 @Composable
 fun LoginScreen(
@@ -128,8 +130,8 @@ fun LoginScreen(
                 persistDebug()
                 savedHint = null
             },
-            label = { Text("IP / хост ПК") },
-            placeholder = { Text("192.168.101.9") },
+            label = { Text("IP / хост ПК", color = VoitosColors.Muted) },
+            placeholder = { Text("192.168.101.9", color = VoitosColors.Muted) },
             supportingText = {
                 Text("«Сохранить» пишет в Загрузки — IP останется после удаления APK. Или нажмите «Найти в Wi‑Fi».")
             },
@@ -145,7 +147,7 @@ fun LoginScreen(
                 persistDebug()
                 savedHint = null
             },
-            label = { Text("Порт") },
+            label = { Text("Порт", color = VoitosColors.Muted) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
@@ -192,9 +194,7 @@ fun LoginScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading && !scanning,
-            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                containerColor = VoitosColors.Accent2,
-            ),
+            colors = voitosAccent2ButtonColors(),
         ) {
             Text(if (scanning) "Ищем сервер в Wi‑Fi…" else "Найти сервер в Wi‑Fi")
         }
@@ -211,9 +211,7 @@ fun LoginScreen(
                     recent = listOf(url) + recent.filter { it != url }
                 },
                 modifier = Modifier.weight(1f),
-                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                    containerColor = VoitosColors.Accent,
-                ),
+                colors = voitosPrimaryButtonColors(),
             ) { Text("Сохранить адрес") }
             TextButton(
                 onClick = {
@@ -234,7 +232,7 @@ fun LoginScreen(
                     }
                 },
                 enabled = !loading && !scanning,
-            ) { Text("Проверить") }
+            ) { Text("Проверить", color = VoitosColors.Accent) }
         }
         savedHint?.let {
             Text(it, color = VoitosColors.Ok, style = MaterialTheme.typography.bodySmall)
@@ -262,7 +260,7 @@ fun LoginScreen(
                 phone = it
                 persistDebug()
             },
-            label = { Text("Телефон") },
+            label = { Text("Телефон", color = VoitosColors.Muted) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
@@ -272,7 +270,7 @@ fun LoginScreen(
             OutlinedTextField(
                 value = code,
                 onValueChange = { code = it },
-                label = { Text("Код из SMS") },
+                label = { Text("Код из SMS", color = VoitosColors.Muted) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
@@ -283,11 +281,14 @@ fun LoginScreen(
         }
         error?.let {
             Spacer(modifier = Modifier.height(8.dp))
-            Text(it, color = MaterialTheme.colorScheme.error)
+            Text(it, color = VoitosColors.Danger)
         }
         Spacer(modifier = Modifier.height(16.dp))
         if (loading || scanning) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                color = VoitosColors.Accent,
+            )
         } else if (step == 0) {
             Button(
                 onClick = {
@@ -313,6 +314,7 @@ fun LoginScreen(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
+                colors = voitosPrimaryButtonColors(),
             ) { Text("Получить код") }
         } else {
             Button(
@@ -338,8 +340,9 @@ fun LoginScreen(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
+                colors = voitosPrimaryButtonColors(),
             ) { Text("Войти") }
-            TextButton(onClick = { step = 0 }) { Text("Изменить номер") }
+            TextButton(onClick = { step = 0 }) { Text("Изменить номер", color = VoitosColors.Accent) }
         }
     }
 }
@@ -412,6 +415,10 @@ fun InboxScreen(
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(notifications, key = { it.id }) { n ->
                 Card(
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = VoitosColors.Panel,
+                        contentColor = VoitosColors.Text,
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
@@ -504,7 +511,7 @@ fun WorkRequestsScreen(
     ) {
         item {
             if (onBack != null) {
-                TextButton(onClick = onBack) { Text("← Назад") }
+                VoitosBackButton(onClick = onBack)
             }
             Text("Заявки", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
             error?.let { Text(it, color = VoitosColors.Danger) }
@@ -664,7 +671,7 @@ fun ConfirmAmountScreen(
     val scope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        VoitosBackButton(onClick = onBack)
         Text("Подтвердите сумму", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Text("Заявка #$workRequestId", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(12.dp))
@@ -686,13 +693,13 @@ fun ConfirmAmountScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
-            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+            colors = voitosPrimaryButtonColors(),
         ) { Text("Да, сумма верна") }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = amount,
             onValueChange = { amount = it },
-            label = { Text("Своя сумма, ₽") },
+            label = { Text("Своя сумма, ₽", color = VoitosColors.Muted) },
             modifier = Modifier.fillMaxWidth(),
             colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
         )
@@ -719,7 +726,7 @@ fun ConfirmAmountScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
-            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.BgSoft, contentColor = VoitosColors.Text),
+            colors = voitosSecondaryButtonColors(),
         ) { Text("Отправить свою сумму") }
         message?.let { Text(it, color = VoitosColors.Ok) }
         error?.let { Text(it, color = VoitosColors.Danger) }
@@ -779,7 +786,7 @@ fun SubscriptionScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        VoitosBackButton(onClick = onBack)
         Text("Подписка", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
@@ -830,33 +837,8 @@ fun SubscriptionScreen(
                 onClick = { picker.launch("image/*") },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
-                colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                colors = voitosPrimaryButtonColors(),
             ) { Text("Загрузить чек") }
-            Button(
-                onClick = {
-                    scope.launch {
-                        loading = true
-                        error = null
-                        try {
-                            val tiny =
-                                "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
-                            val res = client.uploadReceipt(tiny, "dev-receipt.jpg")
-                            message = "Тестовый чек #${res.id} на проверке"
-                            reload()
-                        } catch (e: Exception) {
-                            error = friendlyNetworkError(e)
-                        } finally {
-                            loading = false
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !loading,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = VoitosColors.BgSoft,
-                    contentColor = VoitosColors.Text,
-                ),
-            ) { Text("Тестовый чек (dev)") }
         }
         if (receipts.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -903,7 +885,7 @@ fun NewWorkRequestScreen(
             .padding(16.dp),
     ) {
         if (onBack != null) {
-            TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+            VoitosBackButton(onClick = onBack)
         }
         Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Text("Выберите роль", color = VoitosColors.Muted)
@@ -919,7 +901,7 @@ fun NewWorkRequestScreen(
         OutlinedTextField(
             value = description,
             onValueChange = { description = it },
-            label = { Text("Что случилось") },
+            label = { Text("Что случилось", color = VoitosColors.Muted) },
             modifier = Modifier.fillMaxWidth(),
             minLines = 3,
             colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
@@ -952,7 +934,7 @@ fun NewWorkRequestScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading && description.length >= 5 && selectedId != null,
-            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+            colors = voitosPrimaryButtonColors(),
         ) { Text("Создать заявку") }
         message?.let { Text(it, color = VoitosColors.Ok) }
         error?.let { Text(it, color = VoitosColors.Danger) }
@@ -1002,7 +984,7 @@ fun WorkRequestPhotosScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        VoitosBackButton(onClick = onBack)
         Text("Фото заявки #$workRequestId", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Text("Нужно хотя бы одно фото места работ.", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(12.dp))
@@ -1010,35 +992,8 @@ fun WorkRequestPhotosScreen(
             onClick = { picker.launch("image/*") },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
-            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+            colors = voitosPrimaryButtonColors(),
         ) { Text("Выбрать фото") }
-        Button(
-            onClick = {
-                scope.launch {
-                    loading = true
-                    error = null
-                    try {
-                        // Небольшой валидный JPEG (не 1×1), чтобы в админке было видно
-                        val tiny =
-                            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxAQEBAQEBAPEBAQDw8PDw8PDw8PFRAVFREWFhUVFRUYHSggGBolGxUVITEhJSkrLi4uFx8zODMtNygtLisBCgoKDg0OGxAQGy0lHyUtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAEAAQMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAAAAQID/8QAFhEBAQEAAAAAAAAAAAAAAAAAAAER/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
-                        val name = "test_${System.currentTimeMillis()}.jpg"
-                        val res = client.addWorkRequestPhoto(workRequestId, tiny, name)
-                        photoCount = res.photoCount
-                        message = "Приложено фото: $photoCount"
-                    } catch (e: Exception) {
-                        error = e.message
-                    } finally {
-                        loading = false
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !loading,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = VoitosColors.BgSoft,
-                contentColor = VoitosColors.Text,
-            ),
-        ) { Text("Добавить тестовое фото") }
         Spacer(modifier = Modifier.height(8.dp))
         Text("Сейчас приложено: $photoCount", color = VoitosColors.Text)
         Button(
@@ -1059,7 +1014,7 @@ fun WorkRequestPhotosScreen(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading && photoCount > 0,
-            colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+            colors = voitosPrimaryButtonColors(),
         ) { Text("Готово — отправить") }
         if (loading) CircularProgressIndicator(color = VoitosColors.Accent)
         message?.let { Text(it, color = VoitosColors.Ok) }
@@ -1111,7 +1066,7 @@ fun OnboardingScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Обучение", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-            TextButton(onClick = onBack) { Text("Закрыть", color = VoitosColors.Accent) }
+            VoitosBackButton(onClick = onBack, label = "Закрыть")
         }
         progress?.let {
             Text(
@@ -1127,7 +1082,10 @@ fun OnboardingScreen(
         error?.let { Text(it, color = VoitosColors.Danger) }
         if (step == null) {
             if (error == null) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                color = VoitosColors.Accent,
+            )
                 Text("Загрузка…", color = VoitosColors.Muted)
             }
         } else {
@@ -1181,6 +1139,7 @@ fun OnboardingScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
+                colors = voitosPrimaryButtonColors(),
             ) {
                 Text(
                     when {
@@ -1190,6 +1149,7 @@ fun OnboardingScreen(
                         progress?.completed == true || progress?.rewardGranted == true -> "Закрыть"
                         else -> "Готово"
                     },
+                    color = VoitosColors.Text,
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
@@ -1200,16 +1160,17 @@ fun OnboardingScreen(
                 TextButton(
                     onClick = { if (index > 0) index -= 1 },
                     enabled = index > 0 && !loading,
-                ) { Text("← Предыдущий") }
+                ) { Text("← Предыдущий", color = VoitosColors.Accent) }
                 TextButton(
                     onClick = { if (index < steps.lastIndex) index += 1 },
                     enabled = index < steps.lastIndex && !loading,
-                ) { Text("Следующий →") }
+                ) { Text("Следующий →", color = VoitosColors.Accent) }
             }
-            TextButton(
+            VoitosBackButton(
                 onClick = onBack,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Закрыть онбординг") }
+                label = "Закрыть онбординг",
+            )
         }
     }
 }

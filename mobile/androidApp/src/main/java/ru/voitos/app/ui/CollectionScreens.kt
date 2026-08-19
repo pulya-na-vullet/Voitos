@@ -21,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +50,7 @@ import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.CollectionBrief
 import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.ui.theme.VoitosColors
+import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
 
 @Composable
 fun CollectionsScreen(
@@ -96,7 +96,7 @@ fun CollectionsScreen(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 if (onBack != null) {
-                    TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+                    VoitosBackButton(onClick = onBack)
                 }
                 Text("Сборы", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
             }
@@ -246,7 +246,7 @@ fun CollectionDetailScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        VoitosBackButton(onClick = onBack)
         Text("Сбор", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
@@ -361,7 +361,7 @@ fun CollectionDetailScreen(
                         onClick = { picker.launch("image/*") },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !uploading,
-                        colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                        colors = voitosPrimaryButtonColors(),
                     ) {
                         Text(if (uploading) "Отправка…" else "Приложить ещё чек")
                     }
@@ -371,7 +371,7 @@ fun CollectionDetailScreen(
                         onClick = { picker.launch("image/*") },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !uploading,
-                        colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                        colors = voitosPrimaryButtonColors(),
                     ) {
                         Text(if (uploading) "Отправка…" else "Приложить чек оплаты")
                     }

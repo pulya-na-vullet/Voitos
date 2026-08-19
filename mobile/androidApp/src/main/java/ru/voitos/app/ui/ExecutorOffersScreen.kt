@@ -10,11 +10,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +28,8 @@ import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.ExecutorOfferBrief
 import ru.voitos.app.model.ExecutorProfileBrief
 import ru.voitos.app.ui.theme.VoitosColors
+import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
+import ru.voitos.app.ui.theme.voitosSecondaryButtonColors
 
 @Composable
 fun ExecutorOffersScreen(
@@ -70,7 +70,7 @@ fun ExecutorOffersScreen(
     LaunchedEffect(Unit) { reload() }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        VoitosBackButton(onClick = onBack)
         Text("Заявки для меня", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
@@ -126,7 +126,7 @@ fun ExecutorOffersScreen(
                                             }
                                         },
                                         enabled = busyId != offer.offerId,
-                                        colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                                        colors = voitosPrimaryButtonColors(),
                                     ) { Text("Беру") }
                                     Button(
                                         onClick = {
@@ -145,8 +145,8 @@ fun ExecutorOffersScreen(
                                             }
                                         },
                                         enabled = busyId != offer.offerId,
-                                        colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.BgSoft),
-                                    ) { Text("Отказ") }
+                                        colors = voitosSecondaryButtonColors(),
+                                    ) { Text("Отказ", color = VoitosColors.Danger) }
                                 }
                             }
                         }

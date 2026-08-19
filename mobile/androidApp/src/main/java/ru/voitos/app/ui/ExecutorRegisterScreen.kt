@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -34,6 +33,7 @@ import kotlinx.coroutines.launch
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.ExecutorRole
 import ru.voitos.app.ui.theme.VoitosColors
+import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
 
 /**
  * Регистрация исполнителя — шаги как в MAX-боте:
@@ -99,7 +99,7 @@ fun ExecutorRegisterScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        TextButton(onClick = onBack) { Text("← Назад", color = VoitosColors.Accent) }
+        VoitosBackButton(onClick = onBack)
         Text("Стать исполнителем", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
@@ -127,7 +127,7 @@ fun ExecutorRegisterScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
             1 -> {
@@ -156,7 +156,7 @@ fun ExecutorRegisterScreen(
                         nextAfterLabel()
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
             2 -> {
@@ -170,7 +170,7 @@ fun ExecutorRegisterScreen(
                 Button(
                     onClick = { step = 3 },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
             3 -> {
@@ -191,7 +191,7 @@ fun ExecutorRegisterScreen(
                         step = 4
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
             4 -> {
@@ -212,7 +212,7 @@ fun ExecutorRegisterScreen(
                         step = 5
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
             5 -> {
@@ -233,7 +233,7 @@ fun ExecutorRegisterScreen(
                         step = 6
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
             6 -> {
@@ -260,7 +260,7 @@ fun ExecutorRegisterScreen(
                         step = if (role?.requiresQualificationDocs == true) 7 else 8
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
             7 -> {
@@ -282,7 +282,7 @@ fun ExecutorRegisterScreen(
                         step = 8
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
             8 -> {
@@ -316,7 +316,7 @@ fun ExecutorRegisterScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !loading,
-                    colors = ButtonDefaults.buttonColors(containerColor = VoitosColors.Accent),
+                    colors = voitosPrimaryButtonColors(),
                 ) { Text("Отправить") }
             }
         }

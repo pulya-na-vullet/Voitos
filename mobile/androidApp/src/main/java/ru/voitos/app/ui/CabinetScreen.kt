@@ -11,7 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +32,9 @@ import ru.voitos.app.model.FamilyMember
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.SubscriptionInfo
 import ru.voitos.app.ui.theme.VoitosColors
+import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
+import ru.voitos.app.ui.theme.voitosSecondaryButtonColors
+import ru.voitos.app.ui.theme.voitosAccent2ButtonColors
 
 @Composable
 fun CabinetScreen(
@@ -152,10 +154,7 @@ fun CabinetScreen(
         Button(
             onClick = onOpenSubscription,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = VoitosColors.Accent,
-                contentColor = VoitosColors.OnAccent,
-            ),
+            colors = voitosPrimaryButtonColors(),
         ) { Text("Подписка") }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -163,10 +162,7 @@ fun CabinetScreen(
         Button(
             onClick = onOpenOnboarding,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = VoitosColors.BgSoft,
-                contentColor = VoitosColors.Text,
-            ),
+            colors = voitosSecondaryButtonColors(),
         ) { Text("Обучение") }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -174,10 +170,7 @@ fun CabinetScreen(
         Button(
             onClick = onRegisterExecutor,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = VoitosColors.BgSoft,
-                contentColor = VoitosColors.Text,
-            ),
+            colors = voitosSecondaryButtonColors(),
         ) { Text("Зарегистрироваться исполнителем") }
 
         if (executor?.isExecutor == true) {
@@ -185,10 +178,7 @@ fun CabinetScreen(
             Button(
                 onClick = onOpenExecutorOffers,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = VoitosColors.Accent2,
-                    contentColor = VoitosColors.OnAccent,
-                ),
+                colors = voitosAccent2ButtonColors(),
             ) {
                 val n = executor?.openOffersCount ?: 0
                 Text(if (n > 0) "Мои заявки мастера ($n)" else "Мои заявки мастера")
