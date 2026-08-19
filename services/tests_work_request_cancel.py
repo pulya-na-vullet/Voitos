@@ -77,3 +77,22 @@ class RolePickAndCancelTests(TestCase):
         self.assertIn("отменил", reply.lower())
         req.refresh_from_db()
         self.assertEqual(req.status, WorkRequestStatus.CANCELLED)
+
+    def test_cancel_open_request_while_searching(self):
+        from services.work_request_cancel import maybe_cancel_open_client_request
+
+        req = WorkRequest.objects.create(
+            user=self.user,
+            role=self.elec,
+            description="Розетка",
+            status=WorkRequestStatus.OFFERING,
+            client_locality="Куюки",
+        )
+        self.pending.clear_pending()
+        reply = maybe_cancel_open_client_request(
+            self.user, "отменить заявку", use_ai=False
+        )
+        self.assertIsNotNone(reply)
+        self.assertIn("отменил", reply.lower())
+        req.refresh_from_db()
+        self.assertEqual(req.status, WorkRequestStatus.CANCELLED)

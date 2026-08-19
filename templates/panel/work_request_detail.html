@@ -112,10 +112,10 @@
   {% endif %}
   <p><strong>Описание:</strong></p>
   <p>{{ item.description }}</p>
-  <h3>Фото</h3>
+  <h3>Фото ({{ item.photos.count }})</h3>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
     {% for p in item.photos.all %}
-      <a href="{{ p.image.url }}" target="_blank"><img src="{{ p.image.url }}" alt="" style="max-width:220px; max-height:180px; border-radius:8px;"></a>
+      <a href="{{ p.image.url }}" target="_blank"><img src="{{ p.image.url }}" alt="фото {{ forloop.counter }}" style="max-width:220px; max-height:180px; border-radius:8px; background:#eee;"></a>
     {% empty %}
       <span class="muted">Нет фото</span>
     {% endfor %}

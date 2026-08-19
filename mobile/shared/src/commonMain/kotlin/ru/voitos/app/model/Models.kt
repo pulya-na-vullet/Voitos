@@ -151,6 +151,13 @@ data class WorkRequestSubmitResult(
 )
 
 @Serializable
+data class WorkRequestCancelResult(
+    val ok: Boolean = true,
+    val id: Int = 0,
+    val status: String = "",
+)
+
+@Serializable
 data class ReceiptBrief(
     val id: Int,
     val status: String = "",

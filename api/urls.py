@@ -32,6 +32,11 @@ urlpatterns = [
         views.work_request_submit,
         name="work_request_submit",
     ),
+    path(
+        "work-requests/<int:pk>/cancel",
+        views.work_request_cancel,
+        name="work_request_cancel",
+    ),
     path("collections", views.collections_list, name="collections"),
     path("collections/<int:pk>", views.collection_detail, name="collection_detail"),
     path("onboarding", views.onboarding, name="onboarding"),

@@ -405,7 +405,7 @@ def work_request_add_photo(request, pk: int):
     """Добавить фото к черновику заявки (base64 JSON — проще для KMP)."""
     from django.core.files.base import ContentFile
 
-    from api.media import decode_base64_payload
+    from api.media import decode_base64_payload, unique_upload_filename
     from database.models import WorkRequestPhoto, WorkRequestStatus
 
     wr = WorkRequest.objects.filter(pk=pk, user=request.bot_user).first()
@@ -416,18 +416,21 @@ def work_request_add_photo(request, pk: int):
 
     data = parse_json(request)
     raw_b64 = (data.get("content_base64") or data.get("image_base64") or "").strip()
-    filename = (data.get("filename") or "photo.jpg").strip()[:120] or "photo.jpg"
+    raw_name = (data.get("filename") or "photo.jpg").strip()[:120] or "photo.jpg"
     image_bytes = decode_base64_payload(raw_b64)
     if not image_bytes:
         return json_response({"error": "content_base64_required"}, status=400)
 
+    filename = unique_upload_filename(raw_name)
     photo = WorkRequestPhoto(request=wr)
     photo.image.save(filename, ContentFile(image_bytes), save=True)
+    photo_count = WorkRequestPhoto.objects.filter(request=wr).count()
     return json_response(
         {
             "ok": True,
             "photo_id": photo.id,
-            "photo_count": wr.photos.count(),
+            "photo_count": photo_count,
+            "filename": photo.image.name.split("/")[-1] if photo.image.name else filename,
             "status": wr.status,
         },
         status=201,
@@ -505,6 +508,27 @@ def work_request_submit(request, pk: int):
             "dispatched": dispatched,
         }
     )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_cancel(request, pk: int):
+    """Клиент отменяет свою заявку (поиск мастера / ранняя стадия)."""
+    from services.work_request_cancel import cancel_client_work_request
+
+    wr = WorkRequest.objects.filter(pk=pk, user=request.bot_user).first()
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    try:
+        cancel_client_work_request(
+            request.bot_user,
+            wr,
+            note="Отменено клиентом в приложении.",
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc)}, status=400)
+    wr.refresh_from_db()
+    return json_response({"ok": True, "id": wr.id, "status": wr.status})
 
 
 @api_login_required

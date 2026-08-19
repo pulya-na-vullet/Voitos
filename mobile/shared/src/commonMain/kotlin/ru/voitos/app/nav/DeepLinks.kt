@@ -41,7 +41,8 @@ object DeepLinks {
 
     fun routeForType(type: String, entityId: Int?): Route = when (type) {
         "work_request.assigned",
-        "work_request.no_executor" ->
+        "work_request.no_executor",
+        "work_request.executor_declined" ->
             if (entityId != null) Route.WorkRequest(entityId) else Route.Home
         "work_request.confirm_amount" ->
             if (entityId != null) Route.WorkRequest(entityId, "confirm") else Route.Home

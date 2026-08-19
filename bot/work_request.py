@@ -154,14 +154,18 @@ def handle_work_request_photo(
             return "Заявка не найдена — начните снова."
 
     safe_name = (filename or "photo.jpg")[:120]
+    from api.media import unique_upload_filename
+
+    store_name = unique_upload_filename(safe_name)
     photo = WorkRequestPhoto(request=req)
-    photo.image.save(safe_name, ContentFile(image_bytes), save=True)
+    photo.image.save(store_name, ContentFile(image_bytes), save=True)
     photos.append(photo.id)
     payload["photos"] = photos
     pending.pending_payload = payload
     pending.save(update_fields=["pending_payload", "updated_at"])
+    real_count = WorkRequestPhoto.objects.filter(request=req).count()
     return (
-        f"Фото добавлено ({len(photos)}). "
+        f"Фото добавлено ({real_count}). "
         "Можете прислать ещё или напишите «готово»."
     )
 

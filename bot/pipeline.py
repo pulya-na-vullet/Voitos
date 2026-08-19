@@ -107,6 +107,15 @@ class MessagePipeline:
                 self._store_out(user, cancelled, "work_request_cancel")
                 return cancelled
 
+        # Клиент отменяет уже отправленную заявку (поиск мастера и т.п.)
+        if not (pending.pending_kind or "").strip():
+            from services.work_request_cancel import maybe_cancel_open_client_request
+
+            cancelled_open = maybe_cancel_open_client_request(user, text)
+            if cancelled_open is not None:
+                self._store_out(user, cancelled_open, "work_request_cancel")
+                return cancelled_open
+
         from bot.work_request import WORK_REQUEST_KIND, handle_work_request_step
 
         if pending.pending_kind == WORK_REQUEST_KIND:

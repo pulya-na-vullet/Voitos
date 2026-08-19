@@ -176,3 +176,12 @@ class WorkRequestDispatchTests(TestCase):
         ).first()
         self.assertIsNotNone(nxt)
         self.assertEqual(nxt.contractor_id, c2.id)
+        client_msgs = [t for who, t in self.sent if "Житель" in who or who == str(self.client_user)]
+        self.assertTrue(
+            any("отказался" in t.lower() and "ищем другого" in t.lower() for t in client_msgs),
+            self.sent,
+        )
+        self.assertTrue(
+            any("отменить заявку" in t.lower() for t in client_msgs),
+            self.sent,
+        )
