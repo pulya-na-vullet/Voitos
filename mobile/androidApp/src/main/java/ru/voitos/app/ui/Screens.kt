@@ -33,13 +33,16 @@ import androidx.compose.ui.Modifier.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import ru.voitos.app.VoitosApi
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.AppNotification
 import ru.voitos.app.model.CollectionBrief
 import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.WorkRequestBrief
 import ru.voitos.app.nav.DeepLinks
-import ru.voitos.app.VoitosApi
 
 @Composable
 fun LoginScreen(
@@ -362,19 +365,53 @@ fun SubscriptionScreen(
     onBack: () -> Unit,
 ) {
     var info by remember { mutableStateOf<ru.voitos.app.model.SubscriptionInfo?>(null) }
+    var receipts by remember { mutableStateOf<List<ru.voitos.app.model.ReceiptBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        try {
-            info = client.subscription()
-        } catch (e: Exception) {
-            error = e.message
+    var message by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    fun reload() {
+        scope.launch {
+            try {
+                info = client.subscription()
+                receipts = client.receipts().items
+            } catch (e: Exception) {
+                error = e.message
+            }
         }
     }
+
+    LaunchedEffect(Unit) { reload() }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            loading = true
+            error = null
+            try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("Не удалось прочитать файл")
+                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "receipt.jpg"
+                val res = client.uploadReceipt(b64, name)
+                message = "Чек #${res.id} отправлен на проверку"
+                reload()
+            } catch (e: Exception) {
+                error = e.message
+            } finally {
+                loading = false
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         TextButton(onClick = onBack) { Text("← Назад") }
         Text("Подписка", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(12.dp))
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         info?.let { s ->
             Text(s.label.ifBlank { s.state }, style = MaterialTheme.typography.titleMedium)
             Text("Доступ: ${s.state}")
@@ -390,10 +427,45 @@ fun SubscriptionScreen(
                 Text("Чеков на проверке: ${s.pendingReceipts}")
             }
             Spacer(Modifier.height(12.dp))
-            Text(
-                "Отправьте чек через бота или приложение (загрузка — следующим шагом).",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Button(
+                onClick = { picker.launch("image/*") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading,
+            ) { Text("Загрузить чек") }
+            Button(
+                onClick = {
+                    scope.launch {
+                        loading = true
+                        error = null
+                        try {
+                            val tiny =
+                                "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
+                            val res = client.uploadReceipt(tiny, "dev-receipt.jpg")
+                            message = "Тестовый чек #${res.id} на проверке"
+                            reload()
+                        } catch (e: Exception) {
+                            error = e.message
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading,
+            ) { Text("Тестовый чек (dev)") }
+        }
+        if (receipts.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text("История чеков", style = MaterialTheme.typography.titleMedium)
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(receipts, key = { it.id }) { r ->
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        Text("#${r.id} · ${r.status}")
+                        r.amount?.let { Text("$it ₽ · ${r.period}") }
+                        Text(r.createdAt, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
         }
     }
 }
@@ -649,9 +721,14 @@ fun OnboardingScreen(
         } else {
             Text(step.title, style = MaterialTheme.typography.titleLarge)
             Text(step.caption)
-            Text(
-                "Картинка: ${staticUrl(apiBaseUrl, step.imageUrl)}",
-                style = MaterialTheme.typography.bodySmall,
+            Spacer(Modifier.height(8.dp))
+            AsyncImage(
+                model = staticUrl(apiBaseUrl, step.imageUrl),
+                contentDescription = step.title,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 160.dp, max = 320.dp),
+                contentScale = ContentScale.Fit,
             )
             if (step.done) {
                 Text("✓ просмотрено", color = MaterialTheme.colorScheme.primary)

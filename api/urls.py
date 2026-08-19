@@ -13,6 +13,7 @@ urlpatterns = [
     path("me", views.me, name="me"),
     path("me/access", views.me_access, name="me_access"),
     path("me/subscription", views.me_subscription, name="me_subscription"),
+    path("me/receipts", views.me_receipts, name="me_receipts"),
     path("executor-roles", views.executor_roles, name="executor_roles"),
     path("work-requests", views.work_requests_list, name="work_requests"),
     path("work-requests/<int:pk>", views.work_request_detail, name="work_request_detail"),

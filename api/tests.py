@@ -424,3 +424,38 @@ class AppEmitHookTests(TestCase):
         self.assertEqual(data["done_count"], 1)
         self.assertTrue(any(s["code"] == "snow" and s["done"] for s in data["steps"]))
         self.assertIn("caption", data["steps"][0])
+
+    def test_upload_subscription_receipt(self):
+        import base64
+        from unittest.mock import patch
+
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkS"
+            "Ew8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJ"
+            "CQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy"
+            "MjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAA"
+            "AAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAA"
+            "AAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQ"
+            "AQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAA"
+            "AAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
+        )
+        b64 = base64.b64encode(jpeg).decode("ascii")
+        with self.settings(MEDIA_ROOT="/tmp/voitos_kmp_receipts"):
+            with patch("subscriptions.service.ocr_image_bytes", return_value=""):
+                resp = self.client.post(
+                    "/api/v1/me/receipts",
+                    data=json.dumps(
+                        {"content_base64": b64, "filename": "pay.jpg"}
+                    ),
+                    content_type="application/json",
+                    HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+                )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()["status"], "pending")
+        listed = self.client.get(
+            "/api/v1/me/receipts",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()["items"]), 1)

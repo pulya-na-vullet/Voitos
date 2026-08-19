@@ -145,6 +145,30 @@ data class WorkRequestSubmitResult(
 )
 
 @Serializable
+data class ReceiptBrief(
+    val id: Int,
+    val status: String = "",
+    val amount: Double? = null,
+    val period: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("reviewed_at") val reviewedAt: String? = null,
+    @SerialName("admin_comment") val adminComment: String = "",
+)
+
+@Serializable
+data class ReceiptList(
+    val items: List<ReceiptBrief> = emptyList(),
+)
+
+@Serializable
+data class ReceiptUploadResult(
+    val ok: Boolean = true,
+    val id: Int = 0,
+    val status: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+)
+
+@Serializable
 data class OnboardingStep(
     val code: String,
     val title: String = "",

@@ -184,17 +184,21 @@ paths:
     post:
       tags: [subscription]
       security: [{ bearerAuth: [] }]
-      summary: Загрузить чек (multipart)
+      summary: Загрузить чек (base64 JSON)
       requestBody:
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
+              required: [content_base64]
               properties:
-                file: { type: string, format: binary }
+                content_base64: { type: string }
+                filename: { type: string, default: receipt.jpg }
       responses:
         "201":
           description: На проверке
+        "400":
+          description: Bad payload
 
   /executor-roles:
     get:

@@ -23,6 +23,8 @@ import ru.voitos.app.model.Me
 import ru.voitos.app.model.NotificationList
 import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.PhotoUploadResult
+import ru.voitos.app.model.ReceiptList
+import ru.voitos.app.model.ReceiptUploadResult
 import ru.voitos.app.model.SubscriptionInfo
 import ru.voitos.app.model.WorkRequestCreated
 import ru.voitos.app.model.WorkRequestList
@@ -76,6 +78,23 @@ class VoitosApiClient(
     suspend fun collection(id: Int): CollectionDetail = authedGet("/collections/$id")
 
     suspend fun subscription(): SubscriptionInfo = authedGet("/me/subscription")
+
+    suspend fun receipts(): ReceiptList = authedGet("/me/receipts")
+
+    suspend fun uploadReceipt(
+        contentBase64: String,
+        filename: String = "receipt.jpg",
+    ): ReceiptUploadResult =
+        http.post("$baseUrl/me/receipts") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("content_base64", contentBase64)
+                    put("filename", filename)
+                },
+            )
+        }.body()
 
     suspend fun executorRoles(): ExecutorRoleList = authedGet("/executor-roles")
 

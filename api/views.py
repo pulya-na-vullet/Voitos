@@ -84,6 +84,54 @@ def me_subscription(request):
 
 
 @api_login_required
+@require_http_methods(["GET", "POST"])
+def me_receipts(request):
+    """Список чеков подписки / загрузка нового (base64)."""
+    user = request.bot_user
+    if request.method == "GET":
+        qs = PaymentReceipt.objects.filter(user=user).order_by("-created_at")[:50]
+        items = []
+        for r in qs:
+            items.append(
+                {
+                    "id": r.id,
+                    "status": r.status,
+                    "amount": float(r.amount) if r.amount is not None else None,
+                    "period": r.period_label() if hasattr(r, "period_label") else "",
+                    "created_at": r.created_at.isoformat(),
+                    "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+                    "admin_comment": (r.admin_comment or "")[:500],
+                }
+            )
+        return json_response({"items": items})
+
+    from api.media import decode_base64_payload
+    from subscriptions.service import submit_receipt
+
+    data = parse_json(request)
+    raw_b64 = (data.get("content_base64") or data.get("image_base64") or "").strip()
+    filename = (data.get("filename") or "receipt.jpg").strip()[:120] or "receipt.jpg"
+    image_bytes = decode_base64_payload(raw_b64)
+    if not image_bytes:
+        return json_response({"error": "content_base64_required"}, status=400)
+    try:
+        receipt = submit_receipt(user, image_bytes, filename=filename)
+    except ValueError as exc:
+        return json_response({"error": str(exc)}, status=400)
+    except Exception:
+        return json_response({"error": "upload_failed"}, status=500)
+    return json_response(
+        {
+            "ok": True,
+            "id": receipt.id,
+            "status": receipt.status,
+            "created_at": receipt.created_at.isoformat(),
+        },
+        status=201,
+    )
+
+
+@api_login_required
 @require_GET
 def executor_roles(request):
     roles = ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
@@ -355,10 +403,9 @@ def work_requests_create(request):
 @require_http_methods(["POST"])
 def work_request_add_photo(request, pk: int):
     """Добавить фото к черновику заявки (base64 JSON — проще для KMP)."""
-    import base64
-
     from django.core.files.base import ContentFile
 
+    from api.media import decode_base64_payload
     from database.models import WorkRequestPhoto, WorkRequestStatus
 
     wr = WorkRequest.objects.filter(pk=pk, user=request.bot_user).first()
@@ -370,17 +417,9 @@ def work_request_add_photo(request, pk: int):
     data = parse_json(request)
     raw_b64 = (data.get("content_base64") or data.get("image_base64") or "").strip()
     filename = (data.get("filename") or "photo.jpg").strip()[:120] or "photo.jpg"
-    if not raw_b64:
+    image_bytes = decode_base64_payload(raw_b64)
+    if not image_bytes:
         return json_response({"error": "content_base64_required"}, status=400)
-    # data:image/jpeg;base64,... 
-    if "," in raw_b64 and raw_b64.lower().startswith("data:"):
-        raw_b64 = raw_b64.split(",", 1)[1]
-    try:
-        image_bytes = base64.b64decode(raw_b64, validate=False)
-    except Exception:
-        return json_response({"error": "invalid_base64"}, status=400)
-    if not image_bytes or len(image_bytes) > 12 * 1024 * 1024:
-        return json_response({"error": "invalid_image"}, status=400)
 
     photo = WorkRequestPhoto(request=wr)
     photo.image.save(filename, ContentFile(image_bytes), save=True)
