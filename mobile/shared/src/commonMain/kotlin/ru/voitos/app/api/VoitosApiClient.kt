@@ -21,6 +21,7 @@ import ru.voitos.app.VoitosApi
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
+import ru.voitos.app.model.CollectionReceiptResult
 import ru.voitos.app.model.ExecutorMe
 import ru.voitos.app.model.ExecutorOfferList
 import ru.voitos.app.model.ExecutorOfferRespondResult
@@ -85,6 +86,22 @@ class VoitosApiClient(
     suspend fun collections(): CollectionList = authedGet("/collections")
 
     suspend fun collection(id: Int): CollectionDetail = authedGet("/collections/$id")
+
+    suspend fun uploadCollectionReceipt(
+        collectionId: Int,
+        contentBase64: String,
+        filename: String = "receipt.jpg",
+    ): CollectionReceiptResult =
+        http.post("$baseUrl/collections/$collectionId/receipt") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("content_base64", contentBase64)
+                    put("filename", filename)
+                },
+            )
+        }.body()
 
     suspend fun subscription(): SubscriptionInfo = authedGet("/me/subscription")
 

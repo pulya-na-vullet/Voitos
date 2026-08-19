@@ -73,9 +73,18 @@ data class CollectionBrief(
     val id: Int,
     val title: String = "",
     val category: String = "",
+    @SerialName("category_label") val categoryLabel: String = "",
     @SerialName("amount_due") val amountDue: Double = 0.0,
     val status: String = "",
+    @SerialName("campaign_status") val campaignStatus: String = "",
     @SerialName("event_at") val eventAt: String? = null,
+    @SerialName("cover_photo_url") val coverPhotoUrl: String = "",
+    @SerialName("photo_urls") val photoUrls: List<String> = emptyList(),
+    val description: String = "",
+    @SerialName("payment_name") val paymentName: String = "",
+    @SerialName("payment_phone") val paymentPhone: String = "",
+    @SerialName("payment_bank") val paymentBank: String = "",
+    @SerialName("payment_status") val paymentStatus: String = "",
 )
 
 @Serializable
@@ -88,13 +97,33 @@ data class CollectionDetail(
     val id: Int,
     val title: String = "",
     val category: String = "",
+    @SerialName("category_label") val categoryLabel: String = "",
     val description: String = "",
     @SerialName("amount_due") val amountDue: Double = 0.0,
     @SerialName("amount_paid") val amountPaid: Double = 0.0,
     val status: String = "",
+    @SerialName("campaign_status") val campaignStatus: String = "",
     @SerialName("event_at") val eventAt: String? = null,
     @SerialName("paid_count") val paidCount: Int = 0,
     @SerialName("invite_count") val inviteCount: Int = 0,
+    @SerialName("invite_id") val inviteId: Int = 0,
+    @SerialName("can_pay") val canPay: Boolean = false,
+    @SerialName("pending_receipts") val pendingReceipts: Int = 0,
+    @SerialName("cover_photo_url") val coverPhotoUrl: String = "",
+    @SerialName("photo_urls") val photoUrls: List<String> = emptyList(),
+    @SerialName("payment_name") val paymentName: String = "",
+    @SerialName("payment_phone") val paymentPhone: String = "",
+    @SerialName("payment_bank") val paymentBank: String = "",
+    @SerialName("payment_status") val paymentStatus: String = "",
+)
+
+@Serializable
+data class CollectionReceiptResult(
+    val ok: Boolean = true,
+    val id: Int = 0,
+    val status: String = "",
+    val message: String = "",
+    @SerialName("created_at") val createdAt: String = "",
 )
 
 @Serializable

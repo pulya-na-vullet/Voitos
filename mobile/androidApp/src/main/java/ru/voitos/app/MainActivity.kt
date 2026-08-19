@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
             setContent {
                 var screen by remember { mutableStateOf<Screen>(initial) }
                 var tab by remember { mutableStateOf(MainTab.Collections) }
+                var collectionsRefresh by remember { mutableStateOf(0) }
                 // Splash только после первого успешного запуска — меньше риска ANR на холодном старте Huawei.
                 var playSplash by remember {
                     mutableStateOf(false)
@@ -146,7 +147,12 @@ class MainActivity : ComponentActivity() {
 
                             Screen.Main -> MainShell(
                                 selected = tab,
-                                onSelect = { tab = it },
+                                onSelect = {
+                                    if (it == MainTab.Collections) {
+                                        collectionsRefresh += 1
+                                    }
+                                    tab = it
+                                },
                                 playLogoSplash = playSplash,
                                 onSplashFinished = {
                                     playSplash = false
@@ -160,6 +166,7 @@ class MainActivity : ComponentActivity() {
                                         client = client,
                                         onOpen = { id -> screen = Screen.CollectionDetail(id) },
                                         onBack = null,
+                                        refreshKey = collectionsRefresh,
                                     )
                                     MainTab.WorkRequests -> WorkRequestsScreen(
                                         client = client,
@@ -217,6 +224,7 @@ class MainActivity : ComponentActivity() {
                                 client = client,
                                 collectionId = s.id,
                                 onBack = {
+                                    collectionsRefresh += 1
                                     tab = MainTab.Collections
                                     screen = Screen.Main
                                 },

@@ -395,6 +395,10 @@ class AppEmitHookTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["title"], "Снег")
         self.assertEqual(resp.json()["amount_due"], 100.0)
+        self.assertIn("payment_phone", resp.json())
+        self.assertIn("payment_bank", resp.json())
+        self.assertIn("photo_urls", resp.json())
+        self.assertTrue(resp.json()["can_pay"])
 
     def test_create_work_request_api(self):
         tok = MobileAuthToken.objects.create(bot_user=self.client_user)

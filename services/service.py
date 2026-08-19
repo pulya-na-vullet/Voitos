@@ -52,11 +52,15 @@ UNPAID_REMINDER_TEXT = (
 
 def service_payment_requisites() -> str:
     cfg = AppSettings.load()
-    return (
-        f"Получатель: {cfg.service_payee_name}\n"
-        f"Телефон: {cfg.service_payee_phone}\n"
-        f"Статус: {cfg.service_payee_status}"
-    )
+    bank = (getattr(cfg, "service_payee_bank", None) or "").strip()
+    lines = [
+        f"Получатель: {cfg.service_payee_name}",
+        f"Телефон: {cfg.service_payee_phone}",
+    ]
+    if bank:
+        lines.append(f"Банк: {bank}")
+    lines.append(f"Статус: {cfg.service_payee_status}")
+    return "\n".join(lines)
 
 
 def progress_bar(percent: int, width: int = 10) -> str:

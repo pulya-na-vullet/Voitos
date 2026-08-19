@@ -280,6 +280,13 @@ class AppSettings(models.Model):
         max_length=64,
         default="Самозанятый",
     )
+    service_payee_bank = models.CharField(
+        "Сервис: банк для перевода",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Например: Сбер, Т-Банк — показывается жителям в сборе.",
+    )
     service_tax_limit = models.DecimalField(
         "Лимит самозанятого, ₽",
         max_digits=14,

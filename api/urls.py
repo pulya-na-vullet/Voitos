@@ -52,6 +52,11 @@ urlpatterns = [
     ),
     path("collections", views.collections_list, name="collections"),
     path("collections/<int:pk>", views.collection_detail, name="collection_detail"),
+    path(
+        "collections/<int:pk>/receipt",
+        views.collection_receipt,
+        name="collection_receipt",
+    ),
     path("onboarding", views.onboarding, name="onboarding"),
     path(
         "onboarding/steps/<slug:code>/complete",

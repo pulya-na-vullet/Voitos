@@ -396,51 +396,6 @@ fun InboxScreen(
 }
 
 @Composable
-fun CollectionsScreen(
-    client: VoitosApiClient,
-    onOpen: (Int) -> Unit = {},
-    onBack: (() -> Unit)? = null,
-) {
-    var items by remember { mutableStateOf<List<CollectionBrief>>(emptyList()) }
-    var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        try {
-            items = client.collections().items
-        } catch (e: Exception) {
-            error = friendlyNetworkError(e)
-        }
-    }
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        if (onBack != null) {
-            TextButton(onClick = onBack) { Text("← Назад") }
-        }
-        Text("Сборы", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (items.isEmpty() && error == null) {
-            Text(
-                "Нет активных сборов по вашим группе/группам",
-                color = VoitosColors.Muted,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-        }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(items, key = { it.id }) { c ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpen(c.id) },
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(c.title, style = MaterialTheme.typography.titleMedium)
-                        Text("${c.category} · ${c.amountDue} ₽ · ${c.status}")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun WorkRequestsScreen(
     client: VoitosApiClient,
     onConfirm: (Int) -> Unit,
@@ -988,40 +943,6 @@ private fun RoleTileButton(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
-    }
-}
-
-@Composable
-fun CollectionDetailScreen(
-    client: VoitosApiClient,
-    collectionId: Int,
-    onBack: () -> Unit,
-) {
-    var detail by remember { mutableStateOf<ru.voitos.app.model.CollectionDetail?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(collectionId) {
-        try {
-            detail = client.collection(collectionId)
-        } catch (e: Exception) {
-            error = e.message
-        }
-    }
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад") }
-        Text("Сбор", style = MaterialTheme.typography.headlineSmall)
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        detail?.let { c ->
-            Text(c.title, style = MaterialTheme.typography.titleLarge)
-            Text("${c.category} · ${c.status}")
-            Text("К оплате: ${c.amountDue} ₽")
-            if (c.amountPaid > 0) Text("Оплачено: ${c.amountPaid} ₽")
-            c.eventAt?.let { Text("Событие: $it") }
-            Text("Оплатили: ${c.paidCount} из ${c.inviteCount}")
-            if (c.description.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(c.description)
-            }
-        }
     }
 }
 

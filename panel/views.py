@@ -906,6 +906,9 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             request.POST.get("service_payee_status", cfg.service_payee_status).strip()
             or cfg.service_payee_status
         )
+        cfg.service_payee_bank = (
+            request.POST.get("service_payee_bank", getattr(cfg, "service_payee_bank", "")).strip()
+        )
         try:
             cfg.service_tax_limit = Decimal(
                 request.POST.get("service_tax_limit") or cfg.service_tax_limit or "2400000"
