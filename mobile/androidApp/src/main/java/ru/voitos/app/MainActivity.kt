@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,7 +59,6 @@ class MainActivity : ComponentActivity() {
         data object Subscription : Screen()
         data object Onboarding : Screen()
         data object ExecutorRegister : Screen()
-        data object ExecutorOffers : Screen()
         data class Confirm(val id: Int) : Screen()
     }
 
@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
                 var screen by remember { mutableStateOf<Screen>(initial) }
                 var tab by remember { mutableStateOf(MainTab.Collections) }
                 var collectionsRefresh by remember { mutableStateOf(0) }
+                var isExecutor by remember { mutableStateOf(false) }
                 // Splash только после первого успешного запуска — меньше риска ANR на холодном старте Huawei.
                 var playSplash by remember {
                     mutableStateOf(false)
@@ -149,7 +150,16 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
 
-                            Screen.Main -> MainShell(
+                            Screen.Main -> {
+                                LaunchedEffect(client.accessToken, screen) {
+                                    isExecutor = runCatching {
+                                        client.executorMe().isExecutor
+                                    }.getOrDefault(false)
+                                    if (!isExecutor && tab == MainTab.Work) {
+                                        tab = MainTab.Cabinet
+                                    }
+                                }
+                                MainShell(
                                 selected = tab,
                                 onSelect = {
                                     if (it == MainTab.Collections) {
@@ -158,6 +168,7 @@ class MainActivity : ComponentActivity() {
                                     tab = it
                                 },
                                 playLogoSplash = playSplash,
+                                showWorkTab = isExecutor,
                                 onSplashFinished = {
                                     playSplash = false
                                     if (!session.hasLaunchedBefore) {
@@ -194,30 +205,28 @@ class MainActivity : ComponentActivity() {
                                         onOpenSubscription = { screen = Screen.Subscription },
                                         onOpenOnboarding = { screen = Screen.Onboarding },
                                         onRegisterExecutor = { screen = Screen.ExecutorRegister },
-                                        onOpenExecutorOffers = { screen = Screen.ExecutorOffers },
                                         onLogout = {
                                             session.clearSession()
                                             client.accessToken = null
+                                            isExecutor = false
                                             screen = Screen.Login
                                         },
                                     )
+                                    MainTab.Work -> ExecutorOffersScreen(
+                                        client = client,
+                                        onBack = null,
+                                    )
                                 }
+                            }
                             }
 
                             Screen.ExecutorRegister -> ExecutorRegisterScreen(
                                 client = client,
                                 onDone = {
-                                    tab = MainTab.Cabinet
+                                    isExecutor = true
+                                    tab = MainTab.Work
                                     screen = Screen.Main
                                 },
-                                onBack = {
-                                    tab = MainTab.Cabinet
-                                    screen = Screen.Main
-                                },
-                            )
-
-                            Screen.ExecutorOffers -> ExecutorOffersScreen(
-                                client = client,
                                 onBack = {
                                     tab = MainTab.Cabinet
                                     screen = Screen.Main

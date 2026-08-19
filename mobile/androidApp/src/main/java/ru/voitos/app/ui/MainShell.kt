@@ -62,6 +62,7 @@ enum class MainTab {
     WorkRequests,
     CallMaster,
     Cabinet,
+    Work,
 }
 
 @Composable
@@ -96,6 +97,7 @@ fun MainShell(
     onSelect: (MainTab) -> Unit,
     playLogoSplash: Boolean,
     onSplashFinished: () -> Unit,
+    showWorkTab: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     var cabinetIconBounds by remember { mutableStateOf<Rect?>(null) }
@@ -124,6 +126,7 @@ fun MainShell(
             BottomNavBar(
                 selected = selected,
                 onSelect = onSelect,
+                showWorkTab = showWorkTab,
                 hideCabinetIcon = splashRunning,
                 onCabinetIconPositioned = { cabinetIconBounds = it },
             )
@@ -150,6 +153,7 @@ fun MainShell(
 private fun BottomNavBar(
     selected: MainTab,
     onSelect: (MainTab) -> Unit,
+    showWorkTab: Boolean,
     hideCabinetIcon: Boolean,
     onCabinetIconPositioned: (Rect) -> Unit,
 ) {
@@ -157,7 +161,7 @@ private fun BottomNavBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(VoitosColors.Bg.copy(alpha = 0.92f))
-            .padding(horizontal = 4.dp, vertical = 8.dp)
+            .padding(horizontal = 2.dp, vertical = 8.dp)
             .height(64.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -192,6 +196,15 @@ private fun BottomNavBar(
             iconAlpha = if (hideCabinetIcon) 0f else 1f,
             onIconPositioned = onCabinetIconPositioned,
         )
+        if (showWorkTab) {
+            NavItem(
+                label = "Работа",
+                iconRes = R.drawable.ic_nav_work,
+                selected = selected == MainTab.Work,
+                onClick = { onSelect(MainTab.Work) },
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 

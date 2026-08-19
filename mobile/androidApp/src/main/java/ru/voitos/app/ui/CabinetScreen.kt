@@ -34,7 +34,6 @@ import ru.voitos.app.model.SubscriptionInfo
 import ru.voitos.app.ui.theme.VoitosColors
 import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
 import ru.voitos.app.ui.theme.voitosSecondaryButtonColors
-import ru.voitos.app.ui.theme.voitosAccent2ButtonColors
 
 @Composable
 fun CabinetScreen(
@@ -42,7 +41,6 @@ fun CabinetScreen(
     onOpenSubscription: () -> Unit,
     onOpenOnboarding: () -> Unit,
     onRegisterExecutor: () -> Unit,
-    onOpenExecutorOffers: () -> Unit,
     onLogout: () -> Unit,
 ) {
     var me by remember { mutableStateOf<Me?>(null) }
@@ -172,18 +170,6 @@ fun CabinetScreen(
             modifier = Modifier.fillMaxWidth(),
             colors = voitosSecondaryButtonColors(),
         ) { Text("Зарегистрироваться исполнителем") }
-
-        if (executor?.isExecutor == true) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = onOpenExecutorOffers,
-                modifier = Modifier.fillMaxWidth(),
-                colors = voitosAccent2ButtonColors(),
-            ) {
-                val n = executor?.openOffersCount ?: 0
-                Text(if (n > 0) "Мои заявки мастера ($n)" else "Мои заявки мастера")
-            }
-        }
 
         Spacer(modifier = Modifier.height(8.dp))
 

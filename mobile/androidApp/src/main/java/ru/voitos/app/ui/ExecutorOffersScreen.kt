@@ -34,7 +34,7 @@ import ru.voitos.app.ui.theme.voitosSecondaryButtonColors
 @Composable
 fun ExecutorOffersScreen(
     client: VoitosApiClient,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     var profiles by remember { mutableStateOf<List<ExecutorProfileBrief>>(emptyList()) }
     var offers by remember { mutableStateOf<List<ExecutorOfferBrief>>(emptyList()) }
@@ -70,13 +70,18 @@ fun ExecutorOffersScreen(
     LaunchedEffect(Unit) { reload() }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        VoitosBackButton(onClick = onBack)
-        Text("Заявки для меня", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        if (onBack != null) {
+            VoitosBackButton(onClick = onBack)
+        }
+        Text("Работа", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
         message?.let { Text(it, color = VoitosColors.Ok) }
         if (loading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                color = VoitosColors.Accent,
+            )
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (!loading && profiles.isEmpty()) {

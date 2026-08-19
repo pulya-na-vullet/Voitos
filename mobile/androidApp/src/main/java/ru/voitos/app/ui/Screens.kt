@@ -457,35 +457,20 @@ fun WorkRequestsScreen(
     onBack: (() -> Unit)? = null,
 ) {
     var clientItems by remember { mutableStateOf<List<WorkRequestBrief>>(emptyList()) }
-    var executorProfiles by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorProfileBrief>>(emptyList()) }
-    var offers by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorOfferBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var loadingId by remember { mutableStateOf<Int?>(null) }
-    var busyOfferId by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
 
     fun reload() {
         scope.launch {
             loading = true
             error = null
-            val errors = mutableListOf<String>()
             clientItems = runCatching { client.workRequests().items }.getOrElse {
-                errors += friendlyNetworkError(it)
+                error = friendlyNetworkError(it)
                 emptyList()
             }
-            val meEx = runCatching { client.executorMe() }.getOrNull()
-            executorProfiles = meEx?.profiles.orEmpty()
-            offers = if (meEx?.isExecutor == true) {
-                runCatching { client.executorOffers().items }.getOrElse {
-                    errors += friendlyNetworkError(it)
-                    emptyList()
-                }
-            } else {
-                emptyList()
-            }
-            error = errors.firstOrNull()
             loading = false
         }
     }
@@ -495,15 +480,6 @@ fun WorkRequestsScreen(
     val cancellable = setOf(
         "draft", "pending", "offering", "scheduling", "in_progress", "awaiting_client",
     )
-
-    fun offersForProfile(profile: ru.voitos.app.model.ExecutorProfileBrief): List<ru.voitos.app.model.ExecutorOfferBrief> {
-        return offers.filter { offer ->
-            when {
-                profile.roleId > 0 && offer.roleId > 0 -> offer.roleId == profile.roleId
-                else -> offer.roleName.equals(profile.roleName, ignoreCase = true)
-            }
-        }
-    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -522,96 +498,6 @@ fun WorkRequestsScreen(
                     color = VoitosColors.Accent,
                 )
             }
-        }
-
-        if (executorProfiles.isNotEmpty()) {
-            item {
-                Text(
-                    "Как исполнитель",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = VoitosColors.Accent2,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            items(executorProfiles, key = { "ex-${it.id}" }) { profile ->
-                val roleOffers = offersForProfile(profile)
-                PanelCard {
-                    Text(profile.roleName, style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
-                    Text(
-                        profile.statusLabel.ifBlank { profile.status },
-                        color = VoitosColors.Muted,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    if (roleOffers.isEmpty()) {
-                        Text(
-                            "Нет заявок для данного типа исполнителя",
-                            color = VoitosColors.Muted,
-                        )
-                    } else {
-                        roleOffers.forEach { offer ->
-                            Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                                Text(
-                                    "#${offer.workRequestId}",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = VoitosColors.Text,
-                                )
-                                Text(offer.locality.ifBlank { "НП не указан" }, color = VoitosColors.Muted)
-                                if (offer.address.isNotBlank()) {
-                                    Text(offer.address, color = VoitosColors.Muted)
-                                }
-                                Text(offer.description, color = VoitosColors.Text)
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TextButton(
-                                        onClick = {
-                                            scope.launch {
-                                                busyOfferId = offer.offerId
-                                                error = null
-                                                try {
-                                                    val res = client.respondExecutorOffer(offer.offerId, accept = true)
-                                                    message = res.message
-                                                    reload()
-                                                } catch (e: Exception) {
-                                                    error = friendlyNetworkError(e)
-                                                } finally {
-                                                    busyOfferId = null
-                                                }
-                                            }
-                                        },
-                                        enabled = busyOfferId != offer.offerId,
-                                    ) { Text("Беру", color = VoitosColors.Accent) }
-                                    TextButton(
-                                        onClick = {
-                                            scope.launch {
-                                                busyOfferId = offer.offerId
-                                                error = null
-                                                try {
-                                                    val res = client.respondExecutorOffer(offer.offerId, accept = false)
-                                                    message = res.message
-                                                    reload()
-                                                } catch (e: Exception) {
-                                                    error = friendlyNetworkError(e)
-                                                } finally {
-                                                    busyOfferId = null
-                                                }
-                                            }
-                                        },
-                                        enabled = busyOfferId != offer.offerId,
-                                    ) { Text("Отказ", color = VoitosColors.Danger) }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            Text(
-                if (executorProfiles.isNotEmpty()) "Как клиент" else "Мои заявки",
-                style = MaterialTheme.typography.titleMedium,
-                color = VoitosColors.Accent2,
-                modifier = Modifier.padding(top = 8.dp),
-            )
         }
 
         if (!loading && clientItems.isEmpty()) {
