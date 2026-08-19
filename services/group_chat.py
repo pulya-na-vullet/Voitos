@@ -117,7 +117,11 @@ def post_message(user: BotUser, group: ServiceGroup, text: str, *, request=None)
 
 def process_avatar_bytes(raw: bytes) -> bytes:
     """Центральный кроп в квадрат и ресайз до 500×500 JPEG."""
-    img = Image.open(io.BytesIO(raw))
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img.load()
+    except Exception as exc:
+        raise ValueError("Не удалось прочитать изображение. Выберите JPG или PNG.") from exc
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGBA")
     if img.mode == "RGBA":
@@ -135,7 +139,7 @@ def process_avatar_bytes(raw: bytes) -> bytes:
     img = img.crop((left, top, left + side, top + side))
     img = img.resize((AVATAR_SIZE, AVATAR_SIZE), Image.Resampling.LANCZOS)
     out = io.BytesIO()
-    img.save(out, format="JPEG", quality=90, optimize=True)
+    img.save(out, format="JPEG", quality=88, optimize=True)
     return out.getvalue()
 
 

@@ -18,7 +18,7 @@ data class AuthSession(
 
 @Serializable
 data class Me(
-    val id: Int,
+    val id: Int = 0,
     @SerialName("real_name") val realName: String = "",
     val phone: String = "",
     val address: String = "",
@@ -27,6 +27,32 @@ data class Me(
     @SerialName("onboarding_completed") val onboardingCompleted: Boolean = false,
     @SerialName("avatar_url") val avatarUrl: String = "",
 )
+
+@Serializable
+data class AvatarUploadResult(
+    val ok: Boolean = true,
+    val id: Int = 0,
+    @SerialName("real_name") val realName: String = "",
+    val phone: String = "",
+    val address: String = "",
+    val locality: String = "",
+    @SerialName("profile_status") val profileStatus: String = "",
+    @SerialName("onboarding_completed") val onboardingCompleted: Boolean = false,
+    @SerialName("avatar_url") val avatarUrl: String = "",
+    val detail: String = "",
+    val error: String = "",
+) {
+    fun toMe(): Me = Me(
+        id = id,
+        realName = realName,
+        phone = phone,
+        address = address,
+        locality = locality,
+        profileStatus = profileStatus,
+        onboardingCompleted = onboardingCompleted,
+        avatarUrl = avatarUrl,
+    )
+}
 
 @Serializable
 data class AccessInfo(

@@ -46,6 +46,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Ktor types may leak through shared; keep engine available to app module.
     implementation("io.ktor:ktor-client-okhttp:3.0.1")
     debugImplementation("androidx.compose.ui:ui-tooling")

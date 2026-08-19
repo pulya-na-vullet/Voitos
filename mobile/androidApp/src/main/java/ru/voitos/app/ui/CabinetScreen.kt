@@ -1,6 +1,5 @@
 package ru.voitos.app.ui
 
-import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -41,7 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.ExecutorMe
 import ru.voitos.app.model.ExecutorProfileBrief
@@ -100,10 +101,9 @@ fun CabinetScreen(
             error = null
             message = null
             try {
-                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw IllegalStateException("Не удалось прочитать файл")
-                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "avatar.jpg"
+                val (b64, name) = withContext(Dispatchers.Default) {
+                    prepareAvatarJpegBase64(context, uri)
+                }
                 me = client.uploadAvatar(b64, filename = name)
                 message = "Аватар обновлён"
             } catch (e: Exception) {

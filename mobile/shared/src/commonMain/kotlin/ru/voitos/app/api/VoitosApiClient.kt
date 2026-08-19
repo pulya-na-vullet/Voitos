@@ -19,6 +19,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import ru.voitos.app.VoitosApi
 import ru.voitos.app.model.AuthSession
+import ru.voitos.app.model.AvatarUploadResult
 import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
 import ru.voitos.app.model.CollectionReceiptResult
@@ -85,8 +86,8 @@ class VoitosApiClient(
     suspend fun uploadAvatar(
         contentBase64: String,
         filename: String = "avatar.jpg",
-    ): Me =
-        http.post("$baseUrl/me/avatar") {
+    ): Me {
+        val response: HttpResponse = http.post("$baseUrl/me/avatar") {
             applyAuth()
             contentType(ContentType.Application.Json)
             setBody(
@@ -95,7 +96,28 @@ class VoitosApiClient(
                     put("filename", filename)
                 },
             )
-        }.body()
+        }
+        val parsed: AvatarUploadResult = runCatching { response.body<AvatarUploadResult>() }
+            .getOrElse {
+                throw IllegalStateException(
+                    if (response.status.isSuccess()) {
+                        "Сервер вернул неожиданный ответ при загрузке аватара"
+                    } else {
+                        "Не удалось загрузить аватар (HTTP ${response.status.value}). Обновите бэкенд."
+                    },
+                )
+            }
+        if (!response.status.isSuccess() || !parsed.ok) {
+            val msg = parsed.detail.ifBlank { parsed.error }.ifBlank {
+                "Не удалось загрузить аватар (HTTP ${response.status.value})"
+            }
+            throw IllegalStateException(msg)
+        }
+        if (parsed.id <= 0 && parsed.avatarUrl.isBlank()) {
+            throw IllegalStateException("Сервер не вернул профиль после загрузки аватара")
+        }
+        return parsed.toMe()
+    }
 
     suspend fun groups(): ServiceGroupList = authedGet("/groups")
 
