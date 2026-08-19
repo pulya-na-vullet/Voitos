@@ -28,6 +28,7 @@ import ru.voitos.app.model.PhotoUploadResult
 import ru.voitos.app.model.ReceiptList
 import ru.voitos.app.model.ReceiptUploadResult
 import ru.voitos.app.model.SubscriptionInfo
+import ru.voitos.app.model.WorkRequestCancelResult
 import ru.voitos.app.model.WorkRequestCreated
 import ru.voitos.app.model.WorkRequestList
 import ru.voitos.app.model.WorkRequestSubmitResult

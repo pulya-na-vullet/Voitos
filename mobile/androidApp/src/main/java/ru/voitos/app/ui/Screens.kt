@@ -70,7 +70,7 @@ fun LoginScreen(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("Voitos", style = MaterialTheme.typography.headlineLarge)
+        Text("Voitos", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.secondary)
         Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium)
         Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
@@ -256,7 +256,7 @@ fun InboxScreen(
 fun CollectionsScreen(
     client: VoitosApiClient,
     onOpen: (Int) -> Unit = {},
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     var items by remember { mutableStateOf<List<CollectionBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -267,8 +267,10 @@ fun CollectionsScreen(
             error = e.message
         }
     }
-    Column(modifier = Modifier.padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад") }
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        if (onBack != null) {
+            TextButton(onClick = onBack) { Text("← Назад") }
+        }
         Text("Сборы", style = MaterialTheme.typography.headlineSmall)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -292,7 +294,7 @@ fun CollectionsScreen(
 fun WorkRequestsScreen(
     client: VoitosApiClient,
     onConfirm: (Int) -> Unit,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     var items by remember { mutableStateOf<List<WorkRequestBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -316,8 +318,10 @@ fun WorkRequestsScreen(
         "draft", "pending", "offering", "scheduling", "in_progress", "awaiting_client",
     )
 
-    Column(modifier = Modifier.padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад") }
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        if (onBack != null) {
+            TextButton(onClick = onBack) { Text("← Назад") }
+        }
         Text("Заявки", style = MaterialTheme.typography.headlineSmall)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
@@ -551,7 +555,7 @@ fun SubscriptionScreen(
 fun NewWorkRequestScreen(
     client: VoitosApiClient,
     onCreated: (id: Int, needsPhotos: Boolean) -> Unit,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     var roles by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorRole>>(emptyList()) }
     var selectedId by remember { mutableStateOf<Int?>(null) }
@@ -571,7 +575,9 @@ fun NewWorkRequestScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("← Назад") }
+        if (onBack != null) {
+            TextButton(onClick = onBack) { Text("← Назад") }
+        }
         Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall)
         Spacer(modifier = Modifier.height(8.dp))
         Text("Роль", style = MaterialTheme.typography.labelLarge)

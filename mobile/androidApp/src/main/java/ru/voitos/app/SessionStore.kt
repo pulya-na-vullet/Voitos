@@ -19,8 +19,17 @@ class SessionStore(context: Context) {
         get() = prefs.getString(KEY_BASE, VoitosApi.DEFAULT_BASE_URL) ?: VoitosApi.DEFAULT_BASE_URL
         set(value) = prefs.edit { putString(KEY_BASE, value) }
 
+    /** Уже был хотя бы один запуск после установки (не чистая установка). */
+    var hasLaunchedBefore: Boolean
+        get() = prefs.getBoolean(KEY_LAUNCHED, false)
+        set(value) = prefs.edit { putBoolean(KEY_LAUNCHED, value) }
+
     fun clear() {
-        prefs.edit { clear() }
+        // Не трогаем hasLaunchedBefore и baseUrl — это не «чистая установка».
+        prefs.edit {
+            remove(KEY_TOKEN)
+            remove(KEY_NAME)
+        }
     }
 
     fun isLoggedIn(): Boolean = !accessToken.isNullOrBlank()
@@ -29,5 +38,6 @@ class SessionStore(context: Context) {
         private const val KEY_TOKEN = "access_token"
         private const val KEY_NAME = "display_name"
         private const val KEY_BASE = "base_url"
+        private const val KEY_LAUNCHED = "has_launched_before"
     }
 }
