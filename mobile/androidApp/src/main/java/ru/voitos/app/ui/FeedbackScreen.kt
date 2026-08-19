@@ -54,8 +54,8 @@ fun FeedbackScreen(
     onBack: () -> Unit,
 ) {
     var items by remember { mutableStateOf<List<FeedbackTicket>>(emptyList()) }
-    var manager by remember { mutableStateOf(ManagerFeedbackContext()) }
-    var notice by remember { mutableStateOf("Все обращения рассматриваются администратором.") }
+    var managers by remember { mutableStateOf<List<ManagerFeedbackContext>>(emptyList()) }
+    var notice by remember { mutableStateOf("Баги и обратная связь — администратор; ОС по менеджеру отвечает ИИ.") }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -65,7 +65,12 @@ fun FeedbackScreen(
     var subject by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
     var score by remember { mutableIntStateOf(0) }
+    var selectedGroupId by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
+
+    val managerAvailable = managers.any { it.available && it.groupId != null }
+    val selectedManager = managers.firstOrNull { it.groupId == selectedGroupId }
+        ?: managers.firstOrNull { it.available }
 
     fun reload() {
         scope.launch {
@@ -74,8 +79,15 @@ fun FeedbackScreen(
             try {
                 val res = client.feedback()
                 items = res.items
-                manager = res.manager
+                managers = when {
+                    res.managers.isNotEmpty() -> res.managers
+                    res.manager.available -> listOf(res.manager)
+                    else -> emptyList()
+                }
                 if (res.notice.isNotBlank()) notice = res.notice
+                if (selectedGroupId == null || managers.none { it.groupId == selectedGroupId }) {
+                    selectedGroupId = managers.firstOrNull { it.available }?.groupId
+                }
             } catch (e: Exception) {
                 error = friendlyNetworkError(e)
             } finally {
@@ -99,10 +111,16 @@ fun FeedbackScreen(
                             body = body,
                             subject = subject,
                         )
+                        message = "Обращение отправлено. Администратор рассмотрит его и ответит здесь."
                     }
                     FeedbackFormMode.Manager -> {
                         if (score !in 1..5) {
                             error = "Выберите оценку от 1 до 5"
+                            return@launch
+                        }
+                        val groupId = selectedManager?.groupId
+                        if (groupId == null) {
+                            error = "Выберите менеджера / группу"
                             return@launch
                         }
                         client.createFeedback(
@@ -110,11 +128,12 @@ fun FeedbackScreen(
                             body = body,
                             subject = subject,
                             score = score,
+                            groupId = groupId,
                         )
+                        message = "Оценка отправлена. Ответ ИИ появится здесь; оценка уйдёт закреплённому менеджеру."
                     }
                     FeedbackFormMode.None -> return@launch
                 }
-                message = "Обращение отправлено. Администратор рассмотрит его и ответит здесь."
                 formMode = FeedbackFormMode.None
                 subject = ""
                 body = ""
@@ -155,16 +174,24 @@ fun FeedbackScreen(
             ) { Text("Баг или обратная связь") }
             Spacer(modifier = Modifier.height(8.dp))
             Button(
-                onClick = { formMode = FeedbackFormMode.Manager },
+                onClick = {
+                    if (selectedGroupId == null) {
+                        selectedGroupId = managers.firstOrNull { it.available }?.groupId
+                    }
+                    formMode = FeedbackFormMode.Manager
+                },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = manager.available,
+                enabled = managerAvailable,
                 colors = voitosSecondaryButtonColors(),
             ) {
                 Text(
-                    if (manager.available) {
-                        "ОС по менеджеру${if (manager.managerName.isNotBlank()) " · ${manager.managerName}" else ""}"
-                    } else {
-                        "Менеджер района не закреплён"
+                    when {
+                        !managerAvailable -> "Менеджер района не закреплён"
+                        managers.size > 1 -> "ОС по менеджеру · выбрать группу"
+                        else -> {
+                            val m = managers.firstOrNull()
+                            "ОС по менеджеру${if (m?.managerName?.isNotBlank() == true) " · ${m.managerName}" else ""}"
+                        }
                     },
                 )
             }
@@ -196,19 +223,43 @@ fun FeedbackScreen(
                             },
                             minLines = 4,
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Заявку рассмотрит администратор.",
+                            color = VoitosColors.Muted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
                     }
                     FeedbackFormMode.Manager -> {
                         Text("Оценка менеджера", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            listOfNotNull(
-                                manager.managerName.takeIf { it.isNotBlank() },
-                                manager.groupName.takeIf { it.isNotBlank() },
-                            ).joinToString(" · ").ifBlank { "Менеджер вашего района" },
-                            color = VoitosColors.Muted,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
+                        if (managers.size > 1) {
+                            Text("Выберите группу / менеджера", color = VoitosColors.Text)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                managers.filter { it.available && it.groupId != null }.forEach { m ->
+                                    val label = listOfNotNull(
+                                        m.managerName.takeIf { it.isNotBlank() },
+                                        m.groupName.takeIf { it.isNotBlank() },
+                                    ).joinToString(" · ").ifBlank { "Группа ${m.groupId}" }
+                                    KindChip(
+                                        label = label,
+                                        selected = selectedGroupId == m.groupId,
+                                    ) { selectedGroupId = m.groupId }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                        } else {
+                            Text(
+                                listOfNotNull(
+                                    selectedManager?.managerName?.takeIf { it.isNotBlank() },
+                                    selectedManager?.groupName?.takeIf { it.isNotBlank() },
+                                ).joinToString(" · ").ifBlank { "Менеджер вашего района" },
+                                color = VoitosColors.Muted,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
                         Text("Оценка от 1 до 5", color = VoitosColors.Text)
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -223,15 +274,15 @@ fun FeedbackScreen(
                             label = "Комментарий: что улучшить или что понравилось",
                             minLines = 4,
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Ответ сформирует ИИ Яндекса; оценка попадёт к менеджеру выбранной группы.",
+                            color = VoitosColors.Muted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
                     }
                     FeedbackFormMode.None -> Unit
                 }
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    "Все заявки рассматриваются администратором.",
-                    color = VoitosColors.Muted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
                     onClick = { submit() },
@@ -307,7 +358,8 @@ private fun FeedbackTicketCard(ticket: FeedbackTicket) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 "Оценка: ${ticket.score}/5"
-                    + if (ticket.managerName.isNotBlank()) " · ${ticket.managerName}" else "",
+                    + if (ticket.managerName.isNotBlank()) " · ${ticket.managerName}" else ""
+                    + if (ticket.groupName.isNotBlank()) " · ${ticket.groupName}" else "",
                 color = VoitosColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -318,7 +370,11 @@ private fun FeedbackTicketCard(ticket: FeedbackTicket) {
             Spacer(modifier = Modifier.height(10.dp))
             HorizontalDivider(color = VoitosColors.Line.copy(alpha = 0.6f))
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Ответ администратора", style = MaterialTheme.typography.labelLarge, color = VoitosColors.Accent2)
+            Text(
+                if (ticket.answeredByAi || ticket.kind == "manager") "Ответ" else "Ответ администратора",
+                style = MaterialTheme.typography.labelLarge,
+                color = VoitosColors.Accent2,
+            )
             ticket.adminRepliedAt?.let {
                 Text(
                     formatFeedbackDate(it),
@@ -331,7 +387,11 @@ private fun FeedbackTicketCard(ticket: FeedbackTicket) {
         } else {
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "Ещё на рассмотрении — ответ появится здесь.",
+                if (ticket.kind == "manager") {
+                    "ИИ готовит ответ — он появится здесь."
+                } else {
+                    "Ещё на рассмотрении — ответ появится здесь."
+                },
                 color = VoitosColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )

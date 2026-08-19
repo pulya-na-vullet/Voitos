@@ -5,8 +5,8 @@
   <h1>Менеджеры</h1>
 </div>
 <p class="muted" style="margin-top:-6px;">
-  Ежемесячный опрос жителей: оценка менеджера группы 1–5.
-  Здесь отзывы с оценкой 1–4 и саммари ИИ за период.
+  Ежемесячный опрос жителей (1–5) и ОС из приложения по менеджеру группы —
+  оценки из приложения попадают именно к закреплённому менеджеру.
 </p>
 <div class="card">
   <table>
@@ -14,9 +14,11 @@
       <tr>
         <th>Менеджер</th>
         <th>Группы</th>
-        <th>Средняя</th>
-        <th>Ответов</th>
+        <th>Опрос · средняя</th>
+        <th>Опрос · ответов</th>
         <th>ОС 1–4</th>
+        <th>Приложение · средняя</th>
+        <th>Приложение · ОС</th>
         <th>Последний период</th>
         <th></th>
       </tr>
@@ -36,6 +38,8 @@
         <td class="mono">{% if row.avg %}{{ row.avg }}{% else %}—{% endif %}</td>
         <td class="mono">{{ row.count }}</td>
         <td class="mono">{{ row.low_count }}</td>
+        <td class="mono">{% if row.app_avg %}{{ row.app_avg }}{% else %}—{% endif %}</td>
+        <td class="mono">{{ row.app_count }}</td>
         <td>
           {% if row.latest %}
             {{ row.latest.started_at|date:"d.m.Y" }}
@@ -47,7 +51,7 @@
         <td><a class="btn small" href="{% url 'panel:managers_detail' row.profile.user_id %}">Открыть</a></td>
       </tr>
     {% empty %}
-      <tr><td colspan="7" class="muted">Менеджеров пока нет</td></tr>
+      <tr><td colspan="9" class="muted">Менеджеров пока нет</td></tr>
     {% endfor %}
     </tbody>
   </table>
