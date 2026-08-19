@@ -93,6 +93,75 @@ class MobileApiTests(TestCase):
         self.assertEqual(data["total"], 5)
         self.assertEqual(data["done_count"], 0)
 
+    def test_register_device(self):
+        tok = MobileAuthToken.objects.create(bot_user=self.user)
+        resp = self.client.post(
+            "/api/v1/devices",
+            data=json.dumps(
+                {"push_token": "fcm-test-token-abc", "platform": "android"}
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        tok.refresh_from_db()
+        self.assertEqual(tok.push_token, "fcm-test-token-abc")
+        self.assertEqual(tok.push_platform, "android")
+
+
+@override_settings(MOBILE_OTP_DEBUG=True, FCM_SERVER_KEY="", FCM_DRY_RUN=True)
+class FcmPushTests(TestCase):
+    def setUp(self):
+        from api.push import clear_push_log
+
+        clear_push_log()
+        self.user = BotUser.objects.create(
+            max_user_id="push_u1",
+            phone="89625507899",
+            real_name="Push",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+        self.tok = MobileAuthToken.objects.create(
+            bot_user=self.user,
+            push_token="fcm-dry-run-token-001",
+            push_platform="android",
+        )
+
+    def test_notify_dispatches_dry_run_and_marks_sent(self):
+        from api.push import recent_pushes
+
+        n = notify_user(
+            self.user,
+            ntype="collection.offered",
+            title="Снег во дворе",
+            body="Нужно 5 участников",
+            entity_type="collection",
+            entity_id=7,
+        )
+        n.refresh_from_db()
+        self.assertIsNotNone(n.push_sent_at)
+        self.assertIn("collections/7", n.deep_link)
+        pushes = recent_pushes()
+        self.assertEqual(len(pushes), 1)
+        self.assertEqual(pushes[0]["type"], "collection.offered")
+        self.assertEqual(pushes[0]["notification_id"], n.id)
+
+    def test_no_token_skips_push(self):
+        self.tok.push_token = ""
+        self.tok.save(update_fields=["push_token"])
+        from api.push import recent_pushes
+
+        n = notify_user(
+            self.user,
+            ntype="work_request.confirm_amount",
+            title="Подтвердите сумму",
+            entity_type="work_request",
+            entity_id=9,
+        )
+        n.refresh_from_db()
+        self.assertIsNone(n.push_sent_at)
+        self.assertEqual(recent_pushes(), [])
+
 
 class AppEmitHookTests(TestCase):
     """Ключевые стори пишут inbox для KMP/пушей."""

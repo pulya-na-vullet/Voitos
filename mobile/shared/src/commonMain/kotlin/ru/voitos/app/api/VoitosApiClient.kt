@@ -82,6 +82,20 @@ class VoitosApiClient(
         }
     }
 
+    /** Register FCM/APNs token for the current session. */
+    suspend fun registerDevice(pushToken: String, platform: String = "android") {
+        http.post("$baseUrl/devices") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("push_token", pushToken)
+                    put("platform", platform)
+                },
+            )
+        }
+    }
+
     private suspend inline fun <reified T> authedGet(path: String): T =
         http.get("$baseUrl$path") { applyAuth() }.body()
 
