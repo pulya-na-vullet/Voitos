@@ -341,8 +341,11 @@ data class FeedbackTicket(
     val score: Int? = null,
     @SerialName("manager_name") val managerName: String = "",
     @SerialName("group_name") val groupName: String = "",
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("manager_id") val managerId: Int? = null,
     @SerialName("admin_reply") val adminReply: String = "",
     @SerialName("admin_replied_at") val adminRepliedAt: String? = null,
+    @SerialName("answered_by_ai") val answeredByAi: Boolean = false,
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("updated_at") val updatedAt: String = "",
 )
@@ -353,12 +356,14 @@ data class ManagerFeedbackContext(
     @SerialName("manager_name") val managerName: String = "",
     @SerialName("group_name") val groupName: String = "",
     @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("manager_id") val managerId: Int? = null,
 )
 
 @Serializable
 data class FeedbackListResponse(
     val items: List<FeedbackTicket> = emptyList(),
     val manager: ManagerFeedbackContext = ManagerFeedbackContext(),
+    val managers: List<ManagerFeedbackContext> = emptyList(),
     val notice: String = "",
 )
 

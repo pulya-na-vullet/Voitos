@@ -270,6 +270,7 @@ class VoitosApiClient(
         body: String,
         subject: String = "",
         score: Int? = null,
+        groupId: Int? = null,
     ): FeedbackCreateResult {
         val response: HttpResponse = http.post("$baseUrl/me/feedback") {
             applyAuth()
@@ -280,6 +281,7 @@ class VoitosApiClient(
                     put("body", body)
                     put("subject", subject)
                     if (score != null) put("score", score)
+                    if (groupId != null) put("group_id", groupId)
                 },
             )
         }

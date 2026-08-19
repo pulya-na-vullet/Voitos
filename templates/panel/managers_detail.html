@@ -121,4 +121,59 @@
   <p class="muted" style="margin:0;">Опросов по этому менеджеру ещё не было — первая рассылка уйдёт при старте планировщика.</p>
 </div>
 {% endif %}
+
+<div class="card" style="margin-top:16px;">
+  <h3 style="margin-top:0;">ОС из приложения</h3>
+  <p class="muted" style="margin-top:-4px;">Оценки жителей из ЛК → «ОС по менеджеру». Ответ формирует Яндекс ИИ.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Когда</th>
+        <th>Житель</th>
+        <th>Группа</th>
+        <th>Оценка</th>
+        <th>Комментарий</th>
+        <th>Статус</th>
+        <th>Ответ</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in app_tickets %}
+      <tr>
+        <td class="mono">{{ t.id }}</td>
+        <td class="mono">{{ t.created_at|date:"d.m.Y H:i" }}</td>
+        <td><a href="{% url 'panel:user_dashboard' t.user_id %}">{{ t.user }}</a></td>
+        <td>{% if t.group %}{{ t.group.name }}{% else %}—{% endif %}</td>
+        <td class="mono"><strong>{% if t.score %}{{ t.score }}{% else %}—{% endif %}</strong>/5</td>
+        <td>{{ t.body|truncatechars:120 }}</td>
+        <td><span class="badge">{{ t.get_status_display }}</span></td>
+        <td style="max-width:280px; white-space:pre-wrap;">{% if t.admin_reply %}{{ t.admin_reply|truncatechars:200 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><a class="btn small" href="{% url 'panel:feedback_detail' t.id %}">Открыть</a></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="9" class="muted">Из приложения ОС по этому менеджеру ещё не было.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if app_ai_logs %}
+<div class="card" style="margin-top:16px;">
+  <h3 style="margin-top:0;">Лог ИИ по ОС из приложения</h3>
+  <table>
+    <thead><tr><th>Когда</th><th>Роль</th><th>Текст</th></tr></thead>
+    <tbody>
+    {% for log in app_ai_logs %}
+      <tr>
+        <td class="mono">{{ log.created_at|date:"d.m H:i" }}</td>
+        <td><span class="badge">{{ log.role }}</span></td>
+        <td style="white-space:pre-wrap; max-width:640px;">{{ log.content|truncatechars:800 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% endblock %}

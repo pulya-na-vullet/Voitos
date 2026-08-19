@@ -579,11 +579,17 @@ def me_feedback(request):
 
     user = request.bot_user
     if request.method == "GET":
+        mgr = manager_context_dict(user)
         return json_response(
             {
                 "items": [ticket_to_dict(t) for t in list_user_feedback(user)],
-                "manager": manager_context_dict(user),
-                "notice": "Все обращения рассматриваются администратором.",
+                "manager": mgr,
+                "managers": mgr.get("managers") or [],
+                "notice": (
+                    "Баги и обратная связь рассматриваются администратором. "
+                    "ОС по менеджеру отвечает автоматически (ИИ), оценка попадает "
+                    "к закреплённому менеджеру вашей группы."
+                ),
             }
         )
     data = parse_json(request)
@@ -594,6 +600,7 @@ def me_feedback(request):
             body=str(data.get("body") or ""),
             subject=str(data.get("subject") or ""),
             score=data.get("score"),
+            group_id=data.get("group_id"),
         )
     except ValueError as exc:
         return json_response({"error": str(exc), "detail": str(exc)}, status=400)

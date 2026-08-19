@@ -443,7 +443,7 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @admin_required
 def managers_quality_list(request: HttpRequest) -> HttpResponse:
-    from database.models import ManagerSurveyPeriod, ManagerSurveyResponse
+    from database.models import FeedbackKind, FeedbackTicket, ManagerSurveyPeriod, ManagerSurveyResponse
     from django.db.models import Avg, Count
 
     managers = (
@@ -462,6 +462,9 @@ def managers_quality_list(request: HttpRequest) -> HttpResponse:
         low_cnt = ManagerSurveyResponse.objects.filter(
             period__manager=profile.user, score__lte=4
         ).count()
+        app_agg = FeedbackTicket.objects.filter(
+            manager=profile.user, kind=FeedbackKind.MANAGER
+        ).aggregate(avg=Avg("score"), cnt=Count("id"))
         rows.append(
             {
                 "profile": profile,
@@ -470,6 +473,10 @@ def managers_quality_list(request: HttpRequest) -> HttpResponse:
                 "avg": round(float(agg["avg"]), 2) if agg["avg"] is not None else None,
                 "count": int(agg["cnt"] or 0),
                 "low_count": low_cnt,
+                "app_avg": (
+                    round(float(app_agg["avg"]), 2) if app_agg["avg"] is not None else None
+                ),
+                "app_count": int(app_agg["cnt"] or 0),
             }
         )
     return render(request, "panel/managers.html", {"rows": rows})
@@ -480,6 +487,8 @@ def managers_quality_list(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 def managers_quality_detail(request: HttpRequest, user_id: int) -> HttpResponse:
     from database.models import (
+        FeedbackKind,
+        FeedbackTicket,
         ManagerSurveyAILog,
         ManagerSurveyPeriod,
         ManagerSurveyResponse,
@@ -535,6 +544,16 @@ def managers_quality_detail(request: HttpRequest, user_id: int) -> HttpResponse:
     else:
         all_responses = []
 
+    app_tickets = list(
+        FeedbackTicket.objects.filter(manager=manager, kind=FeedbackKind.MANAGER)
+        .select_related("user", "group")
+        .order_by("-created_at")[:100]
+    )
+    app_ai_logs = list(
+        ManagerSurveyAILog.objects.filter(manager=manager, period__isnull=True)
+        .order_by("-created_at")[:50]
+    )
+
     groups = list(manager.managed_service_groups.order_by("name"))
     return render(
         request,
@@ -549,9 +568,10 @@ def managers_quality_detail(request: HttpRequest, user_id: int) -> HttpResponse:
             "feedback": feedback,
             "all_responses": all_responses,
             "ai_logs": ai_logs,
+            "app_tickets": app_tickets,
+            "app_ai_logs": app_ai_logs,
         },
     )
-
 
 @login_required
 @admin_required
