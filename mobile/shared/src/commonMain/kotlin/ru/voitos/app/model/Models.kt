@@ -98,6 +98,22 @@ data class CollectionDetail(
 )
 
 @Serializable
+data class FamilyMember(
+    val id: Int = 0,
+    val name: String = "",
+    val phone: String = "",
+    /** payer | member */
+    val relation: String = "member",
+)
+
+@Serializable
+data class FamilySubscriptionInfo(
+    @SerialName("is_payer") val isPayer: Boolean = false,
+    @SerialName("payer_name") val payerName: String = "",
+    val members: List<FamilyMember> = emptyList(),
+)
+
+@Serializable
 data class SubscriptionInfo(
     val state: String = "",
     @SerialName("subscription_until") val subscriptionUntil: String? = null,
@@ -107,6 +123,7 @@ data class SubscriptionInfo(
     @SerialName("payment_phone") val paymentPhone: String = "",
     @SerialName("payment_name") val paymentName: String = "",
     @SerialName("pending_receipts") val pendingReceipts: Int = 0,
+    val family: FamilySubscriptionInfo = FamilySubscriptionInfo(),
 )
 
 @Serializable

@@ -54,6 +54,36 @@ class MobileApiTests(TestCase):
         resp = self.client.get("/api/v1/me")
         self.assertEqual(resp.status_code, 401)
 
+    def test_me_subscription_family_members(self):
+        dependent = BotUser.objects.create(
+            max_user_id="app_family2",
+            phone="89625507833",
+            real_name="Член семьи",
+            profile_status=ProfileStatus.VERIFIED,
+            family_payer=self.user,
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.user)
+        resp = self.client.get(
+            "/api/v1/me/subscription",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIn("family", body)
+        self.assertTrue(body["family"]["is_payer"])
+        names = [m["name"] for m in body["family"]["members"]]
+        self.assertIn("Член семьи", names)
+
+        tok2 = MobileAuthToken.objects.create(bot_user=dependent)
+        resp2 = self.client.get(
+            "/api/v1/me/subscription",
+            HTTP_AUTHORIZATION=f"Bearer {tok2.token}",
+        )
+        self.assertEqual(resp2.status_code, 200)
+        fam = resp2.json()["family"]
+        self.assertFalse(fam["is_payer"])
+        self.assertEqual(fam["payer_name"], "Тест")
+
     def test_notifications_inbox(self):
         tok = MobileAuthToken.objects.create(bot_user=self.user)
         n = notify_user(

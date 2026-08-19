@@ -1,5 +1,6 @@
 package ru.voitos.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -7,10 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -25,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.ExecutorMe
+import ru.voitos.app.model.ExecutorProfileBrief
+import ru.voitos.app.model.FamilyMember
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.SubscriptionInfo
 import ru.voitos.app.ui.theme.VoitosColors
@@ -54,7 +59,6 @@ fun CabinetScreen(
         }
         sub = runCatching { client.subscription() }.getOrNull()
         executor = runCatching { client.executorMe() }.getOrElse {
-            // 404 / старый бэкенд → не исполнитель; прочие ошибки не валят весь кабинет
             val msg = it.message.orEmpty()
             if ("404" in msg || "me/executor" in msg.lowercase()) {
                 ExecutorMe(isExecutor = false)
@@ -113,6 +117,7 @@ fun CabinetScreen(
                 if (s.priceRub > 0) {
                     InfoLine("Цена", "${s.priceRub} ₽/мес")
                 }
+                FamilySubscriptionBlock(s)
             } else if (!loading) {
                 Text("Нет данных о подписке", color = VoitosColors.Muted)
             }
@@ -127,16 +132,10 @@ fun CabinetScreen(
             if (ex == null && !loading) {
                 Text("Нет данных", color = VoitosColors.Muted)
             } else if (ex != null) {
-                if (ex.isExecutor) {
-                    Text("Да, вы зарегистрированы как исполнитель", color = VoitosColors.Ok)
-                    ex.profiles.forEach { p ->
-                        Spacer(modifier = Modifier.height(6.dp))
-                        InfoLine("Роль", p.roleName)
-                        InfoLine("Статус", p.statusLabel.ifBlank { p.status })
-                        if (p.locality.isNotBlank()) InfoLine("НП", p.locality)
-                    }
+                if (ex.isExecutor && ex.profiles.isNotEmpty()) {
+                    ExecutorProfilesBlock(ex.profiles)
                     if (ex.openOffersCount > 0) {
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             "Открытых заявок для вас: ${ex.openOffersCount}",
                             color = VoitosColors.Accent2,
@@ -203,6 +202,89 @@ fun CabinetScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Выйти", color = VoitosColors.Danger)
+        }
+    }
+}
+
+@Composable
+private fun FamilySubscriptionBlock(s: SubscriptionInfo) {
+    val family = s.family
+    Spacer(modifier = Modifier.height(10.dp))
+    HorizontalDivider(color = VoitosColors.Line.copy(alpha = 0.6f))
+    Spacer(modifier = Modifier.height(8.dp))
+    when {
+        family.isPayer && family.members.isNotEmpty() -> {
+            Text(
+                "К вашей подписке подключены:",
+                style = MaterialTheme.typography.labelLarge,
+                color = VoitosColors.Text,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            family.members.forEach { m ->
+                FamilyMemberLine(m)
+            }
+        }
+        !family.isPayer && family.payerName.isNotBlank() -> {
+            Text(
+                "Подписка через: ${family.payerName}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = VoitosColors.Text,
+            )
+            val others = family.members.filter { it.relation != "payer" }
+            if (others.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Ещё на этой подписке:",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = VoitosColors.Muted,
+                )
+                others.forEach { FamilyMemberLine(it) }
+            }
+        }
+        else -> {
+            Text(
+                "Семейных подключений нет",
+                style = MaterialTheme.typography.bodySmall,
+                color = VoitosColors.Muted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FamilyMemberLine(m: FamilyMember) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(m.name.ifBlank { "—" }, color = VoitosColors.Text)
+        if (m.phone.isNotBlank()) {
+            Text(m.phone, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Muted)
+        }
+    }
+}
+
+@Composable
+private fun ExecutorProfilesBlock(profiles: List<ExecutorProfileBrief>) {
+    val header = if (profiles.size == 1) {
+        "Вы зарегистрированы как исполнитель:"
+    } else {
+        "Вы зарегистрировались исполнителями под ролями:"
+    }
+    Text(header, color = VoitosColors.Ok)
+    Spacer(modifier = Modifier.height(8.dp))
+    profiles.forEachIndexed { index, p ->
+        if (index > 0) {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(VoitosColors.BgSoft.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                .padding(10.dp),
+        ) {
+            Text(p.roleName, style = MaterialTheme.typography.titleSmall, color = VoitosColors.Accent2)
+            Spacer(modifier = Modifier.height(4.dp))
+            InfoLine("Статус", p.statusLabel.ifBlank { p.status })
+            if (p.locality.isNotBlank()) InfoLine("НП", p.locality)
+            if (p.phone.isNotBlank()) InfoLine("Телефон", p.phone)
         }
     }
 }

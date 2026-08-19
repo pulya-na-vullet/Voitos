@@ -78,9 +78,48 @@ def me_subscription(request):
             "pending_receipts": PaymentReceipt.objects.filter(
                 user=user, status="pending"
             ).count(),
+            "family": _family_subscription_payload(user),
         }
     )
     return json_response(payload)
+
+
+def _family_member_item(u, *, relation: str) -> dict:
+    return {
+        "id": u.id,
+        "name": str(u).strip() or (u.phone or f"#{u.id}"),
+        "phone": (u.phone or "").strip(),
+        "relation": relation,
+    }
+
+
+def _family_subscription_payload(user) -> dict:
+    """Кто на семейной подписке: я плательщик → члены; я на чужой → плательщик и остальные."""
+    dependents = list(
+        user.family_dependents.all().order_by("real_name", "display_name", "id")
+    )
+    payer = user.family_payer
+    members: list[dict] = []
+    if dependents:
+        for d in dependents:
+            members.append(_family_member_item(d, relation="member"))
+        return {
+            "is_payer": True,
+            "payer_name": "",
+            "members": members,
+        }
+    if payer is not None:
+        members.append(_family_member_item(payer, relation="payer"))
+        for d in payer.family_dependents.exclude(id=user.id).order_by(
+            "real_name", "display_name", "id"
+        ):
+            members.append(_family_member_item(d, relation="member"))
+        return {
+            "is_payer": False,
+            "payer_name": str(payer).strip(),
+            "members": members,
+        }
+    return {"is_payer": False, "payer_name": "", "members": []}
 
 
 @api_login_required
