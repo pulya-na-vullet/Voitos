@@ -49,10 +49,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.delay
 import ru.voitos.app.R
 import ru.voitos.app.ui.theme.VoitosColors
 import kotlin.math.roundToInt
@@ -87,6 +89,18 @@ fun VoitosBackground(modifier: Modifier = Modifier, content: @Composable () -> U
                     ),
                 ),
         )
+        // Тот же «подсвет» как у лого: бирюза в центре.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x332DD4BF), Color.Transparent),
+                        center = Offset(0.5f, 0.42f),
+                        radius = 700f,
+                    ),
+                ),
+        )
         content()
     }
 }
@@ -103,9 +117,9 @@ fun MainShell(
     var cabinetIconBounds by remember { mutableStateOf<Rect?>(null) }
     var splashVisible by remember { mutableStateOf(playLogoSplash) }
     var splashRunning by remember { mutableStateOf(playLogoSplash) }
+    var showCabinetLabel by remember { mutableStateOf(!playLogoSplash) }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val density = LocalDensity.current
         val screenW = constraints.maxWidth.toFloat()
         val screenH = constraints.maxHeight.toFloat()
 
@@ -128,18 +142,26 @@ fun MainShell(
                 onSelect = onSelect,
                 showWorkTab = showWorkTab,
                 hideCabinetIcon = splashRunning,
+                showCabinetLabel = showCabinetLabel,
                 onCabinetIconPositioned = { cabinetIconBounds = it },
             )
         }
 
         if (splashVisible) {
-            LogoCollapseSplash(
+            LogoLaunchSplash(
                 screenWidthPx = screenW,
                 screenHeightPx = screenH,
                 targetBounds = cabinetIconBounds,
+                onRevealMain = {
+                    // Главный экран уже под сплэшем; фон сплэша уходит в фазе 4.
+                },
+                onArrivedAtNav = {
+                    showCabinetLabel = true
+                },
                 onFinished = {
                     splashRunning = false
                     splashVisible = false
+                    showCabinetLabel = true
                     onSplashFinished()
                 },
             )
@@ -155,6 +177,7 @@ private fun BottomNavBar(
     onSelect: (MainTab) -> Unit,
     showWorkTab: Boolean,
     hideCabinetIcon: Boolean,
+    showCabinetLabel: Boolean,
     onCabinetIconPositioned: (Rect) -> Unit,
 ) {
     Row(
@@ -203,6 +226,7 @@ private fun BottomNavBar(
             modifier = Modifier.weight(1f),
             tintIcon = false,
             iconAlpha = if (hideCabinetIcon) 0f else 1f,
+            labelAlpha = if (showCabinetLabel) 1f else 0f,
             onIconPositioned = onCabinetIconPositioned,
         )
     }
@@ -217,6 +241,7 @@ private fun NavItem(
     modifier: Modifier = Modifier,
     tintIcon: Boolean = true,
     iconAlpha: Float = 1f,
+    labelAlpha: Float = 1f,
     onIconPositioned: ((Rect) -> Unit)? = null,
 ) {
     val accent = if (selected) VoitosColors.Accent2 else VoitosColors.Muted
@@ -261,7 +286,7 @@ private fun NavItem(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = label,
-                color = accent,
+                color = accent.copy(alpha = accent.alpha * labelAlpha),
                 fontSize = 10.sp,
                 lineHeight = 11.sp,
                 textAlign = TextAlign.Center,
@@ -273,63 +298,134 @@ private fun NavItem(
     }
 }
 
+/**
+ * Холодный старт:
+ * 1) V по центру, 60% ширины
+ * 2) через 0.5с → позиция 3/4 × 4/5, размер 25% ширины
+ * 3) текст-слоган
+ * 4) уход в слот «Личный кабинет» навбара
+ */
 @Composable
-private fun LogoCollapseSplash(
+private fun LogoLaunchSplash(
     screenWidthPx: Float,
     screenHeightPx: Float,
     targetBounds: Rect?,
+    onRevealMain: () -> Unit,
+    onArrivedAtNav: () -> Unit,
     onFinished: () -> Unit,
 ) {
-    val progress = remember { Animatable(0f) }
     val density = LocalDensity.current
-    val startSizePx = with(density) { 160.dp.toPx() }
-    val fallbackEnd = with(density) { 28.dp.toPx() }
     val safeW = screenWidthPx.coerceAtLeast(1f)
     val safeH = screenHeightPx.coerceAtLeast(1f)
-    val fallbackEndCx = safeW * 0.875f
-    val fallbackEndCy = safeH - with(density) { 40.dp.toPx() }
+
+    val sizeAnim = remember { Animatable(safeW * 0.60f) }
+    val cxAnim = remember { Animatable(safeW / 2f) }
+    val cyAnim = remember { Animatable(safeH / 2f) }
+    val bgAnim = remember { Animatable(1f) }
+    val textAnim = remember { Animatable(0f) }
+
+    val midSize = safeW * 0.25f
+    val midCx = safeW * 0.75f
+    val midCy = safeH * 0.80f
+
     val boundsUpdated = rememberUpdatedState(targetBounds)
     val finishOnce = rememberUpdatedState(onFinished)
-
-    var endSizePx by remember { mutableStateOf(fallbackEnd) }
-    var endCx by remember { mutableStateOf(fallbackEndCx) }
-    var endCy by remember { mutableStateOf(fallbackEndCy) }
+    val arrivedOnce = rememberUpdatedState(onArrivedAtNav)
+    val revealOnce = rememberUpdatedState(onRevealMain)
 
     LaunchedEffect(Unit) {
         try {
-            delay(800)
-            val bounds = withTimeoutOrNull(800) {
+            // 1. Держим крупный V (60% ширины, центр)
+            delay(500)
+            // 2. Уменьшение до 25% + сдвиг в 3/4 × 4/5
+            coroutineScope {
+                launch { sizeAnim.animateTo(midSize, tween(700, easing = FastOutSlowInEasing)) }
+                launch { cxAnim.animateTo(midCx, tween(700, easing = FastOutSlowInEasing)) }
+                launch { cyAnim.animateTo(midCy, tween(700, easing = FastOutSlowInEasing)) }
+            }
+            // 3. Слоган
+            textAnim.animateTo(1f, tween(450))
+            delay(900)
+            // 4. Открываем главный (гасим фон) и летим в навбар
+            revealOnce.value()
+            val bounds = withTimeoutOrNull(900) {
                 snapshotFlow { boundsUpdated.value }.filterNotNull().first()
             }
-            if (bounds != null && bounds.width > 1f && bounds.height > 1f) {
-                endSizePx = minOf(bounds.width, bounds.height).coerceAtLeast(1f)
-                endCx = bounds.center.x
-                endCy = bounds.center.y
+            val endSize = if (bounds != null && bounds.width > 1f) {
+                minOf(bounds.width, bounds.height).coerceAtLeast(1f)
+            } else {
+                with(density) { 28.dp.toPx() }
             }
-            progress.animateTo(
-                1f,
-                animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
-            )
+            val endCx = bounds?.center?.x ?: (safeW * 0.90f)
+            val endCy = bounds?.center?.y ?: (safeH - with(density) { 36.dp.toPx() })
+
+            coroutineScope {
+                launch { bgAnim.animateTo(0f, tween(550)) }
+                launch { textAnim.animateTo(0f, tween(350)) }
+                launch { sizeAnim.animateTo(endSize, tween(650, easing = FastOutSlowInEasing)) }
+                launch { cxAnim.animateTo(endCx, tween(650, easing = FastOutSlowInEasing)) }
+                launch { cyAnim.animateTo(endCy, tween(650, easing = FastOutSlowInEasing)) }
+            }
+            arrivedOnce.value()
+            delay(120)
         } catch (_: Exception) {
-            // Huawei / OEM: любая ошибка анимации не должна держать UI.
         } finally {
             finishOnce.value()
         }
     }
 
-    val t = progress.value
-    val sizePx = (startSizePx + (endSizePx - startSizePx) * t).coerceAtLeast(1f)
-    val cx = safeW / 2f + (endCx - safeW / 2f) * t
-    val cy = safeH / 2f + (endCy - safeH / 2f) * t
-    val bgAlpha = (1f - t).coerceIn(0f, 1f)
+    val sizePx = sizeAnim.value.coerceAtLeast(1f)
+    val cx = cxAnim.value
+    val cy = cyAnim.value
+    val bgA = bgAnim.value.coerceIn(0f, 1f)
+    val textA = textAnim.value.coerceIn(0f, 1f)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(VoitosColors.Bg.copy(alpha = 0.96f * bgAlpha)),
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (bgA > 0.01f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF10161D).copy(alpha = bgA),
+                                Color(0xFF0B1015).copy(alpha = bgA),
+                            ),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0x552DD4BF).copy(alpha = 0.45f * bgA),
+                                Color.Transparent,
+                            ),
+                            center = Offset(safeW * 0.5f, safeH * 0.42f),
+                            radius = safeW * 0.85f,
+                        ),
+                    ),
+            )
+        }
+
+        if (textA > 0.01f) {
+            Text(
+                text = "Voitos — ассистент вашего двора на базе ИИ",
+                color = VoitosColors.Text.copy(alpha = textA),
+                fontSize = 16.sp,
+                lineHeight = 22.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 28.dp)
+                    .offset(y = with(density) { (safeH * 0.08f).toDp() }),
+            )
+        }
+
         Image(
-            painter = painterResource(R.drawable.voitos_logo_mono),
+            painter = painterResource(R.drawable.voitos_logo_mark),
             contentDescription = null,
             modifier = Modifier
                 .offset {

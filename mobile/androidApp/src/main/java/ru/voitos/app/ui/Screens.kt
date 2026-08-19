@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.voitos.app.VoitosApi
 import ru.voitos.app.api.VoitosApiClient
@@ -913,6 +914,9 @@ fun OnboardingScreen(
     client: VoitosApiClient,
     apiBaseUrl: String = VoitosApi.DEFAULT_BASE_URL,
     onBack: () -> Unit,
+    /** Если true — нельзя закрыть, пока бэкенд не отметил обучение пройденным. */
+    requireCompletion: Boolean = false,
+    onFinished: (() -> Unit)? = null,
 ) {
     var progress by remember { mutableStateOf<OnboardingProgress?>(null) }
     var index by remember { mutableIntStateOf(0) }
@@ -922,23 +926,38 @@ fun OnboardingScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    fun isDone(p: OnboardingProgress?): Boolean =
+        p != null && (p.completed || p.rewardGranted)
+
+    fun finish() {
+        (onFinished ?: onBack).invoke()
+    }
+
     LaunchedEffect(Unit) {
         try {
             val p = client.onboarding()
             progress = p
-            // Всегда начинаем с первого комикса — можно пересмотреть даже после MAX
             index = 0
-            if (p.completed || p.rewardGranted) {
+            if (isDone(p)) {
+                if (requireCompletion) {
+                    finish()
+                    return@LaunchedEffect
+                }
                 banner = "Обучение уже пройдено. Можно просто полистать комиксы."
             }
         } catch (e: Exception) {
             error = e.message
+            if (requireCompletion) {
+                // Сеть упала — не блокируем вход навсегда.
+                finish()
+            }
         }
     }
 
     val steps = progress?.steps.orEmpty()
     val step = steps.getOrNull(index)
     val total = (progress?.total?.takeIf { it > 0 } ?: steps.size).coerceAtLeast(1)
+    val canClose = !requireCompletion || isDone(progress)
 
     Column(
         modifier = Modifier
@@ -952,7 +971,9 @@ fun OnboardingScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Обучение", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-            VoitosBackButton(onClick = onBack, label = "Закрыть")
+            if (canClose) {
+                VoitosBackButton(onClick = { finish() }, label = "Закрыть")
+            }
         }
         progress?.let {
             Text(
@@ -969,9 +990,9 @@ fun OnboardingScreen(
         if (step == null) {
             if (error == null) {
                 CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = VoitosColors.Accent,
-            )
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    color = VoitosColors.Accent,
+                )
                 Text("Загрузка…", color = VoitosColors.Muted)
             }
         } else {
@@ -992,28 +1013,32 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = {
-                    val alreadyDone = step.done && (progress?.completed == true || progress?.rewardGranted == true)
+                    val alreadyDone = step.done && isDone(progress)
                     if (alreadyDone && index >= steps.lastIndex) {
-                        onBack()
+                        finish()
                         return@Button
                     }
                     scope.launch {
                         loading = true
                         error = null
                         try {
-                            val wasComplete = progress?.completed == true || progress?.rewardGranted == true
+                            val wasComplete = isDone(progress)
                             val res = client.completeOnboardingStep(step.code)
                             progress = res
-                            if (res.rewardJustGranted || (!wasComplete && res.rewardGranted && res.completed)) {
+                            if (res.rewardJustGranted || (!wasComplete && isDone(res))) {
                                 banner =
                                     "Готово! Вам автоматически начислен месяц подписки. Спасибо за обучение."
                             }
                             val last = (res.steps.size - 1).coerceAtLeast(0)
                             if (index < last) {
                                 index += 1
-                            } else if (res.completed || res.rewardGranted) {
+                            } else if (isDone(res)) {
                                 if (banner.isNullOrBlank()) {
                                     banner = "Обучение пройдено (${res.doneCount}/${res.total})."
+                                }
+                                if (requireCompletion) {
+                                    delay(600)
+                                    finish()
                                 }
                             }
                         } catch (e: Exception) {
@@ -1032,7 +1057,7 @@ fun OnboardingScreen(
                         loading -> "…"
                         !step.done -> "Понял · далее"
                         index < steps.lastIndex -> "Далее"
-                        progress?.completed == true || progress?.rewardGranted == true -> "Закрыть"
+                        isDone(progress) -> if (requireCompletion) "Продолжить" else "Закрыть"
                         else -> "Готово"
                     },
                     color = VoitosColors.Text,
@@ -1052,11 +1077,13 @@ fun OnboardingScreen(
                     enabled = index < steps.lastIndex && !loading,
                 ) { Text("Следующий →", color = VoitosColors.Accent) }
             }
-            VoitosBackButton(
-                onClick = onBack,
-                modifier = Modifier.fillMaxWidth(),
-                label = "Закрыть онбординг",
-            )
+            if (canClose && !requireCompletion) {
+                VoitosBackButton(
+                    onClick = { finish() },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Закрыть онбординг",
+                )
+            }
         }
     }
 }

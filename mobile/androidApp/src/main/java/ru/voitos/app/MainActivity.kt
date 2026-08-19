@@ -6,13 +6,16 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
@@ -21,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,8 +48,8 @@ import ru.voitos.app.ui.SubscriptionScreen
 import ru.voitos.app.ui.VoitosBackground
 import ru.voitos.app.ui.WorkRequestPhotosScreen
 import ru.voitos.app.ui.WorkRequestsScreen
-import ru.voitos.app.ui.theme.VoitosTheme
 import ru.voitos.app.ui.theme.VoitosColors
+import ru.voitos.app.ui.theme.VoitosTheme
 
 class MainActivity : ComponentActivity() {
     private lateinit var session: SessionStore
@@ -53,6 +57,10 @@ class MainActivity : ComponentActivity() {
 
     private sealed class Screen {
         data object Login : Screen()
+        /** Проверка онбординга перед сплэшем / главной. */
+        data object Bootstrapping : Screen()
+        /** Обязательный онбординг (ещё не пройден на бэкенде). */
+        data object RequiredOnboarding : Screen()
         data object Main : Screen()
         data class CollectionDetail(val id: Int) : Screen()
         data class WorkRequestPhotos(val id: Int) : Screen()
@@ -72,10 +80,10 @@ class MainActivity : ComponentActivity() {
         client.accessToken = session.accessToken
 
         val lastCrash = CrashFileLogger.consumeLastCrash(this)
-        val initial = resolveDeepLink(intent?.data) ?: if (session.isLoggedIn()) {
-            Screen.Main
-        } else {
-            Screen.Login
+        val deepLinkScreen = resolveDeepLink(intent?.data)
+        val initial = when {
+            session.isLoggedIn() -> Screen.Bootstrapping
+            else -> Screen.Login
         }
 
         try {
@@ -84,12 +92,15 @@ class MainActivity : ComponentActivity() {
                 var tab by remember { mutableStateOf(MainTab.Collections) }
                 var collectionsRefresh by remember { mutableStateOf(0) }
                 var isExecutor by remember { mutableStateOf(false) }
-                // Splash только после первого успешного запуска — меньше риска ANR на холодном старте Huawei.
-                var playSplash by remember {
-                    mutableStateOf(false)
-                }
+                var playSplash by remember { mutableStateOf(false) }
+                var pendingAfterBootstrap by remember { mutableStateOf(deepLinkScreen) }
                 var crashText by remember { mutableStateOf(lastCrash) }
                 val scope = rememberCoroutineScope()
+
+                fun enterMainWithSplash(splash: Boolean) {
+                    playSplash = splash
+                    screen = Screen.Main
+                }
 
                 VoitosTheme {
                     VoitosBackground {
@@ -136,9 +147,9 @@ class MainActivity : ComponentActivity() {
                                         it.accessToken = token
                                     }
                                     scope.launch { registerDevPushToken() }
-                                    playSplash = session.hasLaunchedBefore
+                                    pendingAfterBootstrap = null
                                     tab = MainTab.Collections
-                                    screen = Screen.Main
+                                    screen = Screen.Bootstrapping
                                 },
                                 onDebugPrefs = { url, phone, dbg ->
                                     session.baseUrl = url
@@ -147,6 +158,44 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onSaveServer = { url ->
                                     DevServerSettings.save(this@MainActivity, session, url)
+                                },
+                            )
+
+                            Screen.Bootstrapping -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    CircularProgressIndicator(color = VoitosColors.Accent2)
+                                }
+                                LaunchedEffect(Unit) {
+                                    val needOnboarding = runCatching {
+                                        val p = client.onboarding()
+                                        !(p.completed || p.rewardGranted)
+                                    }.getOrDefault(false)
+                                    if (needOnboarding) {
+                                        screen = Screen.RequiredOnboarding
+                                    } else {
+                                        val next = pendingAfterBootstrap
+                                        pendingAfterBootstrap = null
+                                        if (next != null && next !is Screen.Main) {
+                                            playSplash = false
+                                            screen = next
+                                        } else {
+                                            enterMainWithSplash(splash = true)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Screen.RequiredOnboarding -> OnboardingScreen(
+                                client = client,
+                                apiBaseUrl = session.baseUrl,
+                                onBack = { enterMainWithSplash(splash = true) },
+                                requireCompletion = true,
+                                onFinished = {
+                                    pendingAfterBootstrap = null
+                                    enterMainWithSplash(splash = true)
                                 },
                             )
 
@@ -160,64 +209,65 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 MainShell(
-                                selected = tab,
-                                onSelect = {
-                                    if (it == MainTab.Collections) {
-                                        collectionsRefresh += 1
+                                    selected = tab,
+                                    onSelect = {
+                                        if (it == MainTab.Collections) {
+                                            collectionsRefresh += 1
+                                        }
+                                        tab = it
+                                    },
+                                    playLogoSplash = playSplash,
+                                    showWorkTab = isExecutor,
+                                    onSplashFinished = {
+                                        playSplash = false
+                                        if (!session.hasLaunchedBefore) {
+                                            session.hasLaunchedBefore = true
+                                        }
+                                    },
+                                ) {
+                                    when (tab) {
+                                        MainTab.Collections -> CollectionsScreen(
+                                            client = client,
+                                            onOpen = { id -> screen = Screen.CollectionDetail(id) },
+                                            onBack = null,
+                                            refreshKey = collectionsRefresh,
+                                        )
+                                        MainTab.WorkRequests -> WorkRequestsScreen(
+                                            client = client,
+                                            onConfirm = { id -> screen = Screen.Confirm(id) },
+                                            onBack = null,
+                                        )
+                                        MainTab.CallMaster -> NewWorkRequestScreen(
+                                            client = client,
+                                            onCreated = { id, needsPhotos ->
+                                                screen = if (needsPhotos) {
+                                                    Screen.WorkRequestPhotos(id)
+                                                } else {
+                                                    tab = MainTab.WorkRequests
+                                                    Screen.Main
+                                                }
+                                            },
+                                            onBack = null,
+                                        )
+                                        MainTab.Cabinet -> CabinetScreen(
+                                            client = client,
+                                            onOpenSubscription = { screen = Screen.Subscription },
+                                            onOpenOnboarding = { screen = Screen.Onboarding },
+                                            onRegisterExecutor = { screen = Screen.ExecutorRegister },
+                                            onLogout = {
+                                                session.clearSession()
+                                                client.accessToken = null
+                                                isExecutor = false
+                                                playSplash = false
+                                                screen = Screen.Login
+                                            },
+                                        )
+                                        MainTab.Work -> ExecutorOffersScreen(
+                                            client = client,
+                                            onBack = null,
+                                        )
                                     }
-                                    tab = it
-                                },
-                                playLogoSplash = playSplash,
-                                showWorkTab = isExecutor,
-                                onSplashFinished = {
-                                    playSplash = false
-                                    if (!session.hasLaunchedBefore) {
-                                        session.hasLaunchedBefore = true
-                                    }
-                                },
-                            ) {
-                                when (tab) {
-                                    MainTab.Collections -> CollectionsScreen(
-                                        client = client,
-                                        onOpen = { id -> screen = Screen.CollectionDetail(id) },
-                                        onBack = null,
-                                        refreshKey = collectionsRefresh,
-                                    )
-                                    MainTab.WorkRequests -> WorkRequestsScreen(
-                                        client = client,
-                                        onConfirm = { id -> screen = Screen.Confirm(id) },
-                                        onBack = null,
-                                    )
-                                    MainTab.CallMaster -> NewWorkRequestScreen(
-                                        client = client,
-                                        onCreated = { id, needsPhotos ->
-                                            screen = if (needsPhotos) {
-                                                Screen.WorkRequestPhotos(id)
-                                            } else {
-                                                tab = MainTab.WorkRequests
-                                                Screen.Main
-                                            }
-                                        },
-                                        onBack = null,
-                                    )
-                                    MainTab.Cabinet -> CabinetScreen(
-                                        client = client,
-                                        onOpenSubscription = { screen = Screen.Subscription },
-                                        onOpenOnboarding = { screen = Screen.Onboarding },
-                                        onRegisterExecutor = { screen = Screen.ExecutorRegister },
-                                        onLogout = {
-                                            session.clearSession()
-                                            client.accessToken = null
-                                            isExecutor = false
-                                            screen = Screen.Login
-                                        },
-                                    )
-                                    MainTab.Work -> ExecutorOffersScreen(
-                                        client = client,
-                                        onBack = null,
-                                    )
                                 }
-                            }
                             }
 
                             Screen.ExecutorRegister -> ExecutorRegisterScreen(
