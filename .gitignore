@@ -18,3 +18,5 @@ staticfiles/
 .vscode/
 *.bak
 .android-sdk/
+.android-sdk/
+mobile/local.properties

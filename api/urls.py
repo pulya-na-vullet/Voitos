@@ -18,6 +18,7 @@ urlpatterns = [
     path("me/feedback", views.me_feedback, name="me_feedback"),
     path("groups", views.groups_list, name="groups"),
     path("groups/<int:group_id>/messages", views.group_messages, name="group_messages"),
+    path("groups/<int:group_id>/read", views.group_mark_read, name="group_mark_read"),
     path("executor-roles", views.executor_roles, name="executor_roles"),
     path("work-requests", views.work_requests_list, name="work_requests"),
     path("work-requests/<int:pk>", views.work_request_detail, name="work_request_detail"),

@@ -96,3 +96,27 @@ class GroupChatAndAvatarTests(TestCase):
         self.assertTrue(body.get("avatar_url"))
         self.user.refresh_from_db()
         self.assertTrue(self.user.avatar)
+
+    def test_unread_badge_and_mark_read(self):
+        other_tok = MobileAuthToken.objects.create(bot_user=self.other)
+        # сосед пишет
+        resp = self.client.post(
+            f"/api/v1/groups/{self.g1.id}/messages",
+            data=json.dumps({"text": "Привет от соседа, проверьте чат"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {other_tok.token}",
+        )
+        self.assertEqual(resp.status_code, 201)
+        groups = self.client.get("/api/v1/groups", **self._auth())
+        self.assertEqual(groups.status_code, 200)
+        body = groups.json()
+        self.assertGreaterEqual(body["unread_total"], 1)
+        g1 = next(i for i in body["items"] if i["id"] == self.g1.id)
+        self.assertGreaterEqual(g1["unread_count"], 1)
+
+        # открытие чата помечает прочитанным
+        listed = self.client.get(f"/api/v1/groups/{self.g1.id}/messages", **self._auth())
+        self.assertEqual(listed.status_code, 200)
+        groups2 = self.client.get("/api/v1/groups", **self._auth())
+        self.assertEqual(groups2.json()["unread_total"], 0)
+

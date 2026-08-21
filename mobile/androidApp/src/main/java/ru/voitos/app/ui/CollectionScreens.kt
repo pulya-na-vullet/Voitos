@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -69,11 +71,18 @@ fun CollectionsScreen(
     refreshKey: Int = 0,
 ) {
     var items by remember { mutableStateOf<List<CollectionBrief>>(emptyList()) }
+    var chatUnread by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     val listState = rememberLazyListState()
+
+    fun reloadChatUnread() {
+        scope.launch {
+            chatUnread = runCatching { client.groups().unreadTotal }.getOrDefault(chatUnread)
+        }
+    }
 
     fun reload(silent: Boolean = false) {
         scope.launch {
@@ -83,6 +92,7 @@ fun CollectionsScreen(
             }
             try {
                 items = client.collections().items
+                chatUnread = runCatching { client.groups().unreadTotal }.getOrDefault(0)
                 if (silent) error = null
             } catch (e: Exception) {
                 if (!silent || items.isEmpty()) {
@@ -105,7 +115,10 @@ fun CollectionsScreen(
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) reload(silent = items.isNotEmpty())
+            if (event == Lifecycle.Event.ON_RESUME) {
+                reload(silent = items.isNotEmpty())
+                reloadChatUnread()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -122,8 +135,20 @@ fun CollectionsScreen(
                 }
                 Text("Сборы", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
             }
-            TextButton(onClick = onOpenChat) {
-                Text("Чат", color = VoitosColors.Accent2)
+            Box {
+                TextButton(onClick = onOpenChat) {
+                    Text("Чат", color = VoitosColors.Accent2)
+                }
+                if (chatUnread > 0) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 6.dp, end = 6.dp)
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(VoitosColors.Danger),
+                    )
+                }
             }
         }
         error?.let { NetworkErrorText(it) }
