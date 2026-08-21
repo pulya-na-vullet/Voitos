@@ -1037,18 +1037,17 @@ def work_request_confirm_amount(request, pk: int):
 @api_login_required
 @require_GET
 def groups_list(request):
-    """Группы, в которых состоит житель (для чата)."""
-    from services.group_chat import group_to_dict, groups_for_user
+    """Группы, в которых состоит житель (для чата) + непрочитанные."""
+    from services.group_chat import groups_payload_for_user
 
-    items = [group_to_dict(g) for g in groups_for_user(request.bot_user)]
-    return json_response({"items": items})
+    return json_response(groups_payload_for_user(request.bot_user))
 
 
 @api_login_required
 @require_http_methods(["GET", "POST"])
 def group_messages(request, group_id: int):
     """История и отправка сообщений в чат группы."""
-    from services.group_chat import list_messages, post_message, require_group_member
+    from services.group_chat import list_messages, mark_group_read, post_message, require_group_member
 
     try:
         group = require_group_member(request.bot_user, group_id)
@@ -1070,6 +1069,19 @@ def group_messages(request, group_id: int):
             )
         except Exception:
             return json_response({"items": []})
+        # Открытие/опрос ленты без after_id — помечаем прочитанным
+        if after_id is None and before_id is None and items:
+            mark_group_read(
+                request.bot_user,
+                group,
+                last_read_message_id=items[-1]["id"],
+            )
+        elif after_id is not None and items:
+            mark_group_read(
+                request.bot_user,
+                group,
+                last_read_message_id=items[-1]["id"],
+            )
         return json_response({"group": {"id": group.id, "name": group.name or ""}, "items": items})
 
     data = parse_json(request)
@@ -1083,3 +1095,40 @@ def group_messages(request, group_id: int):
     except ValueError as exc:
         return json_response({"error": str(exc), "detail": str(exc)}, status=400)
     return json_response({"ok": True, "message": item}, status=201)
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def group_mark_read(request, group_id: int):
+    """Пометить чат группы прочитанным (до last_read_message_id или до конца)."""
+    from services.group_chat import mark_group_read, require_group_member, unread_count_for_group
+
+    try:
+        group = require_group_member(request.bot_user, group_id)
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=403)
+    data = parse_json(request)
+    raw = data.get("last_read_message_id")
+    last_id = None
+    if raw is not None and str(raw).strip() != "":
+        try:
+            last_id = int(raw)
+        except (TypeError, ValueError):
+            return json_response(
+                {"error": "bad_last_read", "detail": "Некорректный id сообщения."},
+                status=400,
+            )
+    try:
+        state = mark_group_read(
+            request.bot_user, group, last_read_message_id=last_id
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    return json_response(
+        {
+            "ok": True,
+            "group_id": group.id,
+            "last_read_message_id": state.last_read_message_id,
+            "unread_count": unread_count_for_group(request.bot_user, group),
+        }
+    )

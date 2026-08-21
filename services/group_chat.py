@@ -10,7 +10,7 @@ from django.db.models import Count
 from PIL import Image
 
 from api.media import unique_upload_filename
-from database.models import BotUser, GroupChatMessage, ServiceGroup
+from database.models import BotUser, GroupChatMessage, GroupChatReadState, ServiceGroup
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +27,40 @@ def groups_for_user(user: BotUser) -> list[ServiceGroup]:
     )
 
 
-def group_to_dict(group: ServiceGroup) -> dict:
+def unread_count_for_group(user: BotUser, group: ServiceGroup) -> int:
+    last_read = (
+        GroupChatReadState.objects.filter(user=user, group=group)
+        .values_list("last_read_message_id", flat=True)
+        .first()
+    ) or 0
+    return (
+        GroupChatMessage.objects.filter(group=group, id__gt=last_read)
+        .exclude(author=user)
+        .count()
+    )
+
+
+def group_to_dict(group: ServiceGroup, *, user: BotUser | None = None) -> dict:
     total = getattr(group, "_members_total", None)
     if total is None:
         total = group.members.count()
-    return {
+    payload = {
         "id": group.id,
         "name": group.name or "",
         "description": (group.description or "")[:500],
         "member_count": int(total or 0),
+        "unread_count": 0,
+    }
+    if user is not None:
+        payload["unread_count"] = unread_count_for_group(user, group)
+    return payload
+
+
+def groups_payload_for_user(user: BotUser) -> dict:
+    items = [group_to_dict(g, user=user) for g in groups_for_user(user)]
+    return {
+        "items": items,
+        "unread_total": sum(int(i.get("unread_count") or 0) for i in items),
     }
 
 
@@ -52,6 +77,46 @@ def require_group_member(user: BotUser, group_id: int) -> ServiceGroup:
     if group is None:
         raise ValueError("Вы не состоите в этой группе.")
     return group
+
+
+def mark_group_read(
+    user: BotUser,
+    group: ServiceGroup,
+    *,
+    last_read_message_id: int | None = None,
+) -> GroupChatReadState:
+    if last_read_message_id is None:
+        last_id = (
+            GroupChatMessage.objects.filter(group=group)
+            .order_by("-id")
+            .values_list("id", flat=True)
+            .first()
+        ) or 0
+    else:
+        try:
+            last_id = max(0, int(last_read_message_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Некорректный id сообщения.") from exc
+        if last_id > 0 and not GroupChatMessage.objects.filter(
+            group=group, id=last_id
+        ).exists():
+            # Не чужой id: берём максимум не выше запрошенного в этой группе
+            last_id = (
+                GroupChatMessage.objects.filter(group=group, id__lte=last_id)
+                .order_by("-id")
+                .values_list("id", flat=True)
+                .first()
+            ) or 0
+
+    state, _ = GroupChatReadState.objects.get_or_create(
+        user=user,
+        group=group,
+        defaults={"last_read_message_id": last_id},
+    )
+    if last_id > state.last_read_message_id:
+        state.last_read_message_id = last_id
+        state.save(update_fields=["last_read_message_id", "updated_at"])
+    return state
 
 
 def message_to_dict(msg: GroupChatMessage, *, request=None, viewer: BotUser | None = None) -> dict:
@@ -112,6 +177,8 @@ def post_message(user: BotUser, group: ServiceGroup, text: str, *, request=None)
     if len(text) > MAX_CHAT_TEXT:
         raise ValueError(f"Сообщение слишком длинное (макс. {MAX_CHAT_TEXT}).")
     msg = GroupChatMessage.objects.create(group=group, author=user, text=text)
+    # Свои сообщения сразу считаем прочитанными
+    mark_group_read(user, group, last_read_message_id=msg.id)
     return message_to_dict(msg, request=request, viewer=user)
 
 

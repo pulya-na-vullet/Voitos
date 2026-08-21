@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -104,6 +105,35 @@ class MainActivity : ComponentActivity() {
                 fun enterMainWithSplash(splash: Boolean) {
                     playSplash = splash
                     screen = Screen.Main
+                }
+
+                fun goMain(targetTab: MainTab = tab, refreshCollections: Boolean = false) {
+                    tab = targetTab
+                    if (refreshCollections || targetTab == MainTab.Collections) {
+                        collectionsRefresh += 1
+                    }
+                    screen = Screen.Main
+                }
+
+                fun handleSystemBack() {
+                    when (screen) {
+                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.Main ->
+                            moveTaskToBack(true)
+                        is Screen.CollectionDetail, Screen.GroupChat ->
+                            goMain(MainTab.Collections, refreshCollections = true)
+                        Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister ->
+                            goMain(MainTab.Cabinet)
+                        is Screen.WorkRequestPhotos -> goMain(MainTab.CallMaster)
+                        is Screen.Confirm -> goMain(MainTab.WorkRequests)
+                    }
+                }
+
+                BackHandler(enabled = true) {
+                    if (crashText != null) {
+                        crashText = null
+                    } else {
+                        handleSystemBack()
+                    }
                 }
 
                 VoitosTheme {
@@ -340,8 +370,7 @@ class MainActivity : ComponentActivity() {
                             Screen.GroupChat -> GroupChatScreen(
                                 client = client,
                                 onBack = {
-                                    tab = MainTab.Collections
-                                    screen = Screen.Main
+                                    goMain(MainTab.Collections, refreshCollections = true)
                                 },
                             )
 

@@ -408,11 +408,13 @@ data class ServiceGroupBrief(
     val name: String = "",
     val description: String = "",
     @SerialName("member_count") val memberCount: Int = 0,
+    @SerialName("unread_count") val unreadCount: Int = 0,
 )
 
 @Serializable
 data class ServiceGroupList(
     val items: List<ServiceGroupBrief> = emptyList(),
+    @SerialName("unread_total") val unreadTotal: Int = 0,
 )
 
 @Serializable

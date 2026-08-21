@@ -838,6 +838,39 @@ class GroupChatMessage(models.Model):
         return f"#{self.pk} {self.group_id}: {self.text[:60]}"
 
 
+class GroupChatReadState(models.Model):
+    """До какого сообщения пользователь прочитал чат группы."""
+
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="group_chat_reads",
+        verbose_name="Пользователь",
+    )
+    group = models.ForeignKey(
+        ServiceGroup,
+        on_delete=models.CASCADE,
+        related_name="chat_read_states",
+        verbose_name="Группа",
+    )
+    last_read_message_id = models.BigIntegerField(
+        "Последнее прочитанное сообщение",
+        default=0,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Прочитанность чата группы"
+        verbose_name_plural = "Прочитанность чатов групп"
+        unique_together = [("user", "group")]
+        indexes = [
+            models.Index(fields=["user", "group"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"user={self.user_id} group={self.group_id} read≤{self.last_read_message_id}"
+
+
 class WishPeriodStatus(models.TextChoices):
     OPEN = "open", "Приём пожеланий"
     CLOSED = "closed", "Закрыт"

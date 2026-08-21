@@ -149,6 +149,18 @@ class VoitosApiClient(
         return response.body()
     }
 
+    suspend fun markGroupRead(groupId: Int, lastReadMessageId: Int? = null) {
+        http.post("$baseUrl/groups/$groupId/read") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    if (lastReadMessageId != null) put("last_read_message_id", lastReadMessageId)
+                },
+            )
+        }
+    }
+
     suspend fun notifications(unreadOnly: Boolean = false): NotificationList {
         val q = if (unreadOnly) "?unread=1" else ""
         return authedGet("/notifications$q")
