@@ -1,0 +1,37 @@
+# Публикует APK как GitHub Release, чтобы QR на демо-странице
+# всегда качал крайнюю сборку:
+# https://github.com/pulya-na-vullet/Voitos/releases/latest/download/voitos-debug.apk
+#
+# Запуск: git tag v0.2.21 && git push origin v0.2.21
+# Нужен файл dist/apk/voitos-debug.apk в репозитории на теге.
+
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check APK present
+        run: |
+          test -f dist/apk/voitos-debug.apk
+          ls -lh dist/apk/voitos-debug.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/apk/voitos-debug.apk
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
