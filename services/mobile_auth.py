@@ -125,9 +125,14 @@ def upsert_max_user(
     user = BotUser.objects.select_for_update().filter(max_user_id=max_user_id).first()
     if user:
         fields = ["last_seen_at"]
+        # Не перезаписываем уже привязанный другой телефон (защита аккаунта/семьи).
         if phone and user.phone != phone:
-            user.phone = phone
-            fields.append("phone")
+            bound = normalize_user_phone(user.phone or "")
+            if len(bound) < 11:
+                user.phone = phone
+                fields.append("phone")
+            elif bound != phone:
+                raise ValueError("max_phone_bound")
         if chat_id and user.chat_id != chat_id:
             user.chat_id = chat_id
             fields.append("chat_id")
@@ -664,10 +669,22 @@ def confirm_app_registration(
     )
     if not user:
         raise ValueError("user_not_found")
-    if not is_max_registered(user):
+    mid = (user.max_user_id or "").strip()
+    if not mid or mid.startswith("app_"):
         raise ValueError("max_required")
 
-    user.phone = phone
+    # Защита: код мог устареть/обойти — не даём сменить телефон у занятого Max.
+    conflict = max_phone_bind_conflict_message(user, phone)
+    if conflict:
+        raise ValueError("max_phone_bound")
+
+    # Привязка телефона только если его ещё не было или он совпадает.
+    bound = normalize_user_phone(user.phone or "")
+    if len(bound) < 11:
+        user.phone = phone
+    elif bound != phone:
+        raise ValueError("max_phone_bound")
+
     user.real_name = draft.real_name
     user.gender = draft.gender
     user.birth_date = draft.birth_date
@@ -726,6 +743,11 @@ def bot_issue_register_code(user: BotUser, phone: str | None = None) -> str:
             "и снова напишите сюда «код регистрации»."
         )
 
+    # К этому Max уже привязан другой телефон — не перезаписываем и код не шлём.
+    conflict = max_phone_bind_conflict_message(user, phone_n)
+    if conflict:
+        return conflict
+
     existing = find_registered_user(phone_n)
     if existing and existing.id != user.id:
         return (
@@ -733,17 +755,43 @@ def bot_issue_register_code(user: BotUser, phone: str | None = None) -> str:
             "Войдите в приложение по телефону."
         )
 
-    user, _ = upsert_max_user(
-        max_user_id=user.max_user_id,
-        phone=phone_n,
-        chat_id=user.chat_id or "",
-        display_name=user.display_name or "",
-    )
-    _ch, code = create_challenge(user, kind=PinChallengeKind.REGISTER)
+    bound = normalize_user_phone(user.phone or "")
+    if bound == phone_n:
+        # Телефон уже тот же — только код, без перезаписи профиля.
+        target = user
+    else:
+        # Новая привязка только если у Max ещё не было телефона.
+        target, _ = upsert_max_user(
+            max_user_id=user.max_user_id,
+            phone=phone_n,
+            chat_id=user.chat_id or "",
+            display_name=user.display_name or "",
+        )
+    _ch, code = create_challenge(target, kind=PinChallengeKind.REGISTER)
     return (
         f"Код для завершения регистрации в приложении Voitos: {code}\n"
         f"Действует {CODE_TTL_MINUTES} мин.\n\n"
         "Вернитесь в приложение и введите этот код."
+    )
+
+
+def max_phone_bind_conflict_message(user: BotUser, phone: str) -> str | None:
+    """
+    Если у Max-аккаунта уже есть другой телефон — нельзя регистрировать новый номер.
+    Иначе чужой max_id «переедет» на новый phone и заберёт семью/данные.
+    """
+    bound = normalize_user_phone(user.phone or "")
+    want = normalize_user_phone(phone)
+    if len(bound) < 11:
+        return None
+    if bound == want:
+        return None
+    return (
+        f"К вашему аккаунту Max уже привязан другой номер: {bound}.\n"
+        f"Нельзя зарегистрировать номер {want} на этот же Max.\n\n"
+        "Войдите в приложение под привязанным номером "
+        "или откройте бота Voitos с другого аккаунта Max "
+        "(того, на котором ещё нет привязанного телефона)."
     )
 
 

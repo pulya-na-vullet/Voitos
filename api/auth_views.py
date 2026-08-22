@@ -34,6 +34,10 @@ def _error(code: str, status: int = 400, detail: str | None = None):
             "Заявка на регистрацию не найдена или устарела. "
             "Заполните анкету ещё раз."
         ),
+        "max_phone_bound": (
+            "К этому аккаунту Max уже привязан другой номер телефона. "
+            "Войдите под ним или используйте другой Max."
+        ),
     }.get(code, code)
     return json_response({"error": code, "detail": text}, status=status)
 

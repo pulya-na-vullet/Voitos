@@ -228,3 +228,26 @@ class MaxPinAuthTests(TestCase):
         self.assertIn("телефон", reply.lower())
         reply2 = mobile_auth.bot_issue_register_code(user, phone=phone)
         self.assertIn("Код для завершения регистрации", reply2)
+
+    def test_register_refuses_when_max_already_has_other_phone(self):
+        """Нельзя перепривязать занятый Max к новому телефону (семья/данные)."""
+        owner = BotUser.objects.create(
+            max_user_id="max_owner_832",
+            phone="89625507832",
+            chat_id="chat_owner",
+            real_name="Хозяин",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+        phone_new = "89625507833"
+        mobile_auth.start_app_registration(
+            phone=phone_new,
+            real_name="Новый",
+            gender="male",
+            birth_date="1995-03-03",
+        )
+        reply = mobile_auth.bot_issue_register_code(owner, phone=phone_new)
+        self.assertIn("уже привязан", reply.lower())
+        self.assertNotIn("Код для завершения регистрации", reply)
+        owner.refresh_from_db()
+        self.assertEqual(owner.phone, "89625507832")
+        self.assertEqual(owner.real_name, "Хозяин")
