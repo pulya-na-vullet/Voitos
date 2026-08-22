@@ -22,6 +22,10 @@ SECRET_KEY = env("SECRET_KEY", default="voitos-dev-secret-change-me")
 DEBUG = env("DEBUG")
 # В TestCase Django ставит DEBUG=False; для локальной OTP-отладки / тестов API:
 MOBILE_OTP_DEBUG = env.bool("MOBILE_OTP_DEBUG", default=True)
+# Shared secret for bot → POST /api/v1/auth/max/start (header X-Voitos-Internal).
+AUTH_BOT_INTERNAL_TOKEN = env("AUTH_BOT_INTERNAL_TOKEN", default="")
+# Fallback deep link to open MAX bot from the app.
+MAX_BOT_OPEN_URL = env("MAX_BOT_OPEN_URL", default="")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 INSTALLED_APPS = [

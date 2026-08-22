@@ -60,6 +60,8 @@ fun CabinetScreen(
     onOpenOnboarding: () -> Unit,
     onRegisterExecutor: () -> Unit,
     onOpenFeedback: () -> Unit,
+    onOpenWishes: () -> Unit,
+    onChangePin: () -> Unit,
     onLogout: () -> Unit,
 ) {
     var me by remember { mutableStateOf<Me?>(null) }
@@ -226,6 +228,22 @@ fun CabinetScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosSecondaryButtonColors(),
             ) { Text("Обратная связь") }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onOpenWishes,
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosSecondaryButtonColors(),
+            ) { Text("Оставить пожелание") }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onChangePin,
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosSecondaryButtonColors(),
+            ) { Text("Сменить PIN") }
 
             Spacer(modifier = Modifier.height(8.dp))
 

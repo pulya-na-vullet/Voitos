@@ -1,0 +1,118 @@
+"""Tests for MAX login code + permanent PIN."""
+
+from __future__ import annotations
+
+import json
+
+from django.test import Client, TestCase, override_settings
+
+from api.models import MobileAuthToken, PinChallenge
+from database.models import BotUser, ProfileStatus
+from services import mobile_auth
+
+
+@override_settings(MOBILE_OTP_DEBUG=True, AUTH_BOT_INTERNAL_TOKEN="test-internal")
+class MaxPinAuthTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = BotUser.objects.create(
+            max_user_id="max_auth_1",
+            phone="89625507832",
+            chat_id="chat1",
+            real_name="Тест",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+
+    def test_max_start_and_verify_then_set_pin(self):
+        start = self.client.post(
+            "/api/v1/auth/max/start",
+            data=json.dumps(
+                {
+                    "max_user_id": "max_auth_1",
+                    "phone": "89625507832",
+                    "chat_id": "chat1",
+                    "send": False,
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_VOITOS_INTERNAL="test-internal",
+        )
+        self.assertEqual(start.status_code, 200)
+        code = start.json()["debug_code"]
+        self.assertEqual(len(code), 4)
+
+        verify = self.client.post(
+            "/api/v1/auth/max/verify",
+            data=json.dumps({"phone": "89625507832", "code": code}),
+            content_type="application/json",
+        )
+        self.assertEqual(verify.status_code, 200)
+        data = verify.json()
+        self.assertTrue(data["access_token"])
+        self.assertTrue(data["needs_pin_setup"])
+
+        pin_set = self.client.post(
+            "/api/v1/auth/pin/set",
+            data=json.dumps({"pin": "1937"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {data['access_token']}",
+        )
+        self.assertEqual(pin_set.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.pin_hash)
+
+        login = self.client.post(
+            "/api/v1/auth/pin/login",
+            data=json.dumps({"phone": "89625507832", "pin": "1937"}),
+            content_type="application/json",
+        )
+        self.assertEqual(login.status_code, 200)
+        self.assertFalse(login.json()["needs_pin_setup"])
+
+    def test_merge_app_phone_user(self):
+        app_user = BotUser.objects.create(
+            max_user_id="app_89625501111",
+            phone="89625501111",
+            display_name="AppOnly",
+        )
+        mobile_auth.start_max_login(
+            max_user_id="max_merged",
+            phone="89625501111",
+            chat_id="c2",
+            send=False,
+        )
+        app_user.refresh_from_db()
+        self.assertEqual(app_user.max_user_id, "max_merged")
+        self.assertEqual(app_user.chat_id, "c2")
+
+    def test_pin_reset_flow(self):
+        mobile_auth.set_pin(self.user, "1111")
+        req = self.client.post(
+            "/api/v1/auth/pin/reset-request",
+            data=json.dumps({"phone": "89625507832"}),
+            content_type="application/json",
+        )
+        self.assertEqual(req.status_code, 200)
+        code = req.json()["debug_code"]
+        confirm = self.client.post(
+            "/api/v1/auth/pin/reset-confirm",
+            data=json.dumps({"phone": "89625507832", "code": code, "pin": "2222"}),
+            content_type="application/json",
+        )
+        self.assertEqual(confirm.status_code, 200)
+        login = self.client.post(
+            "/api/v1/auth/pin/login",
+            data=json.dumps({"phone": "89625507832", "pin": "2222"}),
+            content_type="application/json",
+        )
+        self.assertEqual(login.status_code, 200)
+
+    def test_max_start_requires_internal_token(self):
+        resp = self.client.post(
+            "/api/v1/auth/max/start",
+            data=json.dumps(
+                {"max_user_id": "x", "phone": "89625507832", "send": False}
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)

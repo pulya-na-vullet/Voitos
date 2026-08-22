@@ -70,6 +70,47 @@ class PhoneOtpChallenge(models.Model):
         return self.code == (code or "").strip()
 
 
+class PinChallengeKind(models.TextChoices):
+    LOGIN = "login", "Вход через Max"
+    RESET = "reset", "Сброс PIN"
+    CHANGE = "change", "Смена PIN"
+
+
+class PinChallenge(models.Model):
+    """Разовый 4-значный код из MAX (хранится только hash)."""
+
+    bot_user = models.ForeignKey(
+        "database.BotUser",
+        on_delete=models.CASCADE,
+        related_name="pin_challenges",
+        null=True,
+        blank=True,
+    )
+    phone = models.CharField(max_length=32, db_index=True)
+    kind = models.CharField(
+        max_length=16,
+        choices=PinChallengeKind.choices,
+        default=PinChallengeKind.LOGIN,
+        db_index=True,
+    )
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Код Max/PIN challenge"
+        verbose_name_plural = "Коды Max/PIN challenge"
+        ordering = ["-created_at"]
+
+    def is_expired(self) -> bool:
+        return timezone.now() > self.expires_at
+
+    def is_open(self) -> bool:
+        return self.consumed_at is None and not self.is_expired()
+
+
 class AppNotification(models.Model):
     """Inbox + источник для FCM (type → deep_link)."""
 

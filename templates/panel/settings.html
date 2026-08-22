@@ -23,6 +23,11 @@
       <label>Токен бота MAX</label>
       <input type="password" name="max_bot_token" value="" placeholder="{% if has_token %}•••• сохранён{% else %}access token{% endif %}" autocomplete="off">
     </div>
+    <div class="form-row">
+      <label>Ссылка на бота MAX (для приложения)</label>
+      <input type="url" name="max_bot_open_url" value="{{ cfg.max_bot_open_url }}" placeholder="https://max.ru/your_bot">
+      <div class="hint">Кнопка «Войти через Max» в приложении открывает этот URL</div>
+    </div>
     <hr style="border:0; border-top:1px solid var(--line); margin:22px 0;">
     <h3 style="margin-top:0;">Yandex AI</h3>
     <div class="form-row">

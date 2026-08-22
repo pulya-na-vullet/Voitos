@@ -229,6 +229,13 @@ class AppSettings(models.Model):
     """Singleton runtime settings editable from the admin panel."""
 
     max_bot_token = models.CharField("Токен бота MAX", max_length=512, blank=True, default="")
+    max_bot_open_url = models.CharField(
+        "Ссылка на бота MAX (для приложения)",
+        max_length=512,
+        blank=True,
+        default="",
+        help_text="Например https://max.ru/voitos_bot — кнопка «Войти через Max».",
+    )
     allowed_max_user_id = models.CharField(
         "Ограничение одного user_id (устарело)",
         max_length=64,
@@ -388,6 +395,22 @@ class BotUser(models.Model):
     username = models.CharField("Username", max_length=255, blank=True, default="")
     real_name = models.CharField("Имя (анкета)", max_length=255, blank=True, default="")
     phone = models.CharField("Телефон", max_length=32, blank=True, default="")
+    pin_hash = models.CharField(
+        "Хеш PIN приложения",
+        max_length=128,
+        blank=True,
+        default="",
+        help_text="Постоянный 4-значный PIN для входа в приложение (только hash).",
+    )
+    pin_failed_attempts = models.PositiveSmallIntegerField(
+        "Неудачные попытки PIN",
+        default=0,
+    )
+    pin_locked_until = models.DateTimeField(
+        "PIN заблокирован до",
+        null=True,
+        blank=True,
+    )
     address = models.TextField("Адрес", blank=True, default="")
     locality = models.CharField("Населённый пункт", max_length=255, blank=True, default="")
     profile_status = models.CharField(

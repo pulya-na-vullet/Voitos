@@ -666,6 +666,91 @@ def me_feedback(request):
     return json_response({"ok": True, "ticket": ticket_to_dict(ticket)}, status=201)
 
 
+@api_login_required
+@require_http_methods(["GET", "POST"])
+def me_wishes(request):
+    """Пожелания двора из приложения — тот же NeighborhoodWish, что и из MAX."""
+    from services.wishes import capture_wish, user_groups
+
+    user = request.bot_user
+    groups = user_groups(user)
+    if request.method == "GET":
+        from database.models import NeighborhoodWish
+
+        qs = (
+            NeighborhoodWish.objects.filter(user=user)
+            .select_related("group")
+            .order_by("-created_at")[:50]
+        )
+        return json_response(
+            {
+                "items": [
+                    {
+                        "id": w.id,
+                        "text": w.text,
+                        "topic": w.topic,
+                        "topic_label": w.get_topic_display(),
+                        "group_id": w.group_id,
+                        "group_name": w.group.name if w.group_id else "",
+                        "created_at": w.created_at.isoformat(),
+                    }
+                    for w in qs
+                ],
+                "groups": [{"id": g.id, "name": g.name} for g in groups],
+            }
+        )
+
+    data = parse_json(request)
+    text = str(data.get("text") or "").strip()
+    if not text:
+        return json_response({"error": "empty", "detail": "Введите текст пожелания"}, status=400)
+    if not groups:
+        return json_response(
+            {
+                "error": "no_group",
+                "detail": "Вас пока нет в группе жителей — попросите администратора добавить.",
+            },
+            status=400,
+        )
+    group_id = data.get("group_id")
+    group = None
+    if group_id is not None:
+        group = next((g for g in groups if g.id == int(group_id)), None)
+        if group is None:
+            return json_response({"error": "bad_group"}, status=400)
+    elif len(groups) == 1:
+        group = groups[0]
+    else:
+        return json_response(
+            {
+                "error": "group_required",
+                "detail": "Выберите группу",
+                "groups": [{"id": g.id, "name": g.name} for g in groups],
+            },
+            status=400,
+        )
+    try:
+        wish = capture_wish(
+            user,
+            text,
+            group=group,
+            source_message=f"app:{text}",
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    return json_response(
+        {
+            "id": wish.id,
+            "topic": wish.topic,
+            "topic_label": wish.get_topic_display(),
+            "text": wish.text,
+            "group_id": wish.group_id,
+            "group_name": group.name,
+        },
+        status=201,
+    )
+
+
 def _campaign_progress_payload(campaign) -> dict:
     """Собрано / цель + сколько оплатили из приглашённых."""
     from database.models import InviteStatus

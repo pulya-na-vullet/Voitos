@@ -14,6 +14,57 @@ data class AuthSession(
     @SerialName("access_token") val accessToken: String,
     @SerialName("bot_user_id") val botUserId: Int,
     @SerialName("display_name") val displayName: String = "",
+    @SerialName("needs_pin_setup") val needsPinSetup: Boolean = false,
+    @SerialName("has_pin") val hasPin: Boolean = false,
+    val phone: String = "",
+)
+
+@Serializable
+data class AuthConfig(
+    @SerialName("max_bot_open_url") val maxBotOpenUrl: String = "",
+    @SerialName("app_deep_link") val appDeepLink: String = "",
+    @SerialName("phone_otp_fallback") val phoneOtpFallback: Boolean = true,
+)
+
+@Serializable
+data class OkResponse(
+    val ok: Boolean = false,
+    @SerialName("debug_code") val debugCode: String? = null,
+    @SerialName("expires_in") val expiresIn: Int = 0,
+    @SerialName("has_pin") val hasPin: Boolean = false,
+)
+
+@Serializable
+data class WishItem(
+    val id: Int = 0,
+    val text: String = "",
+    val topic: String = "",
+    @SerialName("topic_label") val topicLabel: String = "",
+    @SerialName("group_id") val groupId: Int = 0,
+    @SerialName("group_name") val groupName: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+)
+
+@Serializable
+data class WishGroupOption(
+    val id: Int = 0,
+    val name: String = "",
+)
+
+@Serializable
+data class WishListResponse(
+    val items: List<WishItem> = emptyList(),
+    val groups: List<WishGroupOption> = emptyList(),
+)
+
+@Serializable
+data class WishCreated(
+    val id: Int = 0,
+    val topic: String = "",
+    @SerialName("topic_label") val topicLabel: String = "",
+    val text: String = "",
+    @SerialName("group_id") val groupId: Int = 0,
+    @SerialName("group_name") val groupName: String = "",
 )
 
 @Serializable
