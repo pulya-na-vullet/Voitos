@@ -16,8 +16,17 @@ from services import mobile_auth
 from subscriptions.receipts import normalize_phone
 
 
-def _error(code: str, status: int = 400):
-    return json_response({"error": code, "detail": code}, status=status)
+def _error(code: str, status: int = 400, detail: str | None = None):
+    text = detail or {
+        "not_registered": (
+            "Номер не найден. Пройдите регистрацию в боте Max "
+            "(укажите этот телефон) — после этого вход в приложение станет доступен."
+        ),
+        "invalid_phone": "Укажите корректный номер телефона",
+        "invalid_code": "Неверный или просроченный код",
+        "max_required": "Сначала привяжите аккаунт в боте Max",
+    }.get(code, code)
+    return json_response({"error": code, "detail": text}, status=status)
 
 
 def _check_internal(request) -> bool:
@@ -84,14 +93,51 @@ def phone_verify(request):
 
 
 @api_public
+@require_http_methods(["POST"])
+def phone_login_request(request):
+    """
+    Приложение: телефон → если пользователь есть в боте Max, код уходит в Max.
+    Иначе not_registered (нужна регистрация в боте).
+    """
+    data = parse_json(request)
+    try:
+        body = mobile_auth.request_login_code_by_phone(str(data.get("phone") or ""))
+    except ValueError as exc:
+        code = str(exc)
+        status = 404 if code == "not_registered" else 400
+        return _error(code, status=status)
+    return json_response(body)
+
+
+@api_public
+@require_http_methods(["POST"])
+def phone_login_verify(request):
+    """Проверка кода из Max по телефону → access_token."""
+    data = parse_json(request)
+    try:
+        body = mobile_auth.verify_challenge(
+            phone=str(data.get("phone") or ""),
+            code=str(data.get("code") or ""),
+            kind=PinChallengeKind.LOGIN,
+            device_name=str(data.get("device_name") or ""),
+        )
+    except ValueError as exc:
+        return _error(str(exc))
+    return json_response(body)
+
+
+@api_public
 @require_http_methods(["GET"])
 def auth_config(request):
-    """Публичные ссылки для экрана входа."""
+    """Публичные настройки экрана входа."""
     return json_response(
         {
             "max_bot_open_url": mobile_auth.max_bot_open_url(),
             "app_deep_link": mobile_auth.app_deep_link(),
-            "phone_otp_fallback": True,
+            "registration_hint": (
+                "Регистрация только в боте Max: укажите телефон — "
+                "мы привяжем его к вашему Max ID."
+            ),
         }
     )
 

@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import ru.voitos.app.VoitosApi
+import ru.voitos.app.model.ApiErrorBody
 import ru.voitos.app.model.AuthConfig
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.AvatarUploadResult
@@ -87,6 +88,42 @@ class VoitosApiClient(
     }
 
     suspend fun authConfig(): AuthConfig = http.get("$baseUrl/auth/config").body()
+
+    suspend fun phoneLoginRequest(phone: String): OkResponse {
+        val response: HttpResponse = http.post("$baseUrl/auth/phone/login-request") {
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("phone", phone) })
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            val msg = err?.detail?.ifBlank { null }
+                ?: err?.error?.ifBlank { null }
+                ?: "Не удалось запросить код (HTTP ${response.status.value})"
+            throw IllegalStateException(msg)
+        }
+        return response.body()
+    }
+
+    suspend fun phoneLoginVerify(phone: String, code: String): AuthSession {
+        val response: HttpResponse = http.post("$baseUrl/auth/phone/login-verify") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("phone", phone)
+                    put("code", code)
+                },
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw IllegalStateException(
+                err?.detail?.ifBlank { null } ?: err?.error ?: "Неверный код",
+            )
+        }
+        val session: AuthSession = response.body()
+        accessToken = session.accessToken
+        return session
+    }
 
     suspend fun maxVerify(phone: String, code: String): AuthSession {
         val session: AuthSession = http.post("$baseUrl/auth/max/verify") {
