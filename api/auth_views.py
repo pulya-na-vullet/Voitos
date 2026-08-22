@@ -30,6 +30,8 @@ def _error(code: str, status: int = 400, detail: str | None = None):
         "gender_invalid": "Укажите пол",
         "birth_date_required": "Укажите дату рождения",
         "birth_date_invalid": "Проверьте дату рождения",
+        "address_required": "Укажите адрес",
+        "locality_required": "Укажите населённый пункт",
         "draft_not_found": (
             "Заявка на регистрацию не найдена или устарела. "
             "Заполните анкету ещё раз."
@@ -150,6 +152,8 @@ def register_start(request):
             real_name=str(data.get("real_name") or data.get("name") or ""),
             gender=str(data.get("gender") or ""),
             birth_date=data.get("birth_date") or data.get("birthDate") or "",
+            address=str(data.get("address") or ""),
+            locality=str(data.get("locality") or ""),
         )
     except ValueError as exc:
         code = str(exc)
@@ -184,7 +188,7 @@ def auth_config(request):
         "max_bot_open_url": mobile_auth.max_bot_open_url(),
         "app_deep_link": mobile_auth.app_deep_link(),
         "registration_hint": (
-            "Если номера нет — «Регистрация»: ФИО, пол, дата рождения, "
+            "Если номера нет — «Регистрация»: ФИО, адрес, пол, дата рождения, "
             "затем код из бота Voitos в Max."
         ),
     }

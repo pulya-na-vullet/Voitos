@@ -569,6 +569,8 @@ def start_app_registration(
     real_name: str,
     gender: str,
     birth_date,
+    address: str = "",
+    locality: str = "",
 ) -> dict:
     """Сохранить анкету из приложения; код выдаёт бот Max."""
     phone = normalize_user_phone(phone)
@@ -581,6 +583,12 @@ def start_app_registration(
         raise ValueError("name_required")
     gender_norm = _normalize_gender(gender)
     birth = _parse_birth_date(birth_date)
+    addr = (address or "").strip()
+    loc = (locality or "").strip()
+    if len(addr) < 3:
+        raise ValueError("address_required")
+    if len(loc) < 2:
+        raise ValueError("locality_required")
 
     AppRegistrationDraft.objects.filter(
         phone=phone, consumed_at__isnull=True
@@ -590,6 +598,8 @@ def start_app_registration(
         real_name=name[:255],
         gender=gender_norm,
         birth_date=birth,
+        address=addr[:2000],
+        locality=loc[:255],
         expires_at=timezone.now() + timedelta(hours=DRAFT_TTL_HOURS),
     )
     bot_url = registration_max_deep_link(draft)
@@ -688,17 +698,41 @@ def confirm_app_registration(
     user.real_name = draft.real_name
     user.gender = draft.gender
     user.birth_date = draft.birth_date
+    user.address = (draft.address or "").strip()
+    user.locality = (draft.locality or "").strip()
+    from database.models import ActivityKind, ActivityLog, ProfileStatus
+
+    user.profile_status = ProfileStatus.PENDING_REVIEW
+    user.profile_submitted_at = timezone.now()
     user.save(
         update_fields=[
             "phone",
             "real_name",
             "gender",
             "birth_date",
+            "address",
+            "locality",
+            "profile_status",
+            "profile_submitted_at",
             "last_seen_at",
         ]
     )
     draft.consumed_at = timezone.now()
     draft.save(update_fields=["consumed_at"])
+    ActivityLog.objects.create(
+        user=user,
+        kind=ActivityKind.PROFILE_SUBMITTED,
+        title="Анкета из приложения на проверку",
+        detail=(
+            f"{user.real_name}, {user.phone}, {user.locality}, {user.address}"
+        ),
+    )
+    try:
+        from panel.admin_tasks import task_profile_review
+
+        task_profile_review(user)
+    except Exception:
+        logger.exception("task_profile_review failed for user %s", user.id)
     token = issue_token(user, device_name=device_name)
     return auth_payload(user, token)
 

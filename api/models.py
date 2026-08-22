@@ -113,12 +113,14 @@ class PinChallenge(models.Model):
 
 
 class AppRegistrationDraft(models.Model):
-    """Черновик регистрации из приложения (ФИО/пол/ДР) до кода из Max."""
+    """Черновик регистрации из приложения до кода из Max."""
 
     phone = models.CharField(max_length=32, db_index=True)
     real_name = models.CharField(max_length=255)
     gender = models.CharField(max_length=16)
     birth_date = models.DateField()
+    address = models.TextField(blank=True, default="")
+    locality = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)

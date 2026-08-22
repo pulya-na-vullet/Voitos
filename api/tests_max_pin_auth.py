@@ -158,6 +158,8 @@ class MaxPinAuthTests(TestCase):
                     "real_name": "Иван Иванов",
                     "gender": "male",
                     "birth_date": "15.05.1990",
+                    "address": "ул. Ленина, 1",
+                    "locality": "Куюки",
                 }
             ),
             content_type="application/json",
@@ -196,6 +198,9 @@ class MaxPinAuthTests(TestCase):
         self.assertEqual(max_user.real_name, "Иван Иванов")
         self.assertEqual(max_user.gender, "male")
         self.assertEqual(str(max_user.birth_date), "1990-05-15")
+        self.assertEqual(max_user.address, "ул. Ленина, 1")
+        self.assertEqual(max_user.locality, "Куюки")
+        self.assertEqual(max_user.profile_status, ProfileStatus.PENDING_REVIEW)
 
     def test_register_start_rejects_existing_max_user(self):
         resp = self.client.post(
@@ -222,6 +227,8 @@ class MaxPinAuthTests(TestCase):
             real_name="Петр",
             gender="male",
             birth_date="1992-02-02",
+            address="д. 5",
+            locality="Куюки",
         )
         user = BotUser.objects.create(max_user_id="max_kod", chat_id="c")
         reply = mobile_auth.bot_start_app_register(user)
@@ -244,6 +251,8 @@ class MaxPinAuthTests(TestCase):
             real_name="Новый",
             gender="male",
             birth_date="1995-03-03",
+            address="ул. Новая, 2",
+            locality="Куюки",
         )
         reply = mobile_auth.bot_issue_register_code(owner, phone=phone_new)
         self.assertIn("уже привязан", reply.lower())

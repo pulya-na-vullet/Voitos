@@ -113,6 +113,8 @@ fun LoginScreen(
     var realName by remember { mutableStateOf("") }
     var gender by remember { mutableStateOf("") } // male | female | other
     var birthDate by remember { mutableStateOf("") } // DD.MM.YYYY
+    var address by remember { mutableStateOf("") }
+    var locality by remember { mutableStateOf("") }
     var maxBotUrl by remember { mutableStateOf("https://max.ru/se13602985_1_bot") }
     var canRegister by remember { mutableStateOf(false) }
     var debugHint by remember { mutableStateOf<String?>(null) }
@@ -458,6 +460,22 @@ fun LoginScreen(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     colors = voitosOutlinedFieldColors(),
                 )
+                OutlinedTextField(
+                    value = locality,
+                    onValueChange = { locality = it.take(120) },
+                    label = { Text("Населённый пункт") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = voitosOutlinedFieldColors(),
+                )
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it.take(500) },
+                    label = { Text("Адрес (улица, дом, квартира)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    colors = voitosOutlinedFieldColors(),
+                )
                 error?.let {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(it, color = VoitosColors.Danger)
@@ -489,6 +507,14 @@ fun LoginScreen(
                                     error = "Укажите пол"
                                     return@launch
                                 }
+                                if (locality.trim().length < 2) {
+                                    error = "Укажите населённый пункт"
+                                    return@launch
+                                }
+                                if (address.trim().length < 3) {
+                                    error = "Укажите адрес"
+                                    return@launch
+                                }
                                 loading = true
                                 error = null
                                 try {
@@ -499,6 +525,8 @@ fun LoginScreen(
                                         realName = realName.trim(),
                                         gender = gender,
                                         birthDate = iso,
+                                        address = address.trim(),
+                                        locality = locality.trim(),
                                     )
                                     if (resp.maxBotOpenUrl.isNotBlank()) {
                                         maxBotUrl = resp.maxBotOpenUrl

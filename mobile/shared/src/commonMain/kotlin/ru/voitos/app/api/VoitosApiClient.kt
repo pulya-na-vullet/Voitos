@@ -138,6 +138,8 @@ class VoitosApiClient(
         realName: String,
         gender: String,
         birthDate: String,
+        address: String,
+        locality: String,
     ): OkResponse {
         val response: HttpResponse = http.post("$baseUrl/auth/register/start") {
             contentType(ContentType.Application.Json)
@@ -147,6 +149,8 @@ class VoitosApiClient(
                     put("real_name", realName)
                     put("gender", gender)
                     put("birth_date", birthDate)
+                    put("address", address)
+                    put("locality", locality)
                 },
             )
         }
