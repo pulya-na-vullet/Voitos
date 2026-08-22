@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.BackHandler
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.voitos.app.AppVersion
@@ -67,11 +69,20 @@ class MainActivity : ComponentActivity() {
     private lateinit var session: SessionStore
     private var client: VoitosApiClient = VoitosApiClient()
 
+    /** Последнее касание / жест — для авто-разлогина по простою. */
+    private val lastUserInteractionMs = AtomicLong(SystemClock.elapsedRealtime())
+
     /**
      * Актуальный обработчик «назад» из Compose. Activity-callback нужен, потому что
      * жестовый свайп при predictive back часто не доходит до Compose BackHandler.
      */
     private var composeBackHandler: (() -> Unit)? = null
+
+    companion object {
+        private const val IDLE_LOGOUT_MS = 15 * 60 * 1000L
+        private const val IDLE_CHECK_EVERY_MS = 15_000L
+        private const val VERSION_POLL_EVERY_MS = 30_000L
+    }
 
     private sealed class Screen {
         data object Login : Screen()
@@ -173,12 +184,55 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                fun logoutToLogin() {
+                    session.clearSession()
+                    client.accessToken = null
+                    isExecutor = false
+                    playSplash = false
+                    lastUserInteractionMs.set(SystemClock.elapsedRealtime())
+                    screen = Screen.Login
+                }
+
                 fun goMain(targetTab: MainTab = tab, refreshCollections: Boolean = false) {
                     tab = targetTab
                     if (refreshCollections || targetTab == MainTab.Collections) {
                         collectionsRefresh += 1
                     }
                     screen = Screen.Main
+                }
+
+                // Пока сессия жива — периодически сверяем min version с бэком (не только при старте).
+                LaunchedEffect(screen, client.accessToken) {
+                    val activeSession = !client.accessToken.isNullOrBlank() &&
+                        screen !is Screen.Login &&
+                        screen !is Screen.ForceUpdate
+                    if (!activeSession) return@LaunchedEffect
+                    while (true) {
+                        val health = runCatching {
+                            client.healthCheck(AppVersion.code)
+                        }.getOrNull()
+                        if (appNeedsUpdate(health)) {
+                            goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
+                            break
+                        }
+                        delay(VERSION_POLL_EVERY_MS)
+                    }
+                }
+
+                // 15 минут без касаний → разлогин (ForceUpdate / Login не трогаем).
+                LaunchedEffect(screen, client.accessToken) {
+                    val watchIdle = !client.accessToken.isNullOrBlank() &&
+                        screen !is Screen.Login &&
+                        screen !is Screen.ForceUpdate
+                    if (!watchIdle) return@LaunchedEffect
+                    while (true) {
+                        delay(IDLE_CHECK_EVERY_MS)
+                        val idleFor = SystemClock.elapsedRealtime() - lastUserInteractionMs.get()
+                        if (idleFor >= IDLE_LOGOUT_MS) {
+                            logoutToLogin()
+                            break
+                        }
+                    }
                 }
 
                 fun handleSystemBack() {
@@ -269,6 +323,7 @@ class MainActivity : ComponentActivity() {
                                     scope.launch { registerDevPushToken() }
                                     pendingAfterBootstrap = null
                                     tab = MainTab.Collections
+                                    lastUserInteractionMs.set(SystemClock.elapsedRealtime())
                                     screen = if (result.needsPinSetup) Screen.SetPin else Screen.Bootstrapping
                                 },
                                 onDebugPrefs = { url, phone, dbg ->
@@ -398,13 +453,7 @@ class MainActivity : ComponentActivity() {
                                             onOpenFeedback = { screen = Screen.Feedback },
                                             onOpenWishes = { screen = Screen.Wish },
                                             onChangePin = { screen = Screen.ChangePin },
-                                            onLogout = {
-                                                session.clearSession()
-                                                client.accessToken = null
-                                                isExecutor = false
-                                                playSplash = false
-                                                screen = Screen.Login
-                                            },
+                                            onLogout = { logoutToLogin() },
                                         )
                                         MainTab.Work -> ExecutorOffersScreen(
                                             client = client,
@@ -533,6 +582,16 @@ class MainActivity : ComponentActivity() {
             runCatching { CrashFileLogger.install(this) }
             throw t
         }
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        lastUserInteractionMs.set(SystemClock.elapsedRealtime())
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lastUserInteractionMs.set(SystemClock.elapsedRealtime())
     }
 
     override fun onNewIntent(intent: Intent) {

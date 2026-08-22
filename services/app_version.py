@@ -9,21 +9,25 @@ from database.models import AppSettings
 
 def mobile_version_payload() -> dict:
     cfg = AppSettings.load()
-    min_code = int(
-        getattr(cfg, "mobile_min_version_code", None)
-        or getattr(settings, "MOBILE_MIN_VERSION_CODE", 1)
-        or 1
+    settings_min = int(getattr(settings, "MOBILE_MIN_VERSION_CODE", 1) or 1)
+    cfg_min = int(getattr(cfg, "mobile_min_version_code", None) or 0)
+    # Деплой нового кода всегда поднимает пол: даже если в панели старое значение.
+    min_code = max(cfg_min, settings_min)
+
+    settings_latest = int(
+        getattr(settings, "MOBILE_LATEST_VERSION_CODE", min_code) or min_code
     )
-    latest_code = int(
-        getattr(cfg, "mobile_latest_version_code", None)
-        or getattr(settings, "MOBILE_LATEST_VERSION_CODE", min_code)
-        or min_code
-    )
+    cfg_latest = int(getattr(cfg, "mobile_latest_version_code", None) or 0)
+    latest_code = max(cfg_latest, settings_latest, min_code)
+
     latest_name = (
         getattr(cfg, "mobile_latest_version_name", None)
         or getattr(settings, "MOBILE_LATEST_VERSION_NAME", "")
         or ""
     ).strip()
+    if not latest_name:
+        latest_name = str(getattr(settings, "MOBILE_LATEST_VERSION_NAME", "") or "")
+
     apk_url = (
         getattr(cfg, "mobile_apk_url", None)
         or getattr(settings, "MOBILE_APK_URL", "")
