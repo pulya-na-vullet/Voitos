@@ -14,8 +14,11 @@
     <span class="muted">Статус ответа</span>
     <select name="status" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
       <option value="">Все</option>
+      <option value="open" {% if status == "open" %}selected{% endif %}>Только новые</option>
       {% for value, label in statuses %}
+        {% if value != "open" %}
         <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+        {% endif %}
       {% endfor %}
     </select>
   </label>
@@ -37,6 +40,7 @@
     <input type="date" name="date_to" value="{{ date_to }}" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
   </label>
   <button class="btn small" type="submit">Применить</button>
+  <a class="btn {% if status == 'open' and not kind and not date_from and not date_to %}{% else %}secondary {% endif %}small" href="{% url 'panel:feedback_list' %}?status=open">Только новые</a>
   <a class="btn secondary small" href="{% url 'panel:feedback_list' %}">Сбросить</a>
 </form>
 
