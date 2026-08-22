@@ -23,7 +23,8 @@ data class AuthSession(
 data class AuthConfig(
     @SerialName("max_bot_open_url") val maxBotOpenUrl: String = "",
     @SerialName("app_deep_link") val appDeepLink: String = "",
-    @SerialName("phone_otp_fallback") val phoneOtpFallback: Boolean = true,
+    @SerialName("phone_otp_fallback") val phoneOtpFallback: Boolean = false,
+    @SerialName("registration_hint") val registrationHint: String = "",
 )
 
 @Serializable
@@ -32,6 +33,14 @@ data class OkResponse(
     @SerialName("debug_code") val debugCode: String? = null,
     @SerialName("expires_in") val expiresIn: Int = 0,
     @SerialName("has_pin") val hasPin: Boolean = false,
+    val message: String = "",
+    val phone: String = "",
+)
+
+@Serializable
+data class ApiErrorBody(
+    val error: String = "",
+    val detail: String = "",
 )
 
 @Serializable

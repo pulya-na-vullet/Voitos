@@ -217,6 +217,55 @@ def _send_max_code(user: BotUser, code: str, *, kind: str) -> None:
         logger.exception("Failed to send MAX login code to user %s", user.id)
 
 
+def is_max_registered(user: BotUser | None) -> bool:
+    """Житель прошёл бота Max: есть телефон и настоящий max_user_id (не app_*)."""
+    if user is None:
+        return False
+    phone = normalize_user_phone(user.phone or "")
+    if len(phone) < 11:
+        return False
+    mid = (user.max_user_id or "").strip()
+    if not mid or mid.startswith("app_"):
+        return False
+    return True
+
+
+def find_registered_user(phone: str) -> BotUser | None:
+    phone = normalize_user_phone(phone)
+    if len(phone) < 11:
+        return None
+    qs = BotUser.objects.filter(phone=phone).order_by("-last_seen_at")
+    for user in qs:
+        if is_max_registered(user):
+            return user
+    return None
+
+
+def request_login_code_by_phone(phone: str, *, send: bool = True) -> dict:
+    """
+    Вход из приложения: телефон → если есть в боте Max, шлём код в Max.
+    Иначе not_registered — нужна регистрация в боте.
+    """
+    phone = normalize_user_phone(phone)
+    if len(phone) < 11:
+        raise ValueError("invalid_phone")
+    user = find_registered_user(phone)
+    if not user:
+        raise ValueError("not_registered")
+    _ch, code = create_challenge(user, kind=PinChallengeKind.LOGIN)
+    if send:
+        _send_max_code(user, code, kind=PinChallengeKind.LOGIN)
+    body: dict = {
+        "ok": True,
+        "expires_in": CODE_TTL_MINUTES * 60,
+        "phone": user.phone,
+        "message": "Код отправлен в Max",
+    }
+    if settings.DEBUG or getattr(settings, "MOBILE_OTP_DEBUG", False):
+        body["debug_code"] = code
+    return body
+
+
 def start_max_login(
     *,
     max_user_id: str,

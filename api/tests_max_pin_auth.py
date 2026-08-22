@@ -23,6 +23,36 @@ class MaxPinAuthTests(TestCase):
             profile_status=ProfileStatus.VERIFIED,
         )
 
+    def test_phone_login_requires_max_registration(self):
+        # Только app_* — не считается зарегистрированным в Max
+        BotUser.objects.create(
+            max_user_id="app_89625509999",
+            phone="89625509999",
+        )
+        resp = self.client.post(
+            "/api/v1/auth/phone/login-request",
+            data=json.dumps({"phone": "89625509999"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()["error"], "not_registered")
+
+    def test_phone_login_sends_code_for_max_user(self):
+        req = self.client.post(
+            "/api/v1/auth/phone/login-request",
+            data=json.dumps({"phone": "89625507832"}),
+            content_type="application/json",
+        )
+        self.assertEqual(req.status_code, 200)
+        code = req.json()["debug_code"]
+        verify = self.client.post(
+            "/api/v1/auth/phone/login-verify",
+            data=json.dumps({"phone": "89625507832", "code": code}),
+            content_type="application/json",
+        )
+        self.assertEqual(verify.status_code, 200)
+        self.assertTrue(verify.json()["access_token"])
+
     def test_max_start_and_verify_then_set_pin(self):
         start = self.client.post(
             "/api/v1/auth/max/start",

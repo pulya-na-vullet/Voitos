@@ -1,7 +1,5 @@
 package ru.voitos.app.ui
 
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -28,7 +26,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -67,24 +64,19 @@ fun LoginScreen(
     onDebugPrefs: (baseUrl: String, phone: String, debugCode: String) -> Unit = { _, _, _ -> },
     onSaveServer: (baseUrl: String) -> Unit = {},
 ) {
-    val context = LocalContext.current
     val initialHp = remember(initialBaseUrl) { ru.voitos.app.DevServerSettings.parse(initialBaseUrl) }
     var host by remember { mutableStateOf(initialHp.host) }
     var portText by remember { mutableStateOf(initialHp.port.toString()) }
     var phone by remember { mutableStateOf(initialPhone) }
     var code by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
-    var maxBotUrl by remember { mutableStateOf("") }
-    var mode by remember {
-        mutableStateOf(
-            when {
-                preferPinLogin && initialPhone.isNotBlank() -> "pin"
-                else -> "home"
-            },
-        )
-    }
-    var otpStep by remember { mutableStateOf(0) }
+    var step by remember { mutableStateOf(0) } // 0 phone, 1 code from Max, 2 optional PIN return
+    var showPin by remember { mutableStateOf(preferPinLogin && initialPhone.isNotBlank()) }
     var debugHint by remember { mutableStateOf<String?>(null) }
+    var healthHint by remember { mutableStateOf<String?>(null) }
+    var regHint by remember {
+        mutableStateOf("Регистрация — в боте Max: укажите телефон, мы привяжем Max ID.")
+    }
     var savedHint by remember {
         mutableStateOf(
             if (restoredFromDisk) "IP восстановлен из файла на телефоне" else null,
@@ -92,6 +84,7 @@ fun LoginScreen(
     }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var scanning by remember { mutableStateOf(false) }
     var recent by remember { mutableStateOf(recentBaseUrls) }
     val scope = rememberCoroutineScope()
 
@@ -109,6 +102,16 @@ fun LoginScreen(
         onDebugPrefs(currentBaseUrl(), phone.trim(), debugCode)
     }
 
+    fun applyFound(hit: ru.voitos.app.LanServerDiscovery.Found) {
+        host = hit.host
+        portText = hit.port.toString()
+        persistDebug()
+        onSaveServer(hit.baseUrl)
+        savedHint = "Найден сервер: ${hit.host}:${hit.port}"
+        recent = listOf(hit.baseUrl) + recent.filter { it != hit.baseUrl }
+        healthHint = "Сервер отвечает ✓"
+    }
+
     fun finish(session: AuthSession) {
         val p = session.phone.ifBlank { phone.trim() }
         onLoggedIn(
@@ -123,12 +126,42 @@ fun LoginScreen(
         )
     }
 
+    fun scanWifi(auto: Boolean = false) {
+        scope.launch {
+            scanning = true
+            error = null
+            if (!auto) healthHint = null
+            try {
+                val port = portText.toIntOrNull() ?: 18765
+                val prefer = buildList {
+                    add(currentBaseUrl())
+                    addAll(recent)
+                }
+                val hit = ru.voitos.app.LanServerDiscovery.findFirst(
+                    port = port,
+                    preferHosts = prefer,
+                )
+                if (hit != null) {
+                    applyFound(hit)
+                } else if (!auto) {
+                    healthHint = null
+                    error = "Сервер в Wi‑Fi не найден. Проверьте, что бэкенд запущен на порту $port."
+                }
+            } catch (e: Exception) {
+                if (!auto) error = friendlyNetworkError(e)
+            } finally {
+                scanning = false
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         runCatching {
-            onSaveServer(currentBaseUrl())
             val cfg = client().authConfig()
-            maxBotUrl = cfg.maxBotOpenUrl
+            if (cfg.registrationHint.isNotBlank()) regHint = cfg.registrationHint
         }
+        // Автопоиск IP в сети (как кнопка «Найти сервер в Wi‑Fi»).
+        scanWifi(auto = true)
     }
 
     Column(
@@ -139,12 +172,12 @@ fun LoginScreen(
         verticalArrangement = Arrangement.Center,
     ) {
         Text("Voitos", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.secondary)
-        Text("Вход", style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
+        Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
         VpnDebugBanner()
         Spacer(modifier = Modifier.height(8.dp))
 
-        Text("Сервер", color = VoitosColors.Accent2, style = MaterialTheme.typography.titleSmall)
+        Text("Сервер в локальной сети", color = VoitosColors.Accent2, style = MaterialTheme.typography.titleSmall)
         OutlinedTextField(
             value = host,
             onValueChange = {
@@ -169,96 +202,68 @@ fun LoginScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             colors = voitosOutlinedFieldColors(),
         )
-        savedHint?.let { Text(it, color = VoitosColors.Ok, style = MaterialTheme.typography.bodySmall) }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { scanWifi(auto = false) },
+            enabled = !loading && !scanning,
+            modifier = Modifier.fillMaxWidth(),
+            colors = voitosSecondaryButtonColors(),
+        ) {
+            Text(if (scanning) "Ищем сервер в Wi‑Fi…" else "Найти сервер в Wi‑Fi")
+        }
+        savedHint?.let {
+            Text(it, color = VoitosColors.Ok, style = MaterialTheme.typography.bodySmall)
+        }
+        healthHint?.let {
+            Text(it, color = VoitosColors.Accent2, style = MaterialTheme.typography.bodySmall)
+        }
         if (recent.isNotEmpty()) {
             Text("Недавние:", color = VoitosColors.Muted, style = MaterialTheme.typography.labelSmall)
             recent.take(3).forEach { url ->
+                val hp = ru.voitos.app.DevServerSettings.parse(url)
                 TextButton(onClick = {
-                    val hp = ru.voitos.app.DevServerSettings.parse(url)
                     host = hp.host
                     portText = hp.port.toString()
                     persistDebug()
                     onSaveServer(currentBaseUrl())
                     savedHint = "Сохранено: ${currentBaseUrl()}"
-                    recent = listOf(currentBaseUrl()) + recent.filter { it != currentBaseUrl() }
-                }) { Text(url, color = VoitosColors.Accent) }
+                }) { Text("${hp.host}:${hp.port}", color = VoitosColors.Accent) }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        error?.let {
-            Text(it, color = VoitosColors.Danger)
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        debugHint?.let {
-            Text(it, color = VoitosColors.Accent2, style = MaterialTheme.typography.bodySmall)
-            Spacer(modifier = Modifier.height(8.dp))
-        }
+        Text(regHint, color = VoitosColors.Muted, style = MaterialTheme.typography.bodySmall)
+        Spacer(modifier = Modifier.height(8.dp))
 
-        if (loading) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = VoitosColors.Accent,
+        if (showPin) {
+            Text("Быстрый вход по PIN", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+            OutlinedTextField(
+                value = phone,
+                onValueChange = {
+                    phone = it.filter { ch -> ch.isDigit() }.take(11)
+                    persistDebug()
+                },
+                label = { Text("Телефон") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                colors = voitosOutlinedFieldColors(),
             )
-        } else when (mode) {
-            "home" -> {
-                Button(
-                    onClick = {
-                        persistDebug()
-                        onSaveServer(currentBaseUrl())
-                        val url = maxBotUrl.ifBlank { "https://max.ru/" }
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        }
-                        mode = "max_code"
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = voitosPrimaryButtonColors(),
-                ) { Text("Войти через Max") }
-                Text(
-                    "В боте Max напишите «войти в приложение» — придёт код.",
-                    color = VoitosColors.Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                if (preferPinLogin && initialPhone.isNotBlank()) {
-                    Button(
-                        onClick = { mode = "pin" },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = voitosSecondaryButtonColors(),
-                    ) { Text("Войти по PIN") }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-                TextButton(onClick = { mode = "otp" }) {
-                    Text("Войти по телефону (dev)", color = VoitosColors.Muted)
-                }
-            }
-
-            "max_code" -> {
-                Text("Код из Max", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = {
-                        phone = it.filter { ch -> ch.isDigit() }.take(11)
-                        persistDebug()
-                    },
-                    label = { Text("Телефон") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    colors = voitosOutlinedFieldColors(),
-                )
-                OutlinedTextField(
-                    value = code,
-                    onValueChange = { code = it.filter { ch -> ch.isDigit() }.take(4) },
-                    label = { Text("Код из Max (4 цифры)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    colors = voitosOutlinedFieldColors(),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = pin,
+                onValueChange = { pin = it.filter { ch -> ch.isDigit() }.take(4) },
+                label = { Text("PIN") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                colors = voitosOutlinedFieldColors(),
+            )
+            error?.let { Text(it, color = VoitosColors.Danger) }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (loading || scanning) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally), color = VoitosColors.Accent)
+            } else {
                 Button(
                     onClick = {
                         scope.launch {
@@ -267,56 +272,7 @@ fun LoginScreen(
                             try {
                                 persistDebug()
                                 onSaveServer(currentBaseUrl())
-                                val session = client().maxVerify(phone, code)
-                                finish(session)
-                            } catch (e: Exception) {
-                                error = friendlyNetworkError(e, fallback = "Неверный код")
-                            } finally {
-                                loading = false
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = voitosPrimaryButtonColors(),
-                ) { Text("Подтвердить код") }
-                TextButton(onClick = { mode = "home" }) { Text("Назад", color = VoitosColors.Accent) }
-            }
-
-            "pin" -> {
-                Text("PIN-код", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = {
-                        phone = it.filter { ch -> ch.isDigit() }.take(11)
-                        persistDebug()
-                    },
-                    label = { Text("Телефон") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    colors = voitosOutlinedFieldColors(),
-                )
-                OutlinedTextField(
-                    value = pin,
-                    onValueChange = { pin = it.filter { ch -> ch.isDigit() }.take(4) },
-                    label = { Text("PIN (4 цифры)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    colors = voitosOutlinedFieldColors(),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        scope.launch {
-                            loading = true
-                            error = null
-                            try {
-                                persistDebug()
-                                onSaveServer(currentBaseUrl())
-                                val session = client().pinLogin(phone, pin)
-                                finish(session)
+                                finish(client().pinLogin(phone, pin))
                             } catch (e: Exception) {
                                 error = friendlyNetworkError(e, fallback = "Неверный PIN")
                             } finally {
@@ -326,166 +282,109 @@ fun LoginScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = voitosPrimaryButtonColors(),
-                ) { Text("Войти") }
-                TextButton(onClick = { mode = "reset" }) {
-                    Text("Забыли PIN?", color = VoitosColors.Accent)
+                ) { Text("Войти по PIN") }
+                TextButton(onClick = { showPin = false; error = null }) {
+                    Text("Войти через код в Max", color = VoitosColors.Accent)
                 }
-                TextButton(onClick = { mode = "home" }) { Text("Другой способ", color = VoitosColors.Muted) }
             }
+            return@Column
+        }
 
-            "reset" -> {
-                Text("Сброс PIN через Max", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it.filter { ch -> ch.isDigit() }.take(11) },
-                    label = { Text("Телефон") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    colors = voitosOutlinedFieldColors(),
-                )
-                OutlinedTextField(
-                    value = code,
-                    onValueChange = { code = it.filter { ch -> ch.isDigit() }.take(4) },
-                    label = { Text("Код из Max") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    colors = voitosOutlinedFieldColors(),
-                )
-                OutlinedTextField(
-                    value = pin,
-                    onValueChange = { pin = it.filter { ch -> ch.isDigit() }.take(4) },
-                    label = { Text("Новый PIN") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    colors = voitosOutlinedFieldColors(),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        scope.launch {
-                            loading = true
-                            error = null
-                            try {
-                                val req = client().pinResetRequest(phone)
-                                if (!req.debugCode.isNullOrBlank()) {
-                                    code = req.debugCode.orEmpty()
-                                    debugHint = "Dev-код: ${req.debugCode}"
-                                } else {
-                                    debugHint = "Код отправлен в Max"
-                                }
-                            } catch (e: Exception) {
-                                error = friendlyNetworkError(e)
-                            } finally {
-                                loading = false
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = voitosSecondaryButtonColors(),
-                ) { Text("Запросить код в Max") }
-                Button(
-                    onClick = {
-                        scope.launch {
-                            loading = true
-                            error = null
-                            try {
-                                val session = client().pinResetConfirm(phone, code, pin)
-                                finish(session.copy(needsPinSetup = false, hasPin = true))
-                            } catch (e: Exception) {
-                                error = friendlyNetworkError(e, fallback = "Не удалось сбросить PIN")
-                            } finally {
-                                loading = false
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = voitosPrimaryButtonColors(),
-                ) { Text("Сохранить новый PIN") }
-                TextButton(onClick = { mode = "pin" }) { Text("Назад", color = VoitosColors.Accent) }
+        OutlinedTextField(
+            value = phone,
+            onValueChange = {
+                phone = it.filter { ch -> ch.isDigit() }.take(11)
+                persistDebug()
+            },
+            label = { Text("Телефон") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            colors = voitosOutlinedFieldColors(),
+        )
+        if (step >= 1) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = code,
+                onValueChange = { code = it.filter { ch -> ch.isDigit() }.take(4) },
+                label = { Text("Код из Max") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                colors = voitosOutlinedFieldColors(),
+            )
+            debugHint?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Accent2)
             }
-
-            "otp" -> {
-                Text("Dev: вход по телефону", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = {
-                        phone = it.filter { ch -> ch.isDigit() }.take(11)
-                        persistDebug()
-                    },
-                    label = { Text("Телефон") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    colors = voitosOutlinedFieldColors(),
-                )
-                if (otpStep == 1) {
-                    OutlinedTextField(
-                        value = code,
-                        onValueChange = { code = it.filter { ch -> ch.isDigit() }.take(6) },
-                        label = { Text("Код") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        colors = voitosOutlinedFieldColors(),
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                if (otpStep == 0) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                loading = true
-                                error = null
-                                try {
-                                    persistDebug()
-                                    onSaveServer(currentBaseUrl())
-                                    val res = client().phoneStart(phone)
-                                    val dbg = res["debug_code"].orEmpty()
-                                    if (dbg.isNotBlank()) {
-                                        code = dbg
-                                        debugHint = "Dev-код: $dbg"
-                                        persistDebug(dbg)
-                                    }
-                                    otpStep = 1
-                                } catch (e: Exception) {
-                                    error = friendlyNetworkError(e)
-                                } finally {
-                                    loading = false
-                                }
+        }
+        error?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(it, color = VoitosColors.Danger)
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        if (loading || scanning) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                color = VoitosColors.Accent,
+            )
+        } else if (step == 0) {
+            Button(
+                onClick = {
+                    scope.launch {
+                        loading = true
+                        error = null
+                        debugHint = null
+                        try {
+                            persistDebug()
+                            onSaveServer(currentBaseUrl())
+                            val res = client().phoneLoginRequest(phone)
+                            if (!res.debugCode.isNullOrBlank()) {
+                                code = res.debugCode.orEmpty()
+                                debugHint = "Dev-код: ${res.debugCode}"
+                                persistDebug(res.debugCode.orEmpty())
+                            } else {
+                                debugHint = res.message.ifBlank { "Код отправлен в Max" }
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = voitosPrimaryButtonColors(),
-                    ) { Text("Получить код") }
-                } else {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                loading = true
-                                error = null
-                                try {
-                                    persistDebug(code)
-                                    onSaveServer(currentBaseUrl())
-                                    val session = client().phoneVerify(phone, code)
-                                    finish(session)
-                                } catch (e: Exception) {
-                                    error = friendlyNetworkError(e, fallback = "Неверный код")
-                                } finally {
-                                    loading = false
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = voitosPrimaryButtonColors(),
-                    ) { Text("Войти") }
+                            step = 1
+                        } catch (e: Exception) {
+                            error = e.message?.takeIf { it.isNotBlank() }
+                                ?: friendlyNetworkError(e)
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosPrimaryButtonColors(),
+            ) { Text("Войти") }
+            if (preferPinLogin && initialPhone.isNotBlank()) {
+                TextButton(onClick = { showPin = true }) {
+                    Text("Войти по PIN", color = VoitosColors.Muted)
                 }
-                TextButton(onClick = { mode = "home"; otpStep = 0 }) {
-                    Text("Назад", color = VoitosColors.Accent)
-                }
+            }
+        } else {
+            Button(
+                onClick = {
+                    scope.launch {
+                        loading = true
+                        error = null
+                        try {
+                            persistDebug(code)
+                            onSaveServer(currentBaseUrl())
+                            finish(client().phoneLoginVerify(phone, code))
+                        } catch (e: Exception) {
+                            error = e.message?.takeIf { it.isNotBlank() }
+                                ?: friendlyNetworkError(e, fallback = "Неверный код")
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosPrimaryButtonColors(),
+            ) { Text("Подтвердить код") }
+            TextButton(onClick = { step = 0; code = ""; debugHint = null }) {
+                Text("Изменить номер", color = VoitosColors.Accent)
             }
         }
     }
