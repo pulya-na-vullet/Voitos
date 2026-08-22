@@ -74,6 +74,7 @@ class PinChallengeKind(models.TextChoices):
     LOGIN = "login", "Вход через Max"
     RESET = "reset", "Сброс PIN"
     CHANGE = "change", "Смена PIN"
+    REGISTER = "register", "Регистрация в приложении"
 
 
 class PinChallenge(models.Model):
@@ -102,6 +103,31 @@ class PinChallenge(models.Model):
     class Meta:
         verbose_name = "Код Max/PIN challenge"
         verbose_name_plural = "Коды Max/PIN challenge"
+        ordering = ["-created_at"]
+
+    def is_expired(self) -> bool:
+        return timezone.now() > self.expires_at
+
+    def is_open(self) -> bool:
+        return self.consumed_at is None and not self.is_expired()
+
+
+class AppRegistrationDraft(models.Model):
+    """Черновик регистрации из приложения до кода из Max."""
+
+    phone = models.CharField(max_length=32, db_index=True)
+    real_name = models.CharField(max_length=255)
+    gender = models.CharField(max_length=16)
+    birth_date = models.DateField()
+    address = models.TextField(blank=True, default="")
+    locality = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Черновик регистрации приложения"
+        verbose_name_plural = "Черновики регистрации приложения"
         ordering = ["-created_at"]
 
     def is_expired(self) -> bool:

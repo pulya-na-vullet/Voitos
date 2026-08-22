@@ -23,6 +23,10 @@
           {% for g in panel_managed_groups %}{{ g.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
         </div>
         {% endif %}
+        <div class="brand-versions" title="Версии бэкенда и поддерживаемого приложения">
+          бэкенд {{ voitos_backend_version }} · приложение {{ voitos_mobile_version_name }}
+          <span class="brand-versions-codes">мин.&nbsp;{{ voitos_mobile_min_code }} / актуальная&nbsp;{{ voitos_mobile_latest_code }}</span>
+        </div>
       </div>
     </div>
     <nav class="nav">

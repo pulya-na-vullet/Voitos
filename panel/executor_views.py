@@ -14,6 +14,8 @@ from django.views.decorators.http import require_http_methods, require_POST
 from database.models import (
     AdminTaskKind,
     ExecutorRole,
+    ExecutorRoleProposal,
+    ExecutorRoleProposalStatus,
     PanelActionLog,
     PanelProfile,
     PanelRole,
@@ -35,6 +37,7 @@ from services.executor_roles import (
     custom_flags_from_role,
     generate_role_code,
 )
+from services.role_proposals import approve_proposal, reject_proposal
 
 User = get_user_model()
 
@@ -86,13 +89,60 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
 
     roles = list(ExecutorRole.objects.all().order_by("id"))
     roles_payload = [{"id": r.id, "flags": custom_flags_from_role(r)} for r in roles]
+    open_proposals = list(
+        ExecutorRoleProposal.objects.filter(status=ExecutorRoleProposalStatus.OPEN)
+        .select_related("user")
+        .order_by("-created_at")[:30]
+    )
     return render(
         request,
         "panel/executor_roles.html",
         {
             "roles": roles,
             "roles_flags_json": json.dumps(roles_payload, ensure_ascii=False),
+            "open_proposals": open_proposals,
         },
+    )
+
+
+@login_required
+@admin_required
+@require_http_methods(["GET", "POST"])
+def role_proposal_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    proposal = get_object_or_404(
+        ExecutorRoleProposal.objects.select_related("user", "created_role", "reviewed_by"),
+        pk=pk,
+    )
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        note = (request.POST.get("admin_note") or "").strip()
+        try:
+            if action == "approve":
+                # Позволить админу поправить название перед созданием.
+                new_name = (request.POST.get("role_name") or "").strip()
+                if new_name:
+                    proposal.proposed_name = new_name[:128]
+                    proposal.save(update_fields=["proposed_name", "updated_at"])
+                role = approve_proposal(
+                    proposal, admin_user=request.user, admin_note=note
+                )
+                messages.success(
+                    request,
+                    f"Роль «{role.name}» добавлена в каталог.",
+                )
+            elif action == "reject":
+                reject_proposal(proposal, admin_user=request.user, admin_note=note)
+                messages.info(request, "Заявка отклонена.")
+            else:
+                messages.error(request, "Неизвестное действие.")
+        except ValueError as exc:
+            messages.error(request, str(exc))
+        return redirect("panel:role_proposal_detail", pk=proposal.id)
+
+    return render(
+        request,
+        "panel/role_proposal_detail.html",
+        {"proposal": proposal},
     )
 
 

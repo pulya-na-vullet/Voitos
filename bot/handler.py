@@ -481,10 +481,24 @@ class UpdateHandler:
             return
         user.ensure_grace_period()
         pending, _ = PendingAction.objects.get_or_create(user=user)
+
+        start_payload = str(update.get("payload") or "").strip()
+        from services.mobile_auth import bot_handle_app_register_start_payload
+
+        app_reply = bot_handle_app_register_start_payload(user, start_payload)
+        if app_reply:
+            self._reply(user, app_reply)
+            return
+
         if needs_registration(user):
-            self._reply(user, start_registration(user, pending))
-        else:
-            self._reply(user, help_message(user))
+            self._reply(
+                user,
+                "Добро пожаловать в Voitos!\n\n"
+                "Регистрация в приложении: напишите «код» — пришлю код подтверждения.\n"
+                "Анкета в боте: напишите «регистрация».",
+            )
+            return
+        self._reply(user, help_message(user))
 
     def _reply(self, user, text: str) -> None:
         attachments = None

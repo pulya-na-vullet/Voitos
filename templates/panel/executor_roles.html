@@ -12,6 +12,34 @@
   Доп. признаки добавляете сами.
 </p>
 
+{% if open_proposals %}
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Заявки на новые роли
+    <span class="badge bad">{{ open_proposals|length }}</span>
+  </h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Когда</th>
+        <th>Житель</th>
+        <th>Роль</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in open_proposals %}
+      <tr>
+        <td class="mono">{{ p.created_at|date:"d.m H:i" }}</td>
+        <td><a href="{% url 'panel:user_dashboard' p.user_id %}">{{ p.user }}</a></td>
+        <td>{{ p.proposed_name }}</td>
+        <td><a class="btn small" href="{% url 'panel:role_proposal_detail' p.id %}">Открыть</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 <div class="grid two">
   <div class="card">
     <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-bottom:12px;">

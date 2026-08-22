@@ -11,6 +11,8 @@ urlpatterns = [
     path("auth/phone/verify", auth_views.phone_verify, name="auth_phone_verify"),
     path("auth/phone/login-request", auth_views.phone_login_request, name="auth_phone_login_request"),
     path("auth/phone/login-verify", auth_views.phone_login_verify, name="auth_phone_login_verify"),
+    path("auth/register/start", auth_views.register_start, name="auth_register_start"),
+    path("auth/register/confirm", auth_views.register_confirm, name="auth_register_confirm"),
     path("auth/max/start", auth_views.max_start, name="auth_max_start"),
     path("auth/max/verify", auth_views.max_verify, name="auth_max_verify"),
     path("auth/pin/set", auth_views.pin_set, name="auth_pin_set"),
@@ -40,6 +42,11 @@ urlpatterns = [
         name="work_request_confirm",
     ),
     path(
+        "work-requests/<int:pk>/rate",
+        views.work_request_rate,
+        name="work_request_rate",
+    ),
+    path(
         "work-requests/<int:pk>/confirm-slot",
         views.work_request_confirm_slot,
         name="work_request_confirm_slot",
@@ -66,6 +73,11 @@ urlpatterns = [
     ),
     path("me/executor", views.me_executor, name="me_executor"),
     path("executor/register", views.executor_register, name="executor_register"),
+    path(
+        "executor/role-proposals",
+        views.executor_role_propose,
+        name="executor_role_propose",
+    ),
     path("executor/offers", views.executor_offers, name="executor_offers"),
     path(
         "executor/offers/<int:pk>/respond",

@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.BackHandler
@@ -31,16 +32,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import ru.voitos.app.AppVersion
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.debug.CrashFileLogger
+import ru.voitos.app.model.ApiException
 import ru.voitos.app.nav.DeepLinks
 import ru.voitos.app.push.DevPushTokenProvider
 import ru.voitos.app.ui.CabinetScreen
 import ru.voitos.app.ui.ChangePinScreen
 import ru.voitos.app.ui.CollectionDetailScreen
 import ru.voitos.app.ui.CollectionsScreen
+import ru.voitos.app.ui.RateMasterScreen
 import ru.voitos.app.ui.ConfirmAmountScreen
 import ru.voitos.app.ui.ExecutorOffersScreen
 import ru.voitos.app.ui.ExecutorRegisterScreen
@@ -66,11 +73,33 @@ class MainActivity : ComponentActivity() {
     private lateinit var session: SessionStore
     private var client: VoitosApiClient = VoitosApiClient()
 
+    /** Последнее касание / жест — для авто-разлогина по простою. */
+    private val lastUserInteractionMs = AtomicLong(SystemClock.elapsedRealtime())
+
+    /** Бэкенд вернул 401 (пользователь удалён / токен отозван) — разлогинить в Compose. */
+    private val sessionExpired = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
     /**
      * Актуальный обработчик «назад» из Compose. Activity-callback нужен, потому что
      * жестовый свайп при predictive back часто не доходит до Compose BackHandler.
      */
     private var composeBackHandler: (() -> Unit)? = null
+
+    companion object {
+        private const val IDLE_LOGOUT_MS = 15 * 60 * 1000L
+        private const val IDLE_CHECK_EVERY_MS = 15_000L
+        private const val VERSION_POLL_EVERY_MS = 30_000L
+    }
+
+    private fun newApiClient(baseUrl: String, token: String?): VoitosApiClient =
+        VoitosApiClient(baseUrl = baseUrl).also { api ->
+            api.appVersionCode = AppVersion.code
+            api.accessToken = token
+            api.onUnauthorized = { sessionExpired.tryEmit(Unit) }
+        }
 
     private sealed class Screen {
         data object Login : Screen()
@@ -87,11 +116,14 @@ class MainActivity : ComponentActivity() {
         data class WorkRequestPhotos(val id: Int) : Screen()
         data class WorkRequestDetail(val id: Int) : Screen()
         data object Subscription : Screen()
+        /** Подписка закрыта — только загрузка чека. */
+        data object Paywall : Screen()
         data object Onboarding : Screen()
         data object Feedback : Screen()
         data object GroupChat : Screen()
         data object ExecutorRegister : Screen()
         data class Confirm(val id: Int) : Screen()
+        data class Rate(val id: Int) : Screen()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -112,8 +144,7 @@ class MainActivity : ComponentActivity() {
 
         session = SessionStore(this)
         val restoredServerUrl = DevServerSettings.restoreIfNeeded(this, session)
-        client = VoitosApiClient(baseUrl = session.baseUrl)
-        client.accessToken = session.accessToken
+        client = newApiClient(session.baseUrl, session.accessToken)
 
         val lastCrash = CrashFileLogger.consumeLastCrash(this)
         val deepLinkScreen = resolveDeepLink(intent?.data)
@@ -127,13 +158,13 @@ class MainActivity : ComponentActivity() {
                 var screen by remember { mutableStateOf<Screen>(initial) }
                 var tab by remember { mutableStateOf(MainTab.Collections) }
                 var collectionsRefresh by remember { mutableStateOf(0) }
+                var chatUnread by remember { mutableStateOf(0) }
                 var isExecutor by remember { mutableStateOf(false) }
                 var playSplash by remember { mutableStateOf(false) }
                 var pendingAfterBootstrap by remember { mutableStateOf(deepLinkScreen) }
                 var crashText by remember { mutableStateOf(lastCrash) }
-                var updateMessage by remember { mutableStateOf("") }
                 var updateApkUrl by remember { mutableStateOf("") }
-                var updateLatestName by remember { mutableStateOf("") }
+                var paywallGateMessage by remember { mutableStateOf("") }
                 val scope = rememberCoroutineScope()
 
                 fun enterMainWithSplash(splash: Boolean) {
@@ -141,11 +172,70 @@ class MainActivity : ComponentActivity() {
                     screen = Screen.Main
                 }
 
-                fun goForceUpdate(message: String, apkUrl: String, latestName: String) {
-                    updateMessage = message
+                fun goForceUpdate(apkUrl: String = "") {
                     updateApkUrl = apkUrl
-                    updateLatestName = latestName
                     screen = Screen.ForceUpdate
+                }
+
+                fun goPaywallForServices(message: String = "Оплатите подписку для доступа к услугам") {
+                    paywallGateMessage = message
+                    playSplash = false
+                    screen = Screen.Paywall
+                }
+
+                /** Сборы / мастер / регистрация исполнителя — только при активном доступе. */
+                fun withPaidAccess(onAllowed: () -> Unit) {
+                    scope.launch {
+                        val access = runCatching { client.access() }.getOrNull()
+                        if (access != null && (access.needsPayment || access.state == "blocked")) {
+                            goPaywallForServices()
+                            return@launch
+                        }
+                        onAllowed()
+                    }
+                }
+
+                fun appNeedsUpdate(health: ru.voitos.app.model.HealthResponse?): Boolean {
+                    if (health == null) return false
+                    if (health.updateRequired) return true
+                    return health.minAppVersionCode > 0 && AppVersion.code < health.minAppVersionCode
+                }
+
+                /** После онбординга — hard update, paywall или главный экран. */
+                fun proceedAfterOnboarding() {
+                    scope.launch {
+                        val health = runCatching {
+                            client.healthCheck(AppVersion.code)
+                        }.getOrNull()
+                        if (appNeedsUpdate(health)) {
+                            goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
+                            return@launch
+                        }
+                        val access = runCatching { client.access() }.getOrNull()
+                        val needsPay = access?.needsPayment == true || access?.state == "blocked"
+                        if (needsPay) {
+                            goPaywallForServices()
+                            return@launch
+                        }
+                        val next = pendingAfterBootstrap
+                        pendingAfterBootstrap = null
+                        if (next != null && next !is Screen.Main) {
+                            playSplash = false
+                            screen = next
+                        } else {
+                            enterMainWithSplash(splash = true)
+                        }
+                    }
+                }
+
+                fun logoutToLogin() {
+                    session.clearSession()
+                    client.accessToken = null
+                    client.onUnauthorized = null
+                    isExecutor = false
+                    playSplash = false
+                    lastUserInteractionMs.set(SystemClock.elapsedRealtime())
+                    screen = Screen.Login
                 }
 
                 fun goMain(targetTab: MainTab = tab, refreshCollections: Boolean = false) {
@@ -156,16 +246,63 @@ class MainActivity : ComponentActivity() {
                     screen = Screen.Main
                 }
 
+                // Пользователя удалили в админке / токен отозвали → принудительный выход.
+                LaunchedEffect(Unit) {
+                    sessionExpired.collect { logoutToLogin() }
+                }
+
+                // Пока сессия жива — периодически сверяем min version с бэком (не только при старте).
+                LaunchedEffect(screen, client.accessToken) {
+                    val activeSession = !client.accessToken.isNullOrBlank() &&
+                        screen !is Screen.Login &&
+                        screen !is Screen.ForceUpdate
+                    if (!activeSession) return@LaunchedEffect
+                    while (true) {
+                        val health = runCatching {
+                            client.healthCheck(AppVersion.code)
+                        }.getOrNull()
+                        if (appNeedsUpdate(health)) {
+                            goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
+                            break
+                        }
+                        // Подписка могла закончиться, пока пользователь в приложении.
+                        if (screen !is Screen.Paywall && screen !is Screen.Bootstrapping) {
+                            val access = runCatching { client.access() }.getOrNull()
+                            if (access?.needsPayment == true || access?.state == "blocked") {
+                                goPaywallForServices()
+                                break
+                            }
+                        }
+                        delay(VERSION_POLL_EVERY_MS)
+                    }
+                }
+
+                // 15 минут без касаний → разлогин (ForceUpdate / Login не трогаем).
+                LaunchedEffect(screen, client.accessToken) {
+                    val watchIdle = !client.accessToken.isNullOrBlank() &&
+                        screen !is Screen.Login &&
+                        screen !is Screen.ForceUpdate
+                    if (!watchIdle) return@LaunchedEffect
+                    while (true) {
+                        delay(IDLE_CHECK_EVERY_MS)
+                        val idleFor = SystemClock.elapsedRealtime() - lastUserInteractionMs.get()
+                        if (idleFor >= IDLE_LOGOUT_MS) {
+                            logoutToLogin()
+                            break
+                        }
+                    }
+                }
+
                 fun handleSystemBack() {
                     when (val current = screen) {
-                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.SetPin, Screen.ForceUpdate, Screen.Main ->
+                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.SetPin, Screen.ForceUpdate, Screen.Main, Screen.Paywall ->
                             moveTaskToBack(true)
                         is Screen.CollectionDetail, Screen.GroupChat ->
                             goMain(MainTab.Collections, refreshCollections = true)
                         Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister, Screen.ChangePin, Screen.Wish ->
                             goMain(MainTab.Cabinet)
                         is Screen.WorkRequestPhotos -> goMain(MainTab.CallMaster)
-                        is Screen.WorkRequestDetail, is Screen.Confirm -> goMain(MainTab.WorkRequests)
+                        is Screen.WorkRequestDetail, is Screen.Confirm, is Screen.Rate -> goMain(MainTab.WorkRequests)
                     }
                 }
 
@@ -237,12 +374,12 @@ class MainActivity : ComponentActivity() {
                                     if (result.hasPin || !result.needsPinSetup) {
                                         session.hasPinSetup = true
                                     }
-                                    client = VoitosApiClient(baseUrl = result.baseUrl).also {
-                                        it.accessToken = result.token
-                                    }
+                                    session.needsOnboarding = result.needsOnboarding
+                                    client = newApiClient(result.baseUrl, result.token)
                                     scope.launch { registerDevPushToken() }
                                     pendingAfterBootstrap = null
                                     tab = MainTab.Collections
+                                    lastUserInteractionMs.set(SystemClock.elapsedRealtime())
                                     screen = if (result.needsPinSetup) Screen.SetPin else Screen.Bootstrapping
                                 },
                                 onDebugPrefs = { url, phone, dbg ->
@@ -256,9 +393,6 @@ class MainActivity : ComponentActivity() {
                             )
 
                             Screen.ForceUpdate -> ForceUpdateScreen(
-                                message = updateMessage,
-                                latestVersionName = updateLatestName,
-                                currentVersionName = AppVersion.name,
                                 apkUrl = updateApkUrl,
                             )
 
@@ -278,36 +412,43 @@ class MainActivity : ComponentActivity() {
                                     CircularProgressIndicator(color = VoitosColors.Accent2)
                                 }
                                 LaunchedEffect(Unit) {
-                                    val health = runCatching {
-                                        client.healthCheck(AppVersion.code)
-                                    }.getOrNull()
-                                    if (health != null &&
-                                        (health.updateRequired ||
-                                            (health.minAppVersionCode > 0 &&
-                                                AppVersion.code < health.minAppVersionCode))
-                                    ) {
-                                        goForceUpdate(
-                                            message = health.updateMessage,
-                                            apkUrl = health.apkUrl,
-                                            latestName = health.latestAppVersionName,
-                                        )
+                                    // Сначала hard update — до онбординга и PIN-сессии.
+                                    var health: ru.voitos.app.model.HealthResponse? = null
+                                    repeat(3) {
+                                        health = runCatching {
+                                            client.healthCheck(AppVersion.code)
+                                        }.getOrNull()
+                                        if (health != null) return@repeat
+                                        delay(400)
+                                    }
+                                    if (health == null) {
+                                        val cfg = runCatching { client.authConfig() }.getOrNull()
+                                        if (cfg != null && cfg.minAppVersionCode > AppVersion.code) {
+                                            goForceUpdate(apkUrl = cfg.apkUrl)
+                                            return@LaunchedEffect
+                                        }
+                                    } else if (appNeedsUpdate(health)) {
+                                        goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
                                         return@LaunchedEffect
                                     }
-                                    val needOnboarding = runCatching {
-                                        val p = client.onboarding()
-                                        !(p.completed || p.rewardGranted)
-                                    }.getOrDefault(false)
+
+                                    val needOnboarding = try {
+                                        client.onboarding().requiresOnboarding()
+                                    } catch (e: ApiException) {
+                                        if (e.code == "unauthorized") {
+                                            logoutToLogin()
+                                            return@LaunchedEffect
+                                        }
+                                        session.needsOnboarding
+                                    } catch (_: Exception) {
+                                        session.needsOnboarding
+                                    }
                                     if (needOnboarding) {
+                                        session.needsOnboarding = true
                                         screen = Screen.RequiredOnboarding
                                     } else {
-                                        val next = pendingAfterBootstrap
-                                        pendingAfterBootstrap = null
-                                        if (next != null && next !is Screen.Main) {
-                                            playSplash = false
-                                            screen = next
-                                        } else {
-                                            enterMainWithSplash(splash = true)
-                                        }
+                                        session.needsOnboarding = false
+                                        proceedAfterOnboarding()
                                     }
                                 }
                             }
@@ -315,11 +456,11 @@ class MainActivity : ComponentActivity() {
                             Screen.RequiredOnboarding -> OnboardingScreen(
                                 client = client,
                                 apiBaseUrl = session.baseUrl,
-                                onBack = { enterMainWithSplash(splash = true) },
+                                onBack = { proceedAfterOnboarding() },
                                 requireCompletion = true,
                                 onFinished = {
-                                    pendingAfterBootstrap = null
-                                    enterMainWithSplash(splash = true)
+                                    session.needsOnboarding = false
+                                    proceedAfterOnboarding()
                                 },
                             )
 
@@ -332,13 +473,32 @@ class MainActivity : ComponentActivity() {
                                         tab = MainTab.Cabinet
                                     }
                                 }
+                                // Бейдж чата обновляем на всём Main, не только на вкладке Сборы.
+                                LaunchedEffect(client.accessToken, screen) {
+                                    while (true) {
+                                        val n = runCatching {
+                                            client.groups().unreadTotal
+                                        }.getOrNull()
+                                        if (n != null) chatUnread = n
+                                        delay(5_000)
+                                    }
+                                }
                                 MainShell(
                                     selected = tab,
-                                    onSelect = {
-                                        if (it == MainTab.Collections) {
-                                            collectionsRefresh += 1
+                                    onSelect = { next ->
+                                        val needsPaid = next == MainTab.Collections ||
+                                            next == MainTab.CallMaster ||
+                                            next == MainTab.Work
+                                        if (needsPaid) {
+                                            withPaidAccess {
+                                                if (next == MainTab.Collections) {
+                                                    collectionsRefresh += 1
+                                                }
+                                                tab = next
+                                            }
+                                        } else {
+                                            tab = next
                                         }
-                                        tab = it
                                     },
                                     playLogoSplash = playSplash,
                                     showWorkTab = isExecutor,
@@ -352,14 +512,21 @@ class MainActivity : ComponentActivity() {
                                     when (tab) {
                                         MainTab.Collections -> CollectionsScreen(
                                             client = client,
-                                            onOpen = { id -> screen = Screen.CollectionDetail(id) },
+                                            onOpen = { id ->
+                                                withPaidAccess {
+                                                    screen = Screen.CollectionDetail(id)
+                                                }
+                                            },
                                             onOpenChat = { screen = Screen.GroupChat },
                                             onBack = null,
                                             refreshKey = collectionsRefresh,
+                                            chatUnread = chatUnread,
+                                            onChatUnreadChange = { chatUnread = it },
                                         )
                                         MainTab.WorkRequests -> WorkRequestsScreen(
                                             client = client,
                                             onConfirm = { id -> screen = Screen.Confirm(id) },
+                                            onRate = { id -> screen = Screen.Rate(id) },
                                             onOpen = { id -> screen = Screen.WorkRequestDetail(id) },
                                             onBack = null,
                                         )
@@ -377,19 +544,20 @@ class MainActivity : ComponentActivity() {
                                         )
                                         MainTab.Cabinet -> CabinetScreen(
                                             client = client,
-                                            onOpenSubscription = { screen = Screen.Subscription },
+                                            onOpenSubscription = {
+                                                paywallGateMessage = ""
+                                                screen = Screen.Subscription
+                                            },
                                             onOpenOnboarding = { screen = Screen.Onboarding },
-                                            onRegisterExecutor = { screen = Screen.ExecutorRegister },
+                                            onRegisterExecutor = {
+                                                withPaidAccess {
+                                                    screen = Screen.ExecutorRegister
+                                                }
+                                            },
                                             onOpenFeedback = { screen = Screen.Feedback },
                                             onOpenWishes = { screen = Screen.Wish },
                                             onChangePin = { screen = Screen.ChangePin },
-                                            onLogout = {
-                                                session.clearSession()
-                                                client.accessToken = null
-                                                isExecutor = false
-                                                playSplash = false
-                                                screen = Screen.Login
-                                            },
+                                            onLogout = { logoutToLogin() },
                                         )
                                         MainTab.Work -> ExecutorOffersScreen(
                                             client = client,
@@ -443,6 +611,7 @@ class MainActivity : ComponentActivity() {
                                     screen = Screen.Main
                                 },
                                 onConfirmAmount = { id -> screen = Screen.Confirm(id) },
+                                onRate = { id -> screen = Screen.Rate(id) },
                             )
 
                             Screen.Subscription -> SubscriptionScreen(
@@ -451,6 +620,21 @@ class MainActivity : ComponentActivity() {
                                     tab = MainTab.Cabinet
                                     screen = Screen.Main
                                 },
+                            )
+
+                            Screen.Paywall -> SubscriptionScreen(
+                                client = client,
+                                paymentRequired = true,
+                                gateMessage = paywallGateMessage.ifBlank {
+                                    "Оплатите подписку для доступа к услугам"
+                                },
+                                onBack = { logoutToLogin() },
+                                onAccessRestored = {
+                                    paywallGateMessage = ""
+                                    pendingAfterBootstrap = null
+                                    enterMainWithSplash(splash = true)
+                                },
+                                onLogout = { logoutToLogin() },
                             )
 
                             Screen.Onboarding -> OnboardingScreen(
@@ -489,11 +673,33 @@ class MainActivity : ComponentActivity() {
                             Screen.GroupChat -> GroupChatScreen(
                                 client = client,
                                 onBack = {
+                                    scope.launch {
+                                        chatUnread = runCatching {
+                                            client.groups().unreadTotal
+                                        }.getOrDefault(0)
+                                    }
                                     goMain(MainTab.Collections, refreshCollections = true)
                                 },
                             )
 
                             is Screen.Confirm -> ConfirmAmountScreen(
+                                client = client,
+                                workRequestId = s.id,
+                                onDone = { needsRating ->
+                                    if (needsRating) {
+                                        screen = Screen.Rate(s.id)
+                                    } else {
+                                        tab = MainTab.WorkRequests
+                                        screen = Screen.Main
+                                    }
+                                },
+                                onBack = {
+                                    tab = MainTab.WorkRequests
+                                    screen = Screen.Main
+                                },
+                            )
+
+                            is Screen.Rate -> RateMasterScreen(
                                 client = client,
                                 workRequestId = s.id,
                                 onDone = {
@@ -513,6 +719,16 @@ class MainActivity : ComponentActivity() {
             runCatching { CrashFileLogger.install(this) }
             throw t
         }
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        lastUserInteractionMs.set(SystemClock.elapsedRealtime())
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lastUserInteractionMs.set(SystemClock.elapsedRealtime())
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -540,8 +756,11 @@ class MainActivity : ComponentActivity() {
         return when (val route = DeepLinks.parse(link)) {
             is DeepLinks.Route.Collection -> Screen.CollectionDetail(route.id)
             is DeepLinks.Route.WorkRequest ->
-                if (route.action == "confirm") Screen.Confirm(route.id)
-                else Screen.WorkRequestDetail(route.id)
+                when (route.action) {
+                    "confirm" -> Screen.Confirm(route.id)
+                    "rate" -> Screen.Rate(route.id)
+                    else -> Screen.WorkRequestDetail(route.id)
+                }
             is DeepLinks.Route.Subscription -> Screen.Subscription
             is DeepLinks.Route.Feedback -> Screen.Feedback
             else -> Screen.Main

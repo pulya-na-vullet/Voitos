@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from django.views.decorators.http import require_GET, require_http_methods
 
-from api.http import api_login_required, api_public, json_response, parse_json
+from api.http import (
+    api_login_required,
+    api_public,
+    api_subscription_required,
+    json_response,
+    parse_json,
+)
 from api.models import AppNotification
 from bot.onboarding import STORIES, panel_progress, progress_list
 from database.models import (
@@ -59,12 +65,15 @@ def _me_payload(user, request=None) -> dict:
 
 
 def _access_payload(user) -> dict:
+    user.ensure_grace_period()
     until = user.effective_subscription_until()
     return {
         "state": user.access_state(),
         "subscription_until": until.isoformat() if until else None,
         "grace_until": user.grace_until.isoformat() if user.grace_until else None,
         "label": user.subscription_label(),
+        "needs_payment": user.access_state() == "blocked",
+        "is_active": bool(user.is_active),
     }
 
 
@@ -245,6 +254,27 @@ def executor_roles(request):
 
 
 @api_login_required
+@api_subscription_required
+@require_http_methods(["POST"])
+def executor_role_propose(request):
+    """Житель просит добавить новую роль в каталог (не чаще 1 раза в сутки)."""
+    from services.role_proposals import propose_role, proposal_to_dict
+
+    data = parse_json(request)
+    try:
+        proposal = propose_role(
+            request.bot_user,
+            str(data.get("name") or data.get("proposed_name") or ""),
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    return json_response(
+        {"ok": True, "proposal": proposal_to_dict(proposal)},
+        status=201,
+    )
+
+
+@api_login_required
 @require_GET
 def me_executor(request):
     """Является ли пользователь исполнителем + его роли."""
@@ -297,6 +327,7 @@ def _open_offers_qs(user):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def executor_register(request):
     from bot.contractor_registration import submit_contractor_registration_api
@@ -403,6 +434,8 @@ def _slot_labels(wr) -> list[str]:
 
 
 def _work_request_brief(wr) -> dict:
+    from services.work_request_rating import work_request_needs_rating
+
     slots = _slot_labels(wr)
     return {
         "id": wr.id,
@@ -418,6 +451,7 @@ def _work_request_brief(wr) -> dict:
         "agreed_slot": wr.agreed_slot or "",
         "can_confirm_slot": wr.status == "scheduling",
         "needs_confirm_amount": wr.status == "awaiting_client",
+        "needs_rating": work_request_needs_rating(wr),
     }
 
 
@@ -441,6 +475,8 @@ def work_request_detail(request, pk: int):
     )
     if not wr:
         return json_response({"error": "not_found"}, status=404)
+    from services.work_request_rating import work_request_needs_rating
+
     contractor = wr.assigned_contractor
     requires_photos = bool(
         getattr(wr.role, "requires_work_photos", True) if wr.role_id else True
@@ -451,7 +487,7 @@ def work_request_detail(request, pk: int):
         {
             "assigned_name": str(contractor) if contractor else None,
             "assigned_phone": getattr(contractor, "phone", None) if contractor else None,
-            "needs_rating": False,
+            "needs_rating": work_request_needs_rating(wr),
             "needs_photos": requires_photos and wr.status == "draft",
             "photo_count": len(photo_urls),
             "photo_urls": photo_urls,
@@ -794,11 +830,21 @@ def _campaign_progress_payload(campaign) -> dict:
 
 
 @api_login_required
+@api_subscription_required
 @require_GET
 def collections_list(request):
-    """Список инвайтов жителя в сборы."""
+    """Список инвайтов жителя в сборы (новые сверху)."""
     try:
-        from database.models import InviteStatus, ReceiptStatus, ServiceInvite
+        from database.models import (
+            CampaignStatus,
+            InviteStatus,
+            ReceiptStatus,
+            ServiceCampaign,
+            ServiceInvite,
+        )
+
+        # Лимит одновременных активных сборов на группу (для баннера в приложении).
+        active_limit = 4
 
         invites = (
             ServiceInvite.objects.filter(user=request.bot_user)
@@ -809,7 +855,7 @@ def collections_list(request):
                 "campaign__invites",
                 "receipts",
             )
-            .order_by("-id")[:50]
+            .order_by("-campaign__created_at", "-campaign_id", "-id")[:50]
         )
         pay = _service_payment_payload()
         items = []
@@ -846,16 +892,56 @@ def collections_list(request):
                     "description": (getattr(camp, "description", None) or "")[:400],
                     "pending_receipts": pending_n,
                     "rejected_receipts": rejected_n,
+                    "created_at": (
+                        camp.created_at.isoformat()
+                        if camp and getattr(camp, "created_at", None)
+                        else None
+                    ),
                     **_campaign_progress_payload(camp),
                     **pay,
                 }
             )
-        return json_response({"items": items})
+
+        # Лимит по группе: если у любой группы пользователя уже 4+ активных сбора.
+        from services.wishes import user_groups
+
+        group_ids = {g.id for g in user_groups(request.bot_user)}
+        at_active_limit = False
+        if group_ids:
+            from django.db.models import Count
+
+            at_active_limit = (
+                ServiceCampaign.objects.filter(
+                    group_id__in=group_ids,
+                    status=CampaignStatus.ACTIVE,
+                )
+                .values("group_id")
+                .annotate(n=Count("id"))
+                .filter(n__gte=active_limit)
+                .exists()
+            )
+        # Запасной критерий: на экране уже 4+ активных сбора у этого пользователя.
+        if not at_active_limit:
+            active_on_screen = sum(
+                1 for it in items if (it.get("campaign_status") or "") == CampaignStatus.ACTIVE
+            )
+            at_active_limit = active_on_screen >= active_limit
+
+        return json_response(
+            {
+                "items": items,
+                "active_limit": active_limit,
+                "at_active_limit": at_active_limit,
+            }
+        )
     except Exception:
-        return json_response({"items": []})
+        return json_response(
+            {"items": [], "active_limit": 4, "at_active_limit": False}
+        )
 
 
 @api_login_required
+@api_subscription_required
 @require_GET
 def collection_detail(request, pk: int):
     """Детали сбора по campaign id для текущего пользователя."""
@@ -910,6 +996,7 @@ def collection_detail(request, pk: int):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def collection_receipt(request, pk: int):
     """Загрузить чек оплаты сбора (base64)."""
@@ -954,6 +1041,7 @@ def collection_receipt(request, pk: int):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def work_requests_create(request):
     from database.models import WorkRequestStatus
@@ -997,6 +1085,7 @@ def work_requests_create(request):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def work_request_add_photo(request, pk: int):
     """Добавить фото к черновику заявки (base64 JSON — проще для KMP)."""
@@ -1035,6 +1124,7 @@ def work_request_add_photo(request, pk: int):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def work_request_submit(request, pk: int):
     """Черновик → pending + автоподбор (как «готово» в боте)."""
@@ -1166,7 +1256,66 @@ def work_request_confirm_amount(request, pk: int):
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     reply = _apply_client_confirmation(wr, Decimal(money), pending)
     wr.refresh_from_db()
-    return json_response({"ok": True, "message": reply, "status": wr.status})
+    from services.work_request_rating import work_request_needs_rating
+
+    return json_response(
+        {
+            "ok": True,
+            "message": reply,
+            "status": wr.status,
+            "needs_rating": work_request_needs_rating(wr),
+        }
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_rate(request, pk: int):
+    """Клиент оценивает исполнителя (1–5) после выполнения заявки."""
+    from services.work_request_rating import submit_work_request_rating
+
+    user = request.bot_user
+    wr = (
+        WorkRequest.objects.select_related("assigned_contractor", "assigned_contractor__user")
+        .filter(pk=pk, user=user)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+
+    data = parse_json(request)
+    raw_score = data.get("score")
+    comment = str(data.get("comment") or "")
+    try:
+        rating = submit_work_request_rating(
+            user,
+            wr,
+            score=raw_score,
+            comment=comment,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        status = {
+            "forbidden": 403,
+            "already_rated": 409,
+            "not_ready_for_rating": 400,
+            "no_executor": 400,
+            "score_out_of_range": 400,
+            "score_invalid": 400,
+        }.get(code, 400)
+        return json_response({"error": code, "detail": code}, status=status)
+
+    return json_response(
+        {
+            "ok": True,
+            "score": rating.score,
+            "comment": rating.comment or "",
+            "message": (
+                f"Спасибо! Сохранили оценку {rating.score}/5"
+                + (" и комментарий." if rating.comment else ".")
+            ),
+        }
+    )
 
 
 @api_login_required

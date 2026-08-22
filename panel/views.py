@@ -346,6 +346,24 @@ def user_profile_verify(request: HttpRequest, user_id: int) -> HttpResponse:
     bot_user.real_name = request.POST.get("real_name", bot_user.real_name).strip()
     bot_user.phone = request.POST.get("phone", bot_user.phone).strip()
     bot_user.address = request.POST.get("address", bot_user.address).strip()
+    gender_raw = (request.POST.get("gender") or "").strip().lower()
+    if gender_raw in {"male", "female", "other", ""}:
+        bot_user.gender = gender_raw
+    birth_raw = (request.POST.get("birth_date") or "").strip()
+    if birth_raw:
+        from datetime import datetime as _dt
+
+        parsed = None
+        for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+            try:
+                parsed = _dt.strptime(birth_raw, fmt).date()
+                break
+            except ValueError:
+                continue
+        if parsed:
+            bot_user.birth_date = parsed
+    elif "birth_date" in request.POST and not birth_raw:
+        bot_user.birth_date = None
     bot_user.profile_admin_note = note
 
     if action == "save":

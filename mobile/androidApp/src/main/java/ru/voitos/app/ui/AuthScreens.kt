@@ -3,19 +3,25 @@ package ru.voitos.app.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,13 +34,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.voitos.app.AppVersion
+import ru.voitos.app.R
 import ru.voitos.app.api.VoitosApiClient
+import ru.voitos.app.model.ApiException
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.WishGroupOption
 import ru.voitos.app.model.WishItem
@@ -54,7 +66,22 @@ data class LoginSuccess(
     val phone: String,
     val needsPinSetup: Boolean,
     val hasPin: Boolean,
+    val needsOnboarding: Boolean = false,
+    /** Подписка закончилась — после входа ведём на загрузку чека. */
+    val needsPayment: Boolean = false,
 )
+
+/** ДД.ММ.ГГГГ → YYYY-MM-DD или null. */
+private fun birthDateToIso(raw: String): String? {
+    val parts = raw.trim().split(".")
+    if (parts.size != 3) return null
+    val d = parts[0].toIntOrNull() ?: return null
+    val m = parts[1].toIntOrNull() ?: return null
+    val y = parts[2].toIntOrNull() ?: return null
+    if (parts[2].length != 4) return null
+    if (d !in 1..31 || m !in 1..12 || y !in 1900..2100) return null
+    return "%04d-%02d-%02d".format(y, m, d)
+}
 
 @Composable
 fun LoginScreen(
@@ -85,6 +112,15 @@ fun LoginScreen(
     var pin by remember { mutableStateOf("") }
     var step by remember { mutableStateOf(0) } // 0 phone, 1 code from Max
     var showPin by remember { mutableStateOf(preferPinLogin && initialPhone.isNotBlank()) }
+    var showRegister by remember { mutableStateOf(false) }
+    var regStep by remember { mutableStateOf(0) } // 0 form, 1 max code
+    var realName by remember { mutableStateOf("") }
+    var gender by remember { mutableStateOf("") } // male | female | other
+    var birthDate by remember { mutableStateOf("") } // DD.MM.YYYY
+    var address by remember { mutableStateOf("") }
+    var locality by remember { mutableStateOf("") }
+    var maxBotUrl by remember { mutableStateOf("https://max.ru/se13602985_1_bot") }
+    var canRegister by remember { mutableStateOf(false) }
     var debugHint by remember { mutableStateOf<String?>(null) }
     var serverStatus by remember {
         mutableStateOf(
@@ -92,14 +128,20 @@ fun LoginScreen(
         )
     }
     var regHint by remember {
-        mutableStateOf("Регистрация — в боте Max: укажите телефон, мы привяжем Max ID.")
+        mutableStateOf(
+            "Если номера нет — «Регистрация»: ФИО, пол, дата рождения, затем код из бота Max.",
+        )
     }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var scanning by remember { mutableStateOf(false) }
+    var showManualHost by remember { mutableStateOf(false) }
+    var manualHost by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl)
+    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl).also {
+        it.appVersionCode = AppVersion.code
+    }
 
     fun persistDebug(debugCode: String = "") {
         onDebugPrefs(baseUrl, phone.trim(), debugCode)
@@ -124,12 +166,24 @@ fun LoginScreen(
     fun applyFound(hit: ru.voitos.app.LanServerDiscovery.Found) {
         baseUrl = hit.baseUrl
         serverReady = true
+        showManualHost = false
         persistDebug()
         onSaveServer(hit.baseUrl)
-        serverStatus = "Подключено к серверу в Wi‑Fi"
+        serverStatus = "Подключено: ${hit.host}:${hit.port}"
     }
 
     fun finish(session: AuthSession) {
+        val needsUpdate = session.updateRequired ||
+            (session.minAppVersionCode > 0 && AppVersion.code < session.minAppVersionCode)
+        if (needsUpdate) {
+            applyVersionGate(
+                minCode = session.minAppVersionCode,
+                message = session.updateMessage,
+                apkUrl = session.apkUrl,
+                latestName = session.latestAppVersionName,
+            )
+            return
+        }
         val p = session.phone.ifBlank { phone.trim() }
         onLoggedIn(
             LoginSuccess(
@@ -139,8 +193,50 @@ fun LoginScreen(
                 phone = p,
                 needsPinSetup = session.needsPinSetup,
                 hasPin = session.hasPin || !session.needsPinSetup,
+                needsOnboarding = session.needsOnboarding,
+                needsPayment = session.needsPayment || session.access?.state == "blocked",
             ),
         )
+    }
+
+    fun tryManualHost() {
+        scope.launch {
+            val host = manualHost.trim().substringBefore(':').trim()
+            if (host.isBlank()) {
+                error = "Укажите IP компьютера с бэкендом (например 192.168.1.10)"
+                return@launch
+            }
+            loading = true
+            error = null
+            serverStatus = "Подключаемся к $host…"
+            try {
+                val hit = ru.voitos.app.LanServerDiscovery.findFirst(
+                    port = 18765,
+                    preferHosts = listOf(host),
+                    context = context,
+                )
+                if (hit != null) {
+                    applyFound(hit)
+                    val health = runCatching { client().healthCheck(AppVersion.code) }.getOrNull()
+                    if (health != null) {
+                        applyVersionGate(
+                            minCode = health.minAppVersionCode,
+                            message = health.updateMessage,
+                            apkUrl = health.apkUrl,
+                            latestName = health.latestAppVersionName,
+                        )
+                    }
+                } else {
+                    error = "Нет ответа на $host:18765. Проверьте, что бэкенд запущен и телефон в той же Wi‑Fi."
+                    serverStatus = "Сервер не найден"
+                }
+            } catch (e: Exception) {
+                error = friendlyNetworkError(e)
+                serverStatus = "Не удалось подключиться"
+            } finally {
+                loading = false
+            }
+        }
     }
 
     fun scanWifi(auto: Boolean = false) {
@@ -149,7 +245,12 @@ fun LoginScreen(
             serverReady = false
             updateRequired = false
             if (!auto) error = null
-            serverStatus = "Ищем сервер в Wi‑Fi…"
+            val net = ru.voitos.app.LanServerDiscovery.localNet(context)
+            serverStatus = if (net.phoneIp != null) {
+                "Ищем сервер в Wi‑Fi (ваш IP ${net.phoneIp})…"
+            } else {
+                "Ищем сервер в Wi‑Fi…"
+            }
             try {
                 val prefer = buildList {
                     add(baseUrl)
@@ -159,6 +260,7 @@ fun LoginScreen(
                 val hit = ru.voitos.app.LanServerDiscovery.findFirst(
                     port = 18765,
                     preferHosts = prefer,
+                    context = context,
                 )
                 if (hit != null) {
                     applyFound(hit)
@@ -177,12 +279,18 @@ fun LoginScreen(
                         }
                     }
                 } else {
-                    serverStatus = "Сервер в Wi‑Fi не найден"
+                    showManualHost = true
+                    serverStatus = if (net.phoneIp == null) {
+                        "Не удалось определить Wi‑Fi IP — укажите адрес сервера вручную"
+                    } else {
+                        "Сервер в Wi‑Fi не найден (подсеть ${net.prefix}.x)"
+                    }
                     if (!auto) {
-                        error = "Проверьте, что бэкенд запущен и телефон в той же сети Wi‑Fi."
+                        error = "Проверьте, что бэкенд запущен на порту 18765 и телефон в той же сети Wi‑Fi (не гостевая)."
                     }
                 }
             } catch (e: Exception) {
+                showManualHost = true
                 serverStatus = "Не удалось найти сервер"
                 if (!auto) error = friendlyNetworkError(e)
             } finally {
@@ -200,6 +308,7 @@ fun LoginScreen(
         runCatching {
             val cfg = client().authConfig()
             if (cfg.registrationHint.isNotBlank()) regHint = cfg.registrationHint
+            if (cfg.maxBotOpenUrl.isNotBlank()) maxBotUrl = cfg.maxBotOpenUrl
             applyVersionGate(
                 minCode = cfg.minAppVersionCode,
                 message = cfg.updateMessage,
@@ -216,8 +325,24 @@ fun LoginScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
+        if (updateRequired) {
+            ForceUpdateScreen(apkUrl = updateApkUrl)
+            return@Column
+        }
         Text("Voitos", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.secondary)
         Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
+        Text(
+            "Версия ${AppVersion.name} (${AppVersion.code})",
+            style = MaterialTheme.typography.bodySmall,
+            color = VoitosColors.Muted,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            "Если подписка закончилась — всё равно войдите и загрузите чек. " +
+                "Доступ откроется после проверки.",
+            style = MaterialTheme.typography.bodySmall,
+            color = VoitosColors.Muted,
+        )
         Spacer(modifier = Modifier.height(8.dp))
         VpnDebugBanner()
         Spacer(modifier = Modifier.height(12.dp))
@@ -247,41 +372,267 @@ fun LoginScreen(
                 Text("Повторить поиск", color = VoitosColors.Accent)
             }
         }
-
-        if (updateRequired) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                updateMessage.ifBlank {
-                    "Доступна новая версия приложения. Обновите Voitos, чтобы продолжить."
-                },
-                color = VoitosColors.Warn,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (latestVersionName.isNotBlank()) {
-                Text(
-                    "Актуальная версия: $latestVersionName (у вас ${AppVersion.name})",
-                    color = VoitosColors.Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            if (updateApkUrl.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateApkUrl)))
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = voitosPrimaryButtonColors(),
-                ) { Text("Скачать обновление") }
-            }
+        if (!serverReady && showManualHost) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "Вход недоступен до обновления приложения.",
+                "IP компьютера с бэкендом (порт 18765)",
                 color = VoitosColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )
+            OutlinedTextField(
+                value = manualHost,
+                onValueChange = { manualHost = it.filter { ch -> ch.isDigit() || ch == '.' }.take(15) },
+                label = { Text("Например 192.168.1.10") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = voitosOutlinedFieldColors(),
+            )
+            Button(
+                onClick = { tryManualHost() },
+                enabled = !loading && !scanning && manualHost.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosSecondaryButtonColors(),
+            ) { Text("Подключить по IP") }
+        }
+
+        if (showRegister) {
+            Text("Регистрация", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+            Spacer(modifier = Modifier.height(8.dp))
+            if (regStep == 0) {
+                OutlinedTextField(
+                    value = realName,
+                    onValueChange = { realName = it.take(120) },
+                    label = { Text("ФИО") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = voitosOutlinedFieldColors(),
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = {
+                        phone = it.filter { ch -> ch.isDigit() }.take(11)
+                        persistDebug()
+                    },
+                    label = { Text("Телефон") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = voitosOutlinedFieldColors(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Пол", color = VoitosColors.Muted, style = MaterialTheme.typography.bodySmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(
+                        "male" to "Мужской",
+                        "female" to "Женский",
+                        "other" to "Другой",
+                    ).forEach { (value, label) ->
+                        val selected = gender == value
+                        OutlinedButton(
+                            onClick = { gender = value },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (selected) {
+                                    VoitosColors.BgSoft
+                                } else {
+                                    Color.Transparent
+                                },
+                                contentColor = VoitosColors.Text,
+                            ),
+                            border = BorderStroke(
+                                width = if (selected) 2.dp else 1.dp,
+                                color = if (selected) VoitosColors.Accent2 else Color(0xFF3A4656),
+                            ),
+                        ) {
+                            Text(
+                                label,
+                                color = VoitosColors.Text,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = VoitosColors.Text,
+                                ),
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = birthDate,
+                    onValueChange = { raw ->
+                        birthDate = raw.filter { it.isDigit() || it == '.' }.take(10)
+                    },
+                    label = { Text("Дата рождения (ДД.ММ.ГГГГ)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = voitosOutlinedFieldColors(),
+                )
+                OutlinedTextField(
+                    value = locality,
+                    onValueChange = { locality = it.take(120) },
+                    label = { Text("Населённый пункт") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = voitosOutlinedFieldColors(),
+                )
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it.take(500) },
+                    label = { Text("Адрес (улица, дом, квартира)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    colors = voitosOutlinedFieldColors(),
+                )
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = VoitosColors.Danger)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        color = VoitosColors.Accent,
+                    )
+                } else {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                if (!serverReady) {
+                                    error = "Дождитесь поиска сервера в Wi‑Fi"
+                                    return@launch
+                                }
+                                val iso = birthDateToIso(birthDate)
+                                if (iso == null) {
+                                    error = "Укажите дату рождения в формате ДД.ММ.ГГГГ"
+                                    return@launch
+                                }
+                                if (realName.trim().length < 2) {
+                                    error = "Укажите ФИО"
+                                    return@launch
+                                }
+                                if (gender.isBlank()) {
+                                    error = "Укажите пол"
+                                    return@launch
+                                }
+                                if (locality.trim().length < 2) {
+                                    error = "Укажите населённый пункт"
+                                    return@launch
+                                }
+                                if (address.trim().length < 3) {
+                                    error = "Укажите адрес"
+                                    return@launch
+                                }
+                                loading = true
+                                error = null
+                                try {
+                                    persistDebug()
+                                    onSaveServer(baseUrl)
+                                    val resp = client().registerStart(
+                                        phone = phone,
+                                        realName = realName.trim(),
+                                        gender = gender,
+                                        birthDate = iso,
+                                        address = address.trim(),
+                                        locality = locality.trim(),
+                                    )
+                                    if (resp.maxBotOpenUrl.isNotBlank()) {
+                                        maxBotUrl = resp.maxBotOpenUrl
+                                    }
+                                    debugHint = resp.message.ifBlank {
+                                        "Нажмите «Перейти в Max» — бот пришлёт код. Если кода нет, напишите в боте «код»."
+                                    }
+                                    code = ""
+                                    regStep = 1
+                                } catch (e: Exception) {
+                                    error = e.message?.takeIf { it.isNotBlank() }
+                                        ?: friendlyNetworkError(e)
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        },
+                        enabled = serverReady && !scanning,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = voitosPrimaryButtonColors(),
+                    ) { Text("Продолжить") }
+                    TextButton(
+                        onClick = {
+                            showRegister = false
+                            regStep = 0
+                            error = null
+                            debugHint = null
+                        },
+                    ) {
+                        Text("Назад ко входу", color = VoitosColors.Muted)
+                    }
+                }
+            } else {
+                Text(
+                    debugHint
+                        ?: "Нажмите «Перейти в Max» — бот пришлёт код. Если кода нет, напишите в боте «код» и введите его ниже.",
+                    color = VoitosColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                val botUrl = maxBotUrl.ifBlank { "https://max.ru/se13602985_1_bot" }
+                Button(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(botUrl)))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosSecondaryButtonColors(),
+                ) { Text("Перейти в Max") }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it.filter { ch -> ch.isDigit() }.take(4) },
+                    label = { Text("Код из бота Max") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    colors = voitosOutlinedFieldColors(),
+                )
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = VoitosColors.Danger)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        color = VoitosColors.Accent,
+                    )
+                } else {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                loading = true
+                                error = null
+                                try {
+                                    persistDebug(code)
+                                    onSaveServer(baseUrl)
+                                    finish(client().registerConfirm(phone, code))
+                                } catch (e: Exception) {
+                                    error = e.message?.takeIf { it.isNotBlank() }
+                                        ?: friendlyNetworkError(e, fallback = "Неверный код")
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        },
+                        enabled = serverReady && code.length == 4,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = voitosPrimaryButtonColors(),
+                    ) { Text("Завершить регистрацию") }
+                    TextButton(onClick = { regStep = 0; code = ""; error = null }) {
+                        Text("Изменить анкету", color = VoitosColors.Accent)
+                    }
+                }
+            }
             return@Column
         }
 
@@ -291,6 +642,12 @@ fun LoginScreen(
 
         if (showPin) {
             Text("Быстрый вход по PIN", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+            Text(
+                "Даже если подписка закончилась — войдите и загрузите чек.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = phone,
                 onValueChange = {
@@ -331,6 +688,20 @@ fun LoginScreen(
                                 persistDebug()
                                 onSaveServer(baseUrl)
                                 finish(client().pinLogin(phone, pin))
+                            } catch (e: ApiException) {
+                                if (e.code == "update_required") {
+                                    val health = runCatching {
+                                        client().healthCheck(AppVersion.code)
+                                    }.getOrNull()
+                                    applyVersionGate(
+                                        minCode = health?.minAppVersionCode ?: (AppVersion.code + 1),
+                                        message = health?.updateMessage ?: e.message.orEmpty(),
+                                        apkUrl = health?.apkUrl.orEmpty(),
+                                        latestName = health?.latestAppVersionName.orEmpty(),
+                                    )
+                                } else {
+                                    error = friendlyNetworkError(e, fallback = "Неверный PIN")
+                                }
                             } catch (e: Exception) {
                                 error = friendlyNetworkError(e, fallback = "Неверный PIN")
                             } finally {
@@ -353,6 +724,7 @@ fun LoginScreen(
             value = phone,
             onValueChange = {
                 phone = it.filter { ch -> ch.isDigit() }.take(11)
+                canRegister = false
                 persistDebug()
             },
             label = { Text("Телефон") },
@@ -406,10 +778,15 @@ fun LoginScreen(
                             client().phoneLoginRequest(phone)
                             // Код только из бота Max — поле не заполняем автоматически.
                             debugHint = "Код отправлен в Max"
+                            canRegister = false
                             step = 1
+                        } catch (e: ApiException) {
+                            error = e.message
+                            canRegister = e.code == "not_registered"
                         } catch (e: Exception) {
                             error = e.message?.takeIf { it.isNotBlank() }
                                 ?: friendlyNetworkError(e)
+                            canRegister = false
                         } finally {
                             loading = false
                         }
@@ -419,6 +796,27 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosPrimaryButtonColors(),
             ) { Text("Войти") }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Подписка закончилась? Войдите как обычно — откроется загрузка чека.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (canRegister) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        showRegister = true
+                        regStep = 0
+                        error = null
+                        debugHint = null
+                        code = ""
+                    },
+                    enabled = serverReady,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosSecondaryButtonColors(),
+                ) { Text("Регистрация") }
+            }
             if (preferPinLogin && initialPhone.isNotBlank()) {
                 TextButton(onClick = { showPin = true }) {
                     Text("Войти по PIN", color = VoitosColors.Muted)
@@ -455,38 +853,41 @@ fun LoginScreen(
 
 @Composable
 fun ForceUpdateScreen(
-    message: String,
-    latestVersionName: String,
-    currentVersionName: String,
-    apkUrl: String,
+    apkUrl: String = "",
 ) {
     val context = LocalContext.current
+    BackHandler(enabled = true) { /* hard update — только обновить */ }
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Обновление", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            message.ifBlank {
-                "Доступна новая версия приложения. Обновите Voitos, чтобы продолжить."
-            },
-            color = VoitosColors.Warn,
-            style = MaterialTheme.typography.bodyMedium,
+        Image(
+            painter = painterResource(R.drawable.voitos_logo_mark),
+            contentDescription = "Voitos",
+            modifier = Modifier
+                .fillMaxWidth(0.55f)
+                .heightIn(max = 160.dp),
+            contentScale = ContentScale.Fit,
         )
-        if (latestVersionName.isNotBlank()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Актуальная: $latestVersionName · у вас: $currentVersionName",
-                color = VoitosColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
+        Spacer(modifier = Modifier.height(28.dp))
+        Text(
+            "Просим обновить приложение",
+            style = MaterialTheme.typography.headlineSmall,
+            color = VoitosColors.Text,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "Сейчас: ${AppVersion.name} (${AppVersion.code})",
+            style = MaterialTheme.typography.bodyMedium,
+            color = VoitosColors.Muted,
+            textAlign = TextAlign.Center,
+        )
         if (apkUrl.isNotBlank()) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             Button(
                 onClick = {
                     runCatching {
@@ -495,7 +896,7 @@ fun ForceUpdateScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosPrimaryButtonColors(),
-            ) { Text("Скачать обновление") }
+            ) { Text("Обновить") }
         }
     }
 }

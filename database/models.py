@@ -87,6 +87,12 @@ class ProfileStatus(models.TextChoices):
     REJECTED = "rejected", "Отклонена"
 
 
+class UserGender(models.TextChoices):
+    MALE = "male", "Мужской"
+    FEMALE = "female", "Женский"
+    OTHER = "other", "Другой"
+
+
 class ServiceCategory(models.TextChoices):
     SNOW = "snow", "Чистка снега"
     PLAYGROUND = "playground", "Детская площадка"
@@ -168,6 +174,7 @@ class AdminTaskKind(models.TextChoices):
     WORK_COMMISSION = "work_commission", "Комиссия исполнителя 10%"
     WISH_BALLOT = "wish_ballot", "Сбор по итогам голосования"
     FEEDBACK = "feedback", "Обратная связь / баг"
+    ROLE_PROPOSAL = "role_proposal", "Заявка на новую роль"
 
 
 class WorkRequestStatus(models.TextChoices):
@@ -233,23 +240,23 @@ class AppSettings(models.Model):
         "Ссылка на бота MAX (для приложения)",
         max_length=512,
         blank=True,
-        default="",
-        help_text="Например https://max.ru/voitos_bot — кнопка «Войти через Max».",
+        default="https://max.ru/se13602985_1_bot",
+        help_text="Например https://max.ru/se13602985_1_bot — кнопка «Перейти в Max».",
     )
     mobile_min_version_code = models.PositiveIntegerField(
         "Мин. versionCode приложения",
-        default=7,
+        default=24,
         help_text="Клиенты со меньшим versionCode увидят требование обновить приложение.",
     )
     mobile_latest_version_code = models.PositiveIntegerField(
         "Актуальный versionCode",
-        default=7,
+        default=24,
     )
     mobile_latest_version_name = models.CharField(
         "Актуальная versionName",
         max_length=64,
         blank=True,
-        default="0.2.3-kmp",
+        default="0.2.20-kmp",
     )
     mobile_apk_url = models.CharField(
         "Ссылка на APK для обновления",
@@ -417,6 +424,14 @@ class BotUser(models.Model):
     username = models.CharField("Username", max_length=255, blank=True, default="")
     real_name = models.CharField("Имя (анкета)", max_length=255, blank=True, default="")
     phone = models.CharField("Телефон", max_length=32, blank=True, default="")
+    gender = models.CharField(
+        "Пол",
+        max_length=16,
+        choices=UserGender.choices,
+        blank=True,
+        default="",
+    )
+    birth_date = models.DateField("Дата рождения", null=True, blank=True)
     pin_hash = models.CharField(
         "Хеш PIN приложения",
         max_length=128,
@@ -863,7 +878,9 @@ class GroupChatMessage(models.Model):
     )
     author = models.ForeignKey(
         BotUser,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="group_chat_messages",
         verbose_name="Автор",
     )
@@ -1466,6 +1483,62 @@ class ExecutorRole(models.Model):
         from services.executor_roles import flags_from_role
 
         return flags_from_role(self)
+
+
+class ExecutorRoleProposalStatus(models.TextChoices):
+    OPEN = "open", "На рассмотрении"
+    APPROVED = "approved", "Добавлена"
+    REJECTED = "rejected", "Отклонена"
+
+
+class ExecutorRoleProposal(models.Model):
+    """Житель просит добавить новую роль исполнителя в каталог."""
+
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="role_proposals",
+        verbose_name="Житель",
+    )
+    proposed_name = models.CharField("Предложенная роль", max_length=128)
+    status = models.CharField(
+        max_length=16,
+        choices=ExecutorRoleProposalStatus.choices,
+        default=ExecutorRoleProposalStatus.OPEN,
+        db_index=True,
+    )
+    admin_note = models.TextField("Комментарий администратора", blank=True, default="")
+    created_role = models.ForeignKey(
+        ExecutorRole,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="from_proposals",
+        verbose_name="Созданная роль",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_role_proposals",
+        verbose_name="Рассмотрел",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Заявка на роль исполнителя"
+        verbose_name_plural = "Заявки на роли исполнителей"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Роль «{self.proposed_name}» #{self.pk} ({self.get_status_display()})"
 
 
 class WorkRequest(models.Model):

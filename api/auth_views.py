@@ -9,22 +9,44 @@ from django.conf import settings
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from api.http import api_login_required, api_public, json_response, parse_json
+from api.http import api_login_required, api_public, client_version_code, json_response, parse_json, update_required_response
 from api.models import MobileAuthToken, PhoneOtpChallenge, PinChallengeKind
 from database.models import BotUser
 from services import mobile_auth
+from services.app_version import client_needs_update
 from subscriptions.receipts import normalize_phone
 
 
 def _error(code: str, status: int = 400, detail: str | None = None):
+    if status == 400 and code == "user_deactivated":
+        status = 403
     text = detail or {
         "not_registered": (
-            "Номер не найден. Пройдите регистрацию в боте Max "
-            "(укажите этот телефон) — после этого вход в приложение станет доступен."
+            "Номер не найден. Нажмите «Регистрация», заполните анкету "
+            "и подтвердите код из бота Voitos в Max."
         ),
+        "already_registered": "Этот номер уже зарегистрирован — нажмите «Войти».",
         "invalid_phone": "Укажите корректный номер телефона",
         "invalid_code": "Неверный или просроченный код",
         "max_required": "Сначала привяжите аккаунт в боте Max",
+        "name_required": "Укажите ФИО",
+        "gender_invalid": "Укажите пол",
+        "birth_date_required": "Укажите дату рождения",
+        "birth_date_invalid": "Проверьте дату рождения",
+        "address_required": "Укажите адрес",
+        "locality_required": "Укажите населённый пункт",
+        "draft_not_found": (
+            "Заявка на регистрацию не найдена или устарела. "
+            "Заполните анкету ещё раз."
+        ),
+        "max_phone_bound": (
+            "К этому аккаунту Max уже привязан другой номер телефона. "
+            "Войдите под ним или используйте другой Max."
+        ),
+        "user_deactivated": (
+            "Аккаунт отключён администратором. "
+            "Обратитесь в поддержку — вход недоступен."
+        ),
     }.get(code, code)
     return json_response({"error": code, "detail": text}, status=status)
 
@@ -114,6 +136,9 @@ def phone_login_request(request):
 def phone_login_verify(request):
     """Проверка кода из Max по телефону → access_token."""
     data = parse_json(request)
+    ver = client_version_code(request, data)
+    if ver is not None and client_needs_update(ver):
+        return update_required_response(ver)
     try:
         body = mobile_auth.verify_challenge(
             phone=str(data.get("phone") or ""),
@@ -123,7 +148,47 @@ def phone_login_verify(request):
         )
     except ValueError as exc:
         return _error(str(exc))
+    return json_response(mobile_auth.apply_client_version_gate(body, ver))
+
+
+@api_public
+@require_http_methods(["POST"])
+def register_start(request):
+    """Анкета регистрации из приложения (до кода из Max)."""
+    data = parse_json(request)
+    try:
+        body = mobile_auth.start_app_registration(
+            phone=str(data.get("phone") or ""),
+            real_name=str(data.get("real_name") or data.get("name") or ""),
+            gender=str(data.get("gender") or ""),
+            birth_date=data.get("birth_date") or data.get("birthDate") or "",
+            address=str(data.get("address") or ""),
+            locality=str(data.get("locality") or ""),
+        )
+    except ValueError as exc:
+        code = str(exc)
+        status = 409 if code == "already_registered" else 400
+        return _error(code, status=status)
     return json_response(body)
+
+
+@api_public
+@require_http_methods(["POST"])
+def register_confirm(request):
+    """Код из бота Max → завершение регистрации и access_token."""
+    data = parse_json(request)
+    ver = client_version_code(request, data)
+    if ver is not None and client_needs_update(ver):
+        return update_required_response(ver)
+    try:
+        body = mobile_auth.confirm_app_registration(
+            phone=str(data.get("phone") or ""),
+            code=str(data.get("code") or ""),
+            device_name=str(data.get("device_name") or ""),
+        )
+    except ValueError as exc:
+        return _error(str(exc))
+    return json_response(mobile_auth.apply_client_version_gate(body, ver))
 
 
 @api_public
@@ -136,11 +201,15 @@ def auth_config(request):
         "max_bot_open_url": mobile_auth.max_bot_open_url(),
         "app_deep_link": mobile_auth.app_deep_link(),
         "registration_hint": (
-            "Регистрация только в боте Max: укажите телефон — "
-            "мы привяжем его к вашему Max ID."
+            "Если номера нет — «Регистрация»: ФИО, адрес, пол, дата рождения, "
+            "затем код из бота Voitos в Max."
         ),
     }
     body.update(mobile_version_payload())
+    ver = client_version_code(request)
+    if ver is not None:
+        body["client_version_code"] = ver
+        body["update_required"] = client_needs_update(ver)
     return json_response(body)
 
 
@@ -168,6 +237,9 @@ def max_start(request):
 @require_http_methods(["POST"])
 def max_verify(request):
     data = parse_json(request)
+    ver = client_version_code(request, data)
+    if ver is not None and client_needs_update(ver):
+        return update_required_response(ver)
     try:
         body = mobile_auth.verify_challenge(
             phone=str(data.get("phone") or ""),
@@ -177,7 +249,7 @@ def max_verify(request):
         )
     except ValueError as exc:
         return _error(str(exc))
-    return json_response(body)
+    return json_response(mobile_auth.apply_client_version_gate(body, ver))
 
 
 @api_login_required
@@ -195,6 +267,10 @@ def pin_set(request):
 @require_http_methods(["POST"])
 def pin_login(request):
     data = parse_json(request)
+    ver = client_version_code(request, data)
+    # Жёсткий отказ: старый клиент не получит токен и не пройдёт по PIN в приложение.
+    if ver is not None and client_needs_update(ver):
+        return update_required_response(ver)
     try:
         body = mobile_auth.pin_login(
             phone=str(data.get("phone") or ""),
@@ -204,8 +280,10 @@ def pin_login(request):
     except ValueError as exc:
         code = str(exc)
         status = 423 if code == "pin_locked" else 400
+        if code == "user_deactivated":
+            status = 403
         return _error(code, status=status)
-    return json_response(body)
+    return json_response(mobile_auth.apply_client_version_gate(body, ver))
 
 
 @api_public

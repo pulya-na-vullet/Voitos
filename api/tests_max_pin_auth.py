@@ -52,6 +52,7 @@ class MaxPinAuthTests(TestCase):
         )
         self.assertEqual(verify.status_code, 200)
         self.assertTrue(verify.json()["access_token"])
+        self.assertTrue(verify.json().get("needs_onboarding", True))
 
     def test_max_start_and_verify_then_set_pin(self):
         start = self.client.post(
@@ -146,3 +147,172 @@ class MaxPinAuthTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 403)
+
+    def test_app_registration_with_max_code(self):
+        phone = "89625506666"
+        start = self.client.post(
+            "/api/v1/auth/register/start",
+            data=json.dumps(
+                {
+                    "phone": phone,
+                    "real_name": "Иван Иванов",
+                    "gender": "male",
+                    "birth_date": "15.05.1990",
+                    "address": "ул. Ленина, 1",
+                    "locality": "Куюки",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(start.status_code, 200)
+        body = start.json()
+        self.assertTrue(body["ok"])
+        self.assertIn("?start=appreg-", body["max_bot_open_url"])
+
+        max_user = BotUser.objects.create(
+            max_user_id="max_reg_new",
+            chat_id="chat_reg",
+            display_name="MaxReg",
+        )
+        draft_id = int(body["max_bot_open_url"].rsplit("-", 1)[-1])
+        auto = mobile_auth.bot_handle_app_register_start_payload(
+            max_user, f"appreg-{draft_id}"
+        )
+        self.assertIsNotNone(auto)
+        self.assertIn("Код для завершения регистрации", auto)
+        code = auto.split(":")[1].split()[0].strip()
+        self.assertEqual(len(code), 4)
+
+        confirm = self.client.post(
+            "/api/v1/auth/register/confirm",
+            data=json.dumps({"phone": phone, "code": code}),
+            content_type="application/json",
+        )
+        self.assertEqual(confirm.status_code, 200)
+        data = confirm.json()
+        self.assertTrue(data["access_token"])
+        self.assertTrue(data["needs_pin_setup"])
+
+        max_user.refresh_from_db()
+        self.assertEqual(max_user.phone, phone)
+        self.assertEqual(max_user.real_name, "Иван Иванов")
+        self.assertEqual(max_user.gender, "male")
+        self.assertEqual(str(max_user.birth_date), "1990-05-15")
+        self.assertEqual(max_user.address, "ул. Ленина, 1")
+        self.assertEqual(max_user.locality, "Куюки")
+        self.assertEqual(max_user.profile_status, ProfileStatus.PENDING_REVIEW)
+
+    def test_register_start_rejects_existing_max_user(self):
+        resp = self.client.post(
+            "/api/v1/auth/register/start",
+            data=json.dumps(
+                {
+                    "phone": "89625507832",
+                    "real_name": "Уже Есть",
+                    "gender": "female",
+                    "birth_date": "1991-01-01",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["error"], "already_registered")
+
+    def test_plain_kod_triggers_register_flow(self):
+        self.assertTrue(mobile_auth.looks_like_app_register("код"))
+        self.assertTrue(mobile_auth.looks_like_app_register("Код"))
+        phone = "89625505555"
+        mobile_auth.start_app_registration(
+            phone=phone,
+            real_name="Петр",
+            gender="male",
+            birth_date="1992-02-02",
+            address="д. 5",
+            locality="Куюки",
+        )
+        user = BotUser.objects.create(max_user_id="max_kod", chat_id="c")
+        reply = mobile_auth.bot_start_app_register(user)
+        self.assertIn("телефон", reply.lower())
+        reply2 = mobile_auth.bot_issue_register_code(user, phone=phone)
+        self.assertIn("Код для завершения регистрации", reply2)
+
+    def test_register_refuses_when_max_already_has_other_phone(self):
+        """Нельзя перепривязать занятый Max к новому телефону (семья/данные)."""
+        owner = BotUser.objects.create(
+            max_user_id="max_owner_832",
+            phone="89625507832",
+            chat_id="chat_owner",
+            real_name="Хозяин",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+        phone_new = "89625507833"
+        mobile_auth.start_app_registration(
+            phone=phone_new,
+            real_name="Новый",
+            gender="male",
+            birth_date="1995-03-03",
+            address="ул. Новая, 2",
+            locality="Куюки",
+        )
+        reply = mobile_auth.bot_issue_register_code(owner, phone=phone_new)
+        self.assertIn("уже привязан", reply.lower())
+        self.assertNotIn("Код для завершения регистрации", reply)
+        owner.refresh_from_db()
+        self.assertEqual(owner.phone, "89625507832")
+        self.assertEqual(owner.real_name, "Хозяин")
+
+    def test_expired_subscription_still_logs_in_with_needs_payment(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        self.user.subscription_until = timezone.now() - timedelta(days=40)
+        self.user.grace_until = timezone.now() - timedelta(days=10)
+        self.user.is_active = True
+        self.user.save(update_fields=["subscription_until", "grace_until", "is_active"])
+        self.user.ensure_grace_period()
+        self.assertEqual(self.user.access_state(), "blocked")
+
+        req = self.client.post(
+            "/api/v1/auth/phone/login-request",
+            data=json.dumps({"phone": "89625507832"}),
+            content_type="application/json",
+        )
+        self.assertEqual(req.status_code, 200)
+        code = req.json()["debug_code"]
+        verify = self.client.post(
+            "/api/v1/auth/phone/login-verify",
+            data=json.dumps({"phone": "89625507832", "code": code}),
+            content_type="application/json",
+        )
+        self.assertEqual(verify.status_code, 200)
+        body = verify.json()
+        self.assertTrue(body["access_token"])
+        self.assertTrue(body["needs_payment"])
+        self.assertEqual(body["access"]["state"], "blocked")
+
+        access = self.client.get(
+            "/api/v1/me/access",
+            HTTP_AUTHORIZATION=f"Bearer {body['access_token']}",
+        )
+        self.assertEqual(access.status_code, 200)
+        self.assertTrue(access.json()["needs_payment"])
+
+    def test_deactivated_user_cannot_login(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        req = self.client.post(
+            "/api/v1/auth/phone/login-request",
+            data=json.dumps({"phone": "89625507832"}),
+            content_type="application/json",
+        )
+        self.assertEqual(req.status_code, 200)
+        code = req.json()["debug_code"]
+        verify = self.client.post(
+            "/api/v1/auth/phone/login-verify",
+            data=json.dumps({"phone": "89625507832", "code": code}),
+            content_type="application/json",
+        )
+        self.assertEqual(verify.status_code, 403)
+        self.assertEqual(verify.json()["error"], "user_deactivated")
+

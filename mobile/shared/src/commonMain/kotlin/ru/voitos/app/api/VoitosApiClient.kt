@@ -2,6 +2,7 @@ package ru.voitos.app.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
@@ -10,6 +11,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.request
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
@@ -18,7 +20,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import ru.voitos.app.VoitosApi
+import ru.voitos.app.model.AccessInfo
 import ru.voitos.app.model.ApiErrorBody
+import ru.voitos.app.model.ApiException
 import ru.voitos.app.model.AuthConfig
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.AvatarUploadResult
@@ -41,6 +45,8 @@ import ru.voitos.app.model.OkResponse
 import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.PhotoUploadResult
 import ru.voitos.app.model.ReceiptList
+import ru.voitos.app.model.ConfirmAmountResult
+import ru.voitos.app.model.RateWorkRequestResult
 import ru.voitos.app.model.ReceiptUploadResult
 import ru.voitos.app.model.ServiceGroupList
 import ru.voitos.app.model.SubscriptionInfo
@@ -59,8 +65,65 @@ import ru.voitos.app.model.WorkRequestSubmitResult
 class VoitosApiClient(
     private val baseUrl: String = VoitosApi.DEFAULT_BASE_URL,
 ) {
+    /**
+     * Bearer-токен сессии. При сбросе/новой выдаче снимаем флаг «уже уведомили о 401»,
+     * чтобы после повторного входа снова можно было разлогинить.
+     */
     var accessToken: String? = null
-    private val http: HttpClient = defaultClient()
+        set(value) {
+            field = value
+            if (!value.isNullOrBlank()) {
+                unauthorizedNotified = false
+            }
+        }
+
+    /** versionCode установленного APK — уходит в X-Voitos-App-Version и login body. */
+    var appVersionCode: Int? = null
+
+    /**
+     * Вызывается один раз при 401 на запросе с токеном (пользователь удалён/деактивирован,
+     * токен отозван). UI должен очистить сессию и показать Login.
+     */
+    var onUnauthorized: (() -> Unit)? = null
+
+    private var unauthorizedNotified: Boolean = false
+
+    private val http: HttpClient = HttpClient {
+        install(HttpTimeout) {
+            requestTimeoutMillis = 20_000
+            connectTimeoutMillis = 10_000
+            socketTimeoutMillis = 20_000
+        }
+        install(ContentNegotiation) {
+            json(
+                Json {
+                    ignoreUnknownKeys = true
+                    isLenient = true
+                },
+            )
+        }
+        HttpResponseValidator {
+            validateResponse { response ->
+                if (response.status.value != 401) return@validateResponse
+                val headers = response.request.headers
+                val hadAuth = !headers["Authorization"].isNullOrBlank() ||
+                    !headers["X-Voitos-Token"].isNullOrBlank()
+                if (!hadAuth) return@validateResponse
+                handleUnauthorized()
+                throw ApiException(
+                    "unauthorized",
+                    "Сессия больше недействительна. Войдите снова.",
+                )
+            }
+        }
+    }
+
+    private fun handleUnauthorized() {
+        accessToken = null
+        if (unauthorizedNotified) return
+        unauthorizedNotified = true
+        onUnauthorized?.invoke()
+    }
 
     suspend fun health(): Boolean {
         val body: HealthResponse = http.get("$baseUrl/health").body()
@@ -68,8 +131,11 @@ class VoitosApiClient(
     }
 
     suspend fun healthCheck(clientVersionCode: Int? = null): HealthResponse {
-        val q = if (clientVersionCode != null) "?version_code=$clientVersionCode" else ""
-        return http.get("$baseUrl/health$q").body()
+        val code = clientVersionCode ?: appVersionCode
+        val q = if (code != null) "?version_code=$code" else ""
+        return http.get("$baseUrl/health$q") {
+            applyAppVersionHeader()
+        }.body()
     }
 
     suspend fun phoneStart(phone: String): Map<String, String?> =
@@ -92,7 +158,13 @@ class VoitosApiClient(
         return session
     }
 
-    suspend fun authConfig(): AuthConfig = http.get("$baseUrl/auth/config").body()
+    suspend fun authConfig(): AuthConfig {
+        val code = appVersionCode
+        val q = if (code != null) "?version_code=$code" else ""
+        return http.get("$baseUrl/auth/config$q") {
+            applyAppVersionHeader()
+        }.body()
+    }
 
     suspend fun phoneLoginRequest(phone: String): OkResponse {
         val response: HttpResponse = http.post("$baseUrl/auth/phone/login-request") {
@@ -101,16 +173,79 @@ class VoitosApiClient(
         }
         if (!response.status.isSuccess()) {
             val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            val code = err?.error?.ifBlank { null } ?: "error"
             val msg = err?.detail?.ifBlank { null }
                 ?: err?.error?.ifBlank { null }
                 ?: "Не удалось запросить код (HTTP ${response.status.value})"
-            throw IllegalStateException(msg)
+            throw ApiException(code, msg)
         }
         return response.body()
     }
 
     suspend fun phoneLoginVerify(phone: String, code: String): AuthSession {
         val response: HttpResponse = http.post("$baseUrl/auth/phone/login-verify") {
+            applyAppVersionHeader()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("phone", phone)
+                    put("code", code)
+                    appVersionCode?.let { put("version_code", it) }
+                },
+            )
+        }
+        if (response.status.value == 426) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                "update_required",
+                err?.detail?.ifBlank { null } ?: "Просим обновить приложение",
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "invalid_code",
+                err?.detail?.ifBlank { null } ?: err?.error ?: "Неверный код",
+            )
+        }
+        val session: AuthSession = response.body()
+        accessToken = session.accessToken
+        return session
+    }
+
+    suspend fun registerStart(
+        phone: String,
+        realName: String,
+        gender: String,
+        birthDate: String,
+        address: String,
+        locality: String,
+    ): OkResponse {
+        val response: HttpResponse = http.post("$baseUrl/auth/register/start") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("phone", phone)
+                    put("real_name", realName)
+                    put("gender", gender)
+                    put("birth_date", birthDate)
+                    put("address", address)
+                    put("locality", locality)
+                },
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "error",
+                err?.detail?.ifBlank { null } ?: err?.error ?: "Не удалось начать регистрацию",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun registerConfirm(phone: String, code: String): AuthSession {
+        val response: HttpResponse = http.post("$baseUrl/auth/register/confirm") {
             contentType(ContentType.Application.Json)
             setBody(
                 buildJsonObject {
@@ -121,7 +256,8 @@ class VoitosApiClient(
         }
         if (!response.status.isSuccess()) {
             val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
-            throw IllegalStateException(
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "invalid_code",
                 err?.detail?.ifBlank { null } ?: err?.error ?: "Неверный код",
             )
         }
@@ -145,15 +281,32 @@ class VoitosApiClient(
     }
 
     suspend fun pinLogin(phone: String, pin: String): AuthSession {
-        val session: AuthSession = http.post("$baseUrl/auth/pin/login") {
+        val response: HttpResponse = http.post("$baseUrl/auth/pin/login") {
+            applyAppVersionHeader()
             contentType(ContentType.Application.Json)
             setBody(
                 buildJsonObject {
                     put("phone", phone)
                     put("pin", pin)
+                    appVersionCode?.let { put("version_code", it) }
                 },
             )
-        }.body()
+        }
+        if (response.status.value == 426) {
+            val err = runCatching { response.body<HealthResponse>() }.getOrNull()
+            throw ApiException(
+                "update_required",
+                err?.updateMessage?.ifBlank { null } ?: "Просим обновить приложение",
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "invalid_pin",
+                err?.detail?.ifBlank { null } ?: err?.error ?: "Неверный PIN",
+            )
+        }
+        val session: AuthSession = response.body()
         accessToken = session.accessToken
         return session
     }
@@ -328,6 +481,8 @@ class VoitosApiClient(
             )
         }.body()
 
+    suspend fun access(): AccessInfo = authedGet("/me/access")
+
     suspend fun subscription(): SubscriptionInfo = authedGet("/me/subscription")
 
     suspend fun receipts(): ReceiptList = authedGet("/me/receipts")
@@ -463,6 +618,24 @@ class VoitosApiClient(
             )
         }.body()
 
+    suspend fun proposeExecutorRole(name: String): OkResponse {
+        val response: HttpResponse = http.post("$baseUrl/executor/role-proposals") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("name", name) })
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "error",
+                err?.detail?.ifBlank { null }
+                    ?: err?.error
+                    ?: "Не удалось отправить заявку (HTTP ${response.status.value})",
+            )
+        }
+        return OkResponse(ok = true)
+    }
+
     suspend fun executorOffers(): ExecutorOfferList {
         val response: HttpResponse = http.get("$baseUrl/executor/offers") { applyAuth() }
         if (response.status.value == 404) {
@@ -523,7 +696,11 @@ class VoitosApiClient(
             setBody(buildJsonObject {})
         }.body()
 
-    suspend fun confirmAmount(workRequestId: Int, confirmed: Boolean, amount: Double? = null) {
+    suspend fun confirmAmount(
+        workRequestId: Int,
+        confirmed: Boolean,
+        amount: Double? = null,
+    ): ConfirmAmountResult =
         http.post("$baseUrl/work-requests/$workRequestId/confirm-amount") {
             applyAuth()
             contentType(ContentType.Application.Json)
@@ -533,8 +710,23 @@ class VoitosApiClient(
                     if (amount != null) put("amount", amount)
                 },
             )
-        }
-    }
+        }.body()
+
+    suspend fun rateWorkRequest(
+        workRequestId: Int,
+        score: Int,
+        comment: String = "",
+    ): RateWorkRequestResult =
+        http.post("$baseUrl/work-requests/$workRequestId/rate") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("score", score)
+                    if (comment.isNotBlank()) put("comment", comment)
+                },
+            )
+        }.body()
 
     /** Register FCM/APNs token for the current session. */
     suspend fun registerDevice(pushToken: String, platform: String = "android") {
@@ -559,6 +751,11 @@ class VoitosApiClient(
             bearerAuth(token)
             header("X-Voitos-Token", token)
         }
+        applyAppVersionHeader()
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.applyAppVersionHeader() {
+        appVersionCode?.let { header("X-Voitos-App-Version", it.toString()) }
     }
 
     companion object {
@@ -579,3 +776,4 @@ class VoitosApiClient(
         }
     }
 }
+

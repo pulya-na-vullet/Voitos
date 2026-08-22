@@ -24,6 +24,17 @@ data class AuthSession(
     @SerialName("needs_pin_setup") val needsPinSetup: Boolean = false,
     @SerialName("has_pin") val hasPin: Boolean = false,
     val phone: String = "",
+    /** Бэкенд решает, показывать ли комикс-онбординг. */
+    @SerialName("needs_onboarding") val needsOnboarding: Boolean = false,
+    @SerialName("is_active") val isActive: Boolean = true,
+    /** Подписка закончилась — нужен чек, вход при этом разрешён. */
+    @SerialName("needs_payment") val needsPayment: Boolean = false,
+    val access: AccessInfo? = null,
+    @SerialName("update_required") val updateRequired: Boolean = false,
+    @SerialName("min_app_version_code") val minAppVersionCode: Int = 0,
+    @SerialName("apk_url") val apkUrl: String = "",
+    @SerialName("update_message") val updateMessage: String = "",
+    @SerialName("latest_app_version_name") val latestAppVersionName: String = "",
 )
 
 @Serializable
@@ -47,6 +58,7 @@ data class OkResponse(
     @SerialName("has_pin") val hasPin: Boolean = false,
     val message: String = "",
     val phone: String = "",
+    @SerialName("max_bot_open_url") val maxBotOpenUrl: String = "",
 )
 
 @Serializable
@@ -54,6 +66,11 @@ data class ApiErrorBody(
     val error: String = "",
     val detail: String = "",
 )
+
+class ApiException(
+    val code: String,
+    override val message: String,
+) : Exception(message)
 
 @Serializable
 data class WishItem(
@@ -128,10 +145,12 @@ data class AvatarUploadResult(
 
 @Serializable
 data class AccessInfo(
-    val state: String,
+    val state: String = "",
     @SerialName("subscription_until") val subscriptionUntil: String? = null,
     @SerialName("grace_until") val graceUntil: String? = null,
     val label: String = "",
+    @SerialName("needs_payment") val needsPayment: Boolean = false,
+    @SerialName("is_active") val isActive: Boolean = true,
 )
 
 @Serializable
@@ -165,6 +184,7 @@ data class WorkRequestBrief(
     @SerialName("agreed_slot") val agreedSlot: String = "",
     @SerialName("can_confirm_slot") val canConfirmSlot: Boolean = false,
     @SerialName("needs_confirm_amount") val needsConfirmAmount: Boolean = false,
+    @SerialName("needs_rating") val needsRating: Boolean = false,
 )
 
 @Serializable
@@ -188,6 +208,7 @@ data class WorkRequestDetail(
     @SerialName("agreed_slot") val agreedSlot: String = "",
     @SerialName("can_confirm_slot") val canConfirmSlot: Boolean = false,
     @SerialName("needs_confirm_amount") val needsConfirmAmount: Boolean = false,
+    @SerialName("needs_rating") val needsRating: Boolean = false,
     @SerialName("needs_photos") val needsPhotos: Boolean = false,
     @SerialName("photo_count") val photoCount: Int = 0,
     @SerialName("photo_urls") val photoUrls: List<String> = emptyList(),
@@ -197,6 +218,22 @@ data class WorkRequestDetail(
     @SerialName("reported_amount") val reportedAmount: Double? = null,
     @SerialName("confirmed_amount") val confirmedAmount: Double? = null,
     @SerialName("pay_method") val payMethod: String = "",
+)
+
+@Serializable
+data class ConfirmAmountResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("needs_rating") val needsRating: Boolean = false,
+)
+
+@Serializable
+data class RateWorkRequestResult(
+    val ok: Boolean = true,
+    val score: Int = 0,
+    val comment: String = "",
+    val message: String = "",
 )
 
 @Serializable
@@ -225,11 +262,16 @@ data class CollectionBrief(
     @SerialName("progress_percent") val progressPercent: Int = 0,
     @SerialName("share_policy") val sharePolicy: String = "fixed",
     @SerialName("share_policy_note") val sharePolicyNote: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
 )
 
 @Serializable
 data class CollectionList(
     val items: List<CollectionBrief> = emptyList(),
+    /** Макс. одновременных активных сборов на группу. */
+    @SerialName("active_limit") val activeLimit: Int = 4,
+    /** Группа достигла лимита — показать баннер в списке. */
+    @SerialName("at_active_limit") val atActiveLimit: Boolean = false,
 )
 
 @Serializable
@@ -298,6 +340,8 @@ data class SubscriptionInfo(
     @SerialName("payment_phone") val paymentPhone: String = "",
     @SerialName("payment_name") val paymentName: String = "",
     @SerialName("pending_receipts") val pendingReceipts: Int = 0,
+    @SerialName("needs_payment") val needsPayment: Boolean = false,
+    @SerialName("is_active") val isActive: Boolean = true,
     val family: FamilySubscriptionInfo = FamilySubscriptionInfo(),
 )
 
@@ -400,11 +444,16 @@ data class OnboardingProgress(
     @SerialName("done_count") val doneCount: Int = 0,
     val total: Int = 5,
     val completed: Boolean = false,
+    /** Явный флаг с бэка: клиент обязан следовать ему. */
+    @SerialName("needs_onboarding") val needsOnboarding: Boolean = false,
     @SerialName("reward_granted") val rewardGranted: Boolean = false,
     @SerialName("reward_just_granted") val rewardJustGranted: Boolean = false,
     @SerialName("completed_at") val completedAt: String? = null,
     val steps: List<OnboardingStep> = emptyList(),
-)
+) {
+    fun requiresOnboarding(): Boolean =
+        if (needsOnboarding) true else !(completed || rewardGranted)
+}
 
 @Serializable
 data class ExecutorProfileBrief(

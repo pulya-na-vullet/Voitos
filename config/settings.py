@@ -18,6 +18,16 @@ env = environ.Env(
 
 environ.Env.read_env(BASE_DIR / ".env")
 
+# Windows console: avoid UnicodeEncodeError in logging before LOGGING is applied.
+try:
+    from config.logging_utf8 import configure_stdio_utf8
+
+    configure_stdio_utf8()
+except Exception:
+    pass
+
+from config.version import VOITOS_BACKEND_VERSION  # noqa: F401 — re-export for django.conf.settings
+
 SECRET_KEY = env("SECRET_KEY", default="voitos-dev-secret-change-me")
 DEBUG = env("DEBUG")
 # В TestCase Django ставит DEBUG=False; для локальной OTP-отладки / тестов API:
@@ -25,12 +35,21 @@ MOBILE_OTP_DEBUG = env.bool("MOBILE_OTP_DEBUG", default=True)
 # Shared secret for bot → POST /api/v1/auth/max/start (header X-Voitos-Internal).
 AUTH_BOT_INTERNAL_TOKEN = env("AUTH_BOT_INTERNAL_TOKEN", default="")
 # Fallback deep link to open MAX bot from the app.
-MAX_BOT_OPEN_URL = env("MAX_BOT_OPEN_URL", default="")
+MAX_BOT_OPEN_URL = env(
+    "MAX_BOT_OPEN_URL",
+    default="https://max.ru/se13602985_1_bot",
+)
 # Минимальный versionCode Android-клиента (перекрывается AppSettings в панели).
-MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=7)
-MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=7)
-MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.3-kmp")
-MOBILE_APK_URL = env("MOBILE_APK_URL", default="")
+MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=24)
+MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=24)
+MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.20-kmp")
+MOBILE_APK_URL = env(
+    "MOBILE_APK_URL",
+    default=(
+        "https://github.com/pulya-na-vullet/Voitos/raw/"
+        "cursor/app-registration-max-e31c/dist/apk/voitos-debug.apk"
+    ),
+)
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 INSTALLED_APPS = [
@@ -141,7 +160,7 @@ LOGGING = {
     },
     "handlers": {
         "console": {
-            "class": "logging.StreamHandler",
+            "class": "config.logging_utf8.SafeStreamHandler",
             "formatter": "verbose",
         },
         "file": {
@@ -150,6 +169,7 @@ LOGGING = {
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 5,
             "formatter": "verbose",
+            "encoding": "utf-8",
         },
     },
     "root": {

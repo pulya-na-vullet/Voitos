@@ -1,6 +1,10 @@
 package ru.voitos.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.util.Base64
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -209,6 +213,7 @@ fun InboxScreen(
 fun WorkRequestsScreen(
     client: VoitosApiClient,
     onConfirm: (Int) -> Unit,
+    onRate: (Int) -> Unit = {},
     onOpen: (Int) -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
@@ -363,6 +368,14 @@ fun WorkRequestsScreen(
                         ) { Text("Подтвердить сумму") }
                     }
 
+                    if (wr.needsRating) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            onClick = { onRate(wr.id) },
+                            colors = voitosPrimaryButtonColors(),
+                        ) { Text("Оценить мастера") }
+                    }
+
                     if (wr.status in cancellable) {
                         TextButton(
                             onClick = {
@@ -396,6 +409,7 @@ fun WorkRequestDetailScreen(
     workRequestId: Int,
     onBack: () -> Unit,
     onConfirmAmount: (Int) -> Unit,
+    onRate: (Int) -> Unit = {},
 ) {
     BackHandler(enabled = true) { onBack() }
     var detail by remember { mutableStateOf<WorkRequestDetail?>(null) }
@@ -522,6 +536,14 @@ fun WorkRequestDetailScreen(
                     colors = voitosPrimaryButtonColors(),
                 ) { Text("Подтвердить сумму") }
             }
+            if (wr.needsRating) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { onRate(wr.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Оценить работу мастера") }
+            }
         }
     }
 }
@@ -566,7 +588,7 @@ private fun workRequestStatusColor(status: String): Color = when (status) {
 fun ConfirmAmountScreen(
     client: VoitosApiClient,
     workRequestId: Int,
-    onDone: () -> Unit,
+    onDone: (needsRating: Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(enabled = true) { onBack() }
@@ -587,9 +609,9 @@ fun ConfirmAmountScreen(
                     loading = true
                     error = null
                     try {
-                        client.confirmAmount(workRequestId, confirmed = true)
-                        message = "Сумма подтверждена"
-                        onDone()
+                        val res = client.confirmAmount(workRequestId, confirmed = true)
+                        message = res.message.ifBlank { "Сумма подтверждена" }
+                        onDone(res.needsRating)
                     } catch (e: Exception) {
                         error = friendlyNetworkError(e)
                     } finally {
@@ -620,9 +642,13 @@ fun ConfirmAmountScreen(
                             error = "Нужно число"
                             return@launch
                         }
-                        client.confirmAmount(workRequestId, confirmed = false, amount = v)
-                        message = "Сохранено: $v ₽"
-                        onDone()
+                        val res = client.confirmAmount(
+                            workRequestId,
+                            confirmed = false,
+                            amount = v,
+                        )
+                        message = res.message.ifBlank { "Сохранено: $v ₽" }
+                        onDone(res.needsRating)
                     } catch (e: Exception) {
                         error = friendlyNetworkError(e)
                     } finally {
@@ -640,11 +666,139 @@ fun ConfirmAmountScreen(
 }
 
 @Composable
-fun SubscriptionScreen(
+fun RateMasterScreen(
     client: VoitosApiClient,
+    workRequestId: Int,
+    onDone: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(enabled = true) { onBack() }
+    var score by remember { mutableIntStateOf(0) }
+    var comment by remember { mutableStateOf("") }
+    var executorName by remember { mutableStateOf("") }
+    var alreadyRated by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var loadingMeta by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(workRequestId) {
+        loadingMeta = true
+        runCatching { client.workRequest(workRequestId) }
+            .onSuccess { wr ->
+                executorName = (wr.assignedExecutorName ?: wr.assignedName).orEmpty()
+                alreadyRated = !wr.needsRating
+                if (alreadyRated) {
+                    message = "Эта заявка уже оценена или оценка пока не нужна"
+                }
+            }
+            .onFailure { error = friendlyNetworkError(it) }
+        loadingMeta = false
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        VoitosBackButton(onClick = onBack)
+        Text("Оценка мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        Text("Заявка #$workRequestId", color = VoitosColors.Muted)
+        if (executorName.isNotBlank()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Оцените работу $executorName",
+                color = VoitosColors.Text,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        if (loadingMeta) {
+            CircularProgressIndicator(color = VoitosColors.Accent)
+        } else {
+            Text("Оценка от 1 до 5", color = VoitosColors.Text)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (1..5).forEach { n ->
+                    val selected = score == n
+                    Button(
+                        onClick = { score = n },
+                        enabled = !alreadyRated,
+                        colors = if (selected) voitosPrimaryButtonColors() else voitosSecondaryButtonColors(),
+                    ) { Text("$n") }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = comment,
+                onValueChange = { comment = it.take(2000) },
+                label = { Text("Комментарий (необязательно)", color = VoitosColors.Muted) },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                enabled = !alreadyRated,
+                colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            error?.let { Text(it, color = VoitosColors.Danger) }
+            message?.let { Text(it, color = VoitosColors.Ok) }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (!alreadyRated) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            if (score !in 1..5) {
+                                error = "Выберите оценку от 1 до 5"
+                                return@launch
+                            }
+                            loading = true
+                            error = null
+                            try {
+                                val res = client.rateWorkRequest(
+                                    workRequestId,
+                                    score = score,
+                                    comment = comment.trim(),
+                                )
+                                message = res.message.ifBlank { "Спасибо за оценку!" }
+                                onDone()
+                            } catch (e: Exception) {
+                                error = friendlyNetworkError(e)
+                            } finally {
+                                loading = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading && score in 1..5,
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text(if (loading) "Отправка…" else "Отправить оценку") }
+            }
+            TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                Text(if (alreadyRated) "Назад" else "Позже", color = VoitosColors.Muted)
+            }
+        }
+    }
+}
+
+@Composable
+fun SubscriptionScreen(
+    client: VoitosApiClient,
+    onBack: () -> Unit,
+    /** Подписка закрыта: нельзя уйти в приложение без оплаты. */
+    paymentRequired: Boolean = false,
+    /** Доп. текст над реквизитами (например, после тапа на сборы/мастера). */
+    gateMessage: String = "",
+    onAccessRestored: () -> Unit = {},
+    onLogout: (() -> Unit)? = null,
+) {
+    BackHandler(enabled = true) {
+        if (paymentRequired) {
+            onLogout?.invoke()
+        } else {
+            onBack()
+        }
+    }
     var info by remember { mutableStateOf<ru.voitos.app.model.SubscriptionInfo?>(null) }
     var receipts by remember { mutableStateOf<List<ru.voitos.app.model.ReceiptBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -653,11 +807,21 @@ fun SubscriptionScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    fun copyPhone(phone: String) {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Телефон для оплаты", phone))
+        Toast.makeText(context, "Номер скопирован", Toast.LENGTH_SHORT).show()
+    }
+
     fun reload() {
         scope.launch {
             try {
-                info = client.subscription()
+                val sub = client.subscription()
+                info = sub
                 receipts = client.receipts().items
+                if (paymentRequired && sub.state == "active") {
+                    onAccessRestored()
+                }
             } catch (e: Exception) {
                 error = friendlyNetworkError(e)
             }
@@ -665,6 +829,23 @@ fun SubscriptionScreen(
     }
 
     LaunchedEffect(Unit) { reload() }
+
+    // Пока ждём проверку чека — периодически обновляем статус.
+    LaunchedEffect(paymentRequired) {
+        if (!paymentRequired) return@LaunchedEffect
+        while (true) {
+            delay(12_000)
+            runCatching {
+                val sub = client.subscription()
+                info = sub
+                receipts = runCatching { client.receipts().items }.getOrDefault(receipts)
+                if (sub.state == "active") {
+                    onAccessRestored()
+                    return@LaunchedEffect
+                }
+            }
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -677,7 +858,7 @@ fun SubscriptionScreen(
                 val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                 val name = uri.lastPathSegment?.substringAfterLast('/') ?: "receipt.jpg"
                 val res = client.uploadReceipt(b64, name)
-                message = "Чек #${res.id} отправлен на проверку"
+                message = "Чек #${res.id} отправлен на проверку. Доступ откроется после одобрения."
                 reload()
             } catch (e: Exception) {
                 error = friendlyNetworkError(e)
@@ -693,59 +874,130 @@ fun SubscriptionScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        VoitosBackButton(onClick = onBack)
-        Text("Подписка", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        Spacer(modifier = Modifier.height(12.dp))
+        if (!paymentRequired) {
+            VoitosBackButton(onClick = onBack)
+        }
+        Text(
+            if (paymentRequired) "Оплата подписки" else "Подписка",
+            style = MaterialTheme.typography.headlineSmall,
+            color = VoitosColors.Text,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        val topHint = gateMessage.ifBlank {
+            if (paymentRequired) "Оплатите подписку для доступа к услугам" else ""
+        }
+        if (topHint.isNotBlank()) {
+            Text(
+                topHint,
+                color = VoitosColors.Warn,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        if (paymentRequired) {
+            Text(
+                "Переведите оплату по реквизитам ниже и загрузите чек. " +
+                    "После проверки администратором доступ к сборам и вызову мастера откроется.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
         error?.let { Text(it, color = VoitosColors.Danger) }
         message?.let { Text(it, color = VoitosColors.Ok) }
+
         info?.let { s ->
-            PanelCard {
-                Text(
-                    s.label.ifBlank { s.state },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = VoitosColors.Accent2,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Доступ: ${s.state}", color = VoitosColors.Text)
-                s.subscriptionUntil?.let { Text("До: $it", color = VoitosColors.Text) }
-                s.graceUntil?.let { Text("Grace до: $it", color = VoitosColors.Muted) }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Цена: ${s.priceRub} ₽/мес", color = VoitosColors.Text)
-            }
-            if (s.paymentPhone.isNotBlank() || s.paymentName.isNotBlank() || s.family.members.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
+            // Реквизиты самозанятого — всегда сверху.
+            if (s.paymentPhone.isNotBlank() || s.paymentName.isNotBlank()) {
                 PanelCard {
-                    Text("Оплата и семья", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+                    Text(
+                        "Реквизиты для оплаты",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = VoitosColors.Accent2,
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
-                    if (s.paymentPhone.isNotBlank()) {
-                        Text("Телефон: ${s.paymentPhone}", color = VoitosColors.Text)
-                    }
                     if (s.paymentName.isNotBlank()) {
                         Text("Получатель: ${s.paymentName}", color = VoitosColors.Text)
+                        Spacer(modifier = Modifier.height(4.dp))
                     }
-                    if (s.pendingReceipts > 0) {
-                        Text("Чеков на проверке: ${s.pendingReceipts}", color = VoitosColors.Warn)
-                    }
-                    val fam = s.family
-                    if (fam.isPayer && fam.members.isNotEmpty()) {
+                    if (s.paymentPhone.isNotBlank()) {
+                        Text("Телефон: ${s.paymentPhone}", color = VoitosColors.Text)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("К подписке подключены:", color = VoitosColors.Muted)
-                        fam.members.forEach { m ->
-                            Text("• ${m.name.ifBlank { m.phone }}", color = VoitosColors.Text)
+                        Button(
+                            onClick = { copyPhone(s.paymentPhone) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = voitosPrimaryButtonColors(),
+                        ) {
+                            Text("Скопировать номер телефона")
                         }
-                    } else if (fam.payerName.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Подписка через: ${fam.payerName}", color = VoitosColors.Text)
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Цена: ${s.priceRub} ₽/мес", color = VoitosColors.Text)
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            PanelCard {
+                Text(
+                    s.label.ifBlank {
+                        when (s.state) {
+                            "blocked" -> "Доступ закрыт — нужна оплата"
+                            "grace" -> "Льготный период — оплатите заранее"
+                            "active" -> "Подписка активна"
+                            else -> s.state
+                        }
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = when (s.state) {
+                        "blocked" -> VoitosColors.Danger
+                        "grace" -> VoitosColors.Warn
+                        else -> VoitosColors.Accent2
+                    },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Статус: ${s.state}", color = VoitosColors.Text)
+                s.subscriptionUntil?.let { Text("Была до: $it", color = VoitosColors.Text) }
+                s.graceUntil?.let { Text("Grace до: $it", color = VoitosColors.Muted) }
+                if (s.pendingReceipts > 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Чеков на проверке: ${s.pendingReceipts}", color = VoitosColors.Warn)
+                }
+                val fam = s.family
+                if (fam.isPayer && fam.members.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("К подписке подключены:", color = VoitosColors.Muted)
+                    fam.members.forEach { m ->
+                        Text("• ${m.name.ifBlank { m.phone }}", color = VoitosColors.Text)
+                    }
+                } else if (fam.payerName.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Подписка через: ${fam.payerName}", color = VoitosColors.Text)
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
             Button(
-                onClick = { picker.launch("image/*") },
+                onClick = { picker.launch("*/*") },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
                 colors = voitosPrimaryButtonColors(),
-            ) { Text("Загрузить чек") }
+            ) {
+                Text(if (loading) "Отправка…" else "Загрузить чек")
+            }
+            Text(
+                "Фото перевода или PDF чека",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            if (paymentRequired && onLogout != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = onLogout,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Выйти из аккаунта", color = VoitosColors.Danger)
+                }
+            }
         }
         if (receipts.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -949,31 +1201,38 @@ fun OnboardingScreen(
     val context = LocalContext.current
 
     fun isDone(p: OnboardingProgress?): Boolean =
-        p != null && (p.completed || p.rewardGranted)
+        p != null && !p.requiresOnboarding()
 
     fun finish() {
         (onFinished ?: onBack).invoke()
     }
 
-    LaunchedEffect(Unit) {
-        try {
-            val p = client.onboarding()
-            progress = p
-            index = 0
-            if (isDone(p)) {
-                if (requireCompletion) {
-                    finish()
-                    return@LaunchedEffect
+    fun reload() {
+        scope.launch {
+            loading = true
+            error = null
+            try {
+                val p = client.onboarding()
+                progress = p
+                index = 0
+                if (isDone(p)) {
+                    if (requireCompletion) {
+                        finish()
+                        return@launch
+                    }
+                    banner = "Обучение уже пройдено. Можно просто полистать комиксы."
                 }
-                banner = "Обучение уже пройдено. Можно просто полистать комиксы."
-            }
-        } catch (e: Exception) {
-            error = e.message
-            if (requireCompletion) {
-                // Сеть упала — не блокируем вход навсегда.
-                finish()
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось загрузить обучение"
+                // При обязательном онбординге не пропускаем вход из‑за сети.
+            } finally {
+                loading = false
             }
         }
+    }
+
+    LaunchedEffect(Unit) {
+        reload()
     }
 
     val steps = progress?.steps.orEmpty()
@@ -1010,7 +1269,15 @@ fun OnboardingScreen(
         Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
         if (step == null) {
-            if (error == null) {
+            if (error != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { reload() },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosPrimaryButtonColors(),
+                    enabled = !loading,
+                ) { Text("Повторить загрузку") }
+            } else if (error == null) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                     color = VoitosColors.Accent,
@@ -1086,18 +1353,12 @@ fun OnboardingScreen(
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
+            if (index > 0) {
                 TextButton(
-                    onClick = { if (index > 0) index -= 1 },
-                    enabled = index > 0 && !loading,
+                    onClick = { index -= 1 },
+                    enabled = !loading,
+                    modifier = Modifier.fillMaxWidth(),
                 ) { Text("← Предыдущий", color = VoitosColors.Accent) }
-                TextButton(
-                    onClick = { if (index < steps.lastIndex) index += 1 },
-                    enabled = index < steps.lastIndex && !loading,
-                ) { Text("Следующий →", color = VoitosColors.Accent) }
             }
             if (canClose && !requireCompletion) {
                 VoitosBackButton(

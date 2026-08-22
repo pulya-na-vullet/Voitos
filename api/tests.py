@@ -54,6 +54,31 @@ class MobileApiTests(TestCase):
         resp = self.client.get("/api/v1/me")
         self.assertEqual(resp.status_code, 401)
 
+    def test_deleted_user_token_rejected(self):
+        tok = MobileAuthToken.objects.create(bot_user=self.user)
+        token = tok.token
+        self.user.delete()
+        resp = self.client.get(
+            "/api/v1/me",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()["error"], "unauthorized")
+        self.assertFalse(MobileAuthToken.objects.filter(token=token).exists())
+
+    def test_deactivated_user_token_revoked(self):
+        tok = MobileAuthToken.objects.create(bot_user=self.user)
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        resp = self.client.get(
+            "/api/v1/me",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()["error"], "unauthorized")
+        tok.refresh_from_db()
+        self.assertIsNotNone(tok.revoked_at)
+
     def test_me_subscription_family_members(self):
         dependent = BotUser.objects.create(
             max_user_id="app_family2",
@@ -308,6 +333,67 @@ class AppEmitHookTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         wr.refresh_from_db()
         self.assertEqual(wr.status, "awaiting_commission")
+        body = resp.json()
+        self.assertTrue(body.get("needs_rating"))
+
+    def test_rate_work_request_api(self):
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from database.models import (
+            WorkRequest,
+            WorkRequestPayMethod,
+            WorkRequestRating,
+            WorkRequestStatus,
+        )
+
+        wr = WorkRequest.objects.create(
+            user=self.client_user,
+            role=self.role,
+            description="Оценка",
+            status=WorkRequestStatus.AWAITING_COMMISSION,
+            pay_method=WorkRequestPayMethod.CASH,
+            reported_amount=Decimal("1500"),
+            confirmed_amount=Decimal("1500"),
+            assigned_contractor=self.profile,
+            rating_asked_at=timezone.now(),
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        detail = self.client.get(
+            f"/api/v1/work-requests/{wr.id}",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertTrue(detail.json().get("needs_rating"))
+
+        bad = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/rate",
+            data=json.dumps({"score": 9}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(bad.status_code, 400)
+
+        ok = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/rate",
+            data=json.dumps({"score": 5, "comment": "Отлично"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["score"], 5)
+        rating = WorkRequestRating.objects.get(work_request=wr)
+        self.assertEqual(rating.score, 5)
+        self.assertEqual(rating.comment, "Отлично")
+        self.assertEqual(rating.contractor_id, self.profile.id)
+
+        again = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/rate",
+            data=json.dumps({"score": 4}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(again.status_code, 409)
 
     def test_receipt_approve_emits(self):
         from decimal import Decimal
@@ -399,6 +485,98 @@ class AppEmitHookTests(TestCase):
         self.assertIn("payment_bank", resp.json())
         self.assertIn("photo_urls", resp.json())
         self.assertTrue(resp.json()["can_pay"])
+
+    def test_collections_list_sorted_newest_and_limit_flag(self):
+        from decimal import Decimal
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from database.models import (
+            CampaignStatus,
+            ServiceCampaign,
+            ServiceCategory,
+            ServiceGroup,
+            ServiceInvite,
+        )
+
+        g = ServiceGroup.objects.create(name="Двор-лимит")
+        g.members.add(self.client_user)
+        now = timezone.now()
+        camps = []
+        for i in range(4):
+            camp = ServiceCampaign.objects.create(
+                title=f"Сбор-{i}",
+                category=ServiceCategory.SNOW,
+                group=g,
+                status=CampaignStatus.ACTIVE,
+                total_amount=Decimal("400"),
+                amount_per_user=Decimal("100"),
+            )
+            # Явно разводим created_at: старые раньше.
+            ServiceCampaign.objects.filter(pk=camp.pk).update(
+                created_at=now - timedelta(days=4 - i)
+            )
+            camp.refresh_from_db()
+            ServiceInvite.objects.create(
+                campaign=camp, user=self.client_user, amount_due=Decimal("100")
+            )
+            camps.append(camp)
+
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.get(
+            "/api/v1/collections",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        ids = [it["id"] for it in body["items"]]
+        # Новые сверху: последний созданный (i=3) первый.
+        self.assertEqual(ids[:4], [camps[3].id, camps[2].id, camps[1].id, camps[0].id])
+        self.assertTrue(body["at_active_limit"])
+        self.assertEqual(body["active_limit"], 4)
+        self.assertIn("created_at", body["items"][0])
+
+    def test_collections_blocked_without_subscription(self):
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from database.models import (
+            CampaignStatus,
+            ServiceCampaign,
+            ServiceCategory,
+            ServiceGroup,
+            ServiceInvite,
+        )
+
+        self.client_user.subscription_until = timezone.now() - timedelta(days=40)
+        self.client_user.grace_until = timezone.now() - timedelta(days=10)
+        self.client_user.save(update_fields=["subscription_until", "grace_until"])
+        self.assertEqual(self.client_user.access_state(), "blocked")
+
+        g = ServiceGroup.objects.create(name="Двор-блок")
+        g.members.add(self.client_user)
+        camp = ServiceCampaign.objects.create(
+            title="Снег",
+            category=ServiceCategory.SNOW,
+            group=g,
+            status=CampaignStatus.ACTIVE,
+            total_amount=Decimal("100"),
+            amount_per_user=Decimal("100"),
+        )
+        ServiceInvite.objects.create(
+            campaign=camp, user=self.client_user, amount_due=Decimal("100")
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.get(
+            "/api/v1/collections",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["error"], "subscription_required")
+        self.assertIn("Оплатите подписку", resp.json()["detail"])
 
     def test_create_work_request_api(self):
         tok = MobileAuthToken.objects.create(bot_user=self.client_user)

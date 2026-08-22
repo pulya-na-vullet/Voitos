@@ -70,18 +70,21 @@ fun CollectionsScreen(
     onOpenChat: () -> Unit = {},
     onBack: (() -> Unit)? = null,
     refreshKey: Int = 0,
+    chatUnread: Int = 0,
+    onChatUnreadChange: (Int) -> Unit = {},
 ) {
     var items by remember { mutableStateOf<List<CollectionBrief>>(emptyList()) }
-    var chatUnread by remember { mutableStateOf(0) }
+    var atActiveLimit by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     val listState = rememberLazyListState()
 
-    fun reloadChatUnread() {
+    fun refreshUnread() {
         scope.launch {
-            chatUnread = runCatching { client.groups().unreadTotal }.getOrDefault(chatUnread)
+            val n = runCatching { client.groups().unreadTotal }.getOrNull() ?: return@launch
+            onChatUnreadChange(n)
         }
     }
 
@@ -92,8 +95,16 @@ fun CollectionsScreen(
                 error = null
             }
             try {
-                items = client.collections().items
-                chatUnread = runCatching { client.groups().unreadTotal }.getOrDefault(0)
+                val list = client.collections()
+                // Новые сверху (по дате создания / id кампании).
+                items = list.items.sortedWith(
+                    compareByDescending<CollectionBrief> { it.createdAt.orEmpty() }
+                        .thenByDescending { it.id },
+                )
+                atActiveLimit = list.atActiveLimit ||
+                    items.count { it.campaignStatus.equals("active", ignoreCase = true) } >= 4
+                val n = runCatching { client.groups().unreadTotal }.getOrNull()
+                if (n != null) onChatUnreadChange(n)
                 if (silent) error = null
             } catch (e: Exception) {
                 if (!silent || items.isEmpty()) {
@@ -107,6 +118,15 @@ fun CollectionsScreen(
 
     LaunchedEffect(refreshKey) { reload(silent = items.isNotEmpty()) }
 
+    // Непрочитанные в чате — отдельно и чаще, чем список сборов.
+    LaunchedEffect(Unit) {
+        refreshUnread()
+        while (true) {
+            delay(5_000)
+            refreshUnread()
+        }
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
@@ -118,7 +138,7 @@ fun CollectionsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 reload(silent = items.isNotEmpty())
-                reloadChatUnread()
+                refreshUnread()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -135,6 +155,14 @@ fun CollectionsScreen(
                     VoitosBackButton(onClick = onBack)
                 }
                 Text("Сборы", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+                if (atActiveLimit) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Ваша группа достигла лимита по сборам. Завершите сборы денег, чтобы начать новые.",
+                        color = VoitosColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
             Box {
                 TextButton(onClick = onOpenChat) {

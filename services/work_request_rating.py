@@ -52,6 +52,67 @@ def rating_ask_message(req: WorkRequest, *, service_provided: bool = True) -> st
     )
 
 
+def work_request_needs_rating(wr: WorkRequest) -> bool:
+    """Нужна ли клиенту оценка исполнителя по этой заявке."""
+    if not wr or not wr.assigned_contractor_id:
+        return False
+    if WorkRequestRating.objects.filter(work_request_id=wr.id).exists():
+        return False
+    if wr.rating_asked_at is not None:
+        return True
+    if wr.confirmed_amount is not None and wr.status in {
+        WorkRequestStatus.AWAITING_COMMISSION,
+        WorkRequestStatus.DONE,
+    }:
+        return True
+    return False
+
+
+def submit_work_request_rating(
+    user: BotUser,
+    req: WorkRequest,
+    *,
+    score: int,
+    comment: str = "",
+) -> WorkRequestRating:
+    """Сохранить оценку из приложения (или другого HTTP-клиента)."""
+    try:
+        score_i = int(score)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("score_invalid") from exc
+    if score_i < 1 or score_i > 5:
+        raise ValueError("score_out_of_range")
+    if req.user_id != user.id:
+        raise ValueError("forbidden")
+    if not req.assigned_contractor_id:
+        raise ValueError("no_executor")
+    if WorkRequestRating.objects.filter(work_request_id=req.id).exists():
+        raise ValueError("already_rated")
+    if not work_request_needs_rating(req):
+        raise ValueError("not_ready_for_rating")
+
+    text = (comment or "").strip()[:2000]
+    rating = WorkRequestRating.objects.create(
+        work_request=req,
+        contractor=req.assigned_contractor,
+        client=user,
+        score=score_i,
+        comment=text,
+    )
+    pending = PendingAction.objects.filter(user=user).first()
+    if pending and pending.pending_kind == RATING_PENDING:
+        payload = pending.pending_payload or {}
+        try:
+            pending_wr = int(payload.get("work_request_id") or 0)
+        except (TypeError, ValueError):
+            pending_wr = 0
+        if pending_wr == req.id:
+            pending.clear_pending()
+    if not req.rating_asked_at:
+        WorkRequest.objects.filter(pk=req.id).update(rating_asked_at=timezone.now())
+    return rating
+
+
 def ask_client_for_rating(
     req: WorkRequest,
     *,
@@ -101,6 +162,19 @@ def ask_client_for_rating(
         pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
 
     WorkRequest.objects.filter(pk=req.id).update(rating_asked_at=timezone.now())
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            req.user,
+            ntype="work_request.rate",
+            title="Оцените работу мастера",
+            body=rating_ask_message(req, service_provided=service_provided)[:240],
+            entity_type="work_request",
+            entity_id=req.id,
+        )
+    except Exception:
+        logger.exception("Failed to emit work_request.rate for WR %s", req.id)
     return True
 
 

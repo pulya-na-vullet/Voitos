@@ -66,6 +66,11 @@ class SessionStore(context: Context) {
         get() = prefs.getBoolean(KEY_HAS_PIN, false)
         set(value) = prefs.edit(commit = true) { putBoolean(KEY_HAS_PIN, value) }
 
+    /** Бэкенд сказал показать онбординг (кэш до /onboarding). */
+    var needsOnboarding: Boolean
+        get() = prefs.getBoolean(KEY_NEEDS_ONBOARDING, false)
+        set(value) = prefs.edit(commit = true) { putBoolean(KEY_NEEDS_ONBOARDING, value) }
+
     /** Уже был хотя бы один запуск после установки (не чистая установка). */
     var hasLaunchedBefore: Boolean
         get() = prefs.getBoolean(KEY_LAUNCHED, false)
@@ -76,6 +81,7 @@ class SessionStore(context: Context) {
         prefs.edit(commit = true) {
             remove(KEY_TOKEN)
             remove(KEY_NAME)
+            remove(KEY_NEEDS_ONBOARDING)
         }
     }
 
@@ -93,6 +99,7 @@ class SessionStore(context: Context) {
         private const val KEY_PHONE = "last_phone"
         private const val KEY_DEBUG_CODE = "last_debug_code"
         private const val KEY_HAS_PIN = "has_pin_setup"
+        private const val KEY_NEEDS_ONBOARDING = "needs_onboarding"
         private const val KEY_LAUNCHED = "has_launched_before"
     }
 }

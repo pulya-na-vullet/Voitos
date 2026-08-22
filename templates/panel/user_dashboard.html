@@ -202,6 +202,17 @@
     {% csrf_token %}
     <div class="form-row"><label>Имя</label><input type="text" name="real_name" value="{{ bot_user.real_name }}"></div>
     <div class="form-row"><label>Телефон</label><input type="text" name="phone" value="{{ bot_user.phone }}"></div>
+    <div class="form-row"><label>Пол</label>
+      <select name="gender">
+        <option value="" {% if not bot_user.gender %}selected{% endif %}>—</option>
+        <option value="male" {% if bot_user.gender == "male" %}selected{% endif %}>Мужской</option>
+        <option value="female" {% if bot_user.gender == "female" %}selected{% endif %}>Женский</option>
+        <option value="other" {% if bot_user.gender == "other" %}selected{% endif %}>Другой</option>
+      </select>
+    </div>
+    <div class="form-row"><label>Дата рождения</label>
+      <input type="date" name="birth_date" value="{% if bot_user.birth_date %}{{ bot_user.birth_date|date:'Y-m-d' }}{% endif %}">
+    </div>
     <div class="form-row"><label>Населённый пункт</label><input type="text" name="locality" value="{{ bot_user.locality }}"></div>
     <div class="form-row"><label>Адрес</label><textarea name="address" rows="2">{{ bot_user.address }}</textarea></div>
     <div class="form-row"><label>Комментарий админа</label><input type="text" name="note" value="{{ bot_user.profile_admin_note }}" placeholder="опционально, уйдёт пользователю при запросе дозаполнения"></div>

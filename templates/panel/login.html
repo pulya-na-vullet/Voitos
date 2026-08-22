@@ -11,6 +11,10 @@
       </div>
     </div>
     <p class="muted">Для администратора и менеджера группы</p>
+    <p class="muted" style="font-size:0.85rem; margin-top:-8px;">
+      бэкенд {{ voitos_backend_version }} · приложение {{ voitos_mobile_version_name }}
+      (мин.&nbsp;{{ voitos_mobile_min_code }})
+    </p>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post">
       {% csrf_token %}
