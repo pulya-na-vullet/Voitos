@@ -880,6 +880,25 @@ def settings_view(request: HttpRequest) -> HttpResponse:
         if new_key:
             cfg.yandex_api_key = new_key
         cfg.max_bot_open_url = request.POST.get("max_bot_open_url", "").strip()
+        try:
+            cfg.mobile_min_version_code = int(
+                request.POST.get("mobile_min_version_code") or cfg.mobile_min_version_code or 1
+            )
+        except ValueError:
+            pass
+        try:
+            cfg.mobile_latest_version_code = int(
+                request.POST.get("mobile_latest_version_code")
+                or cfg.mobile_latest_version_code
+                or cfg.mobile_min_version_code
+            )
+        except ValueError:
+            pass
+        cfg.mobile_latest_version_name = (
+            request.POST.get("mobile_latest_version_name", cfg.mobile_latest_version_name).strip()
+            or cfg.mobile_latest_version_name
+        )
+        cfg.mobile_apk_url = request.POST.get("mobile_apk_url", "").strip()
         cfg.allowed_max_user_id = ""  # multi-user
         cfg.yandex_folder_id = request.POST.get("yandex_folder_id", "").strip()
         cfg.yandex_model = normalize_yandex_model(

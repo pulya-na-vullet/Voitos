@@ -1,5 +1,7 @@
 package ru.voitos.app.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,10 +28,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import ru.voitos.app.AppVersion
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.WishGroupOption
@@ -64,6 +68,7 @@ fun LoginScreen(
     onDebugPrefs: (baseUrl: String, phone: String, debugCode: String) -> Unit = { _, _, _ -> },
     onSaveServer: (baseUrl: String) -> Unit = {},
 ) {
+    val context = LocalContext.current
     val initialHp = remember(initialBaseUrl) { ru.voitos.app.DevServerSettings.parse(initialBaseUrl) }
     var baseUrl by remember {
         mutableStateOf(
@@ -71,6 +76,10 @@ fun LoginScreen(
         )
     }
     var serverReady by remember { mutableStateOf(false) }
+    var updateRequired by remember { mutableStateOf(false) }
+    var updateMessage by remember { mutableStateOf("") }
+    var updateApkUrl by remember { mutableStateOf("") }
+    var latestVersionName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf(initialPhone) }
     var code by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
@@ -94,6 +103,22 @@ fun LoginScreen(
 
     fun persistDebug(debugCode: String = "") {
         onDebugPrefs(baseUrl, phone.trim(), debugCode)
+    }
+
+    fun applyVersionGate(minCode: Int, message: String, apkUrl: String, latestName: String) {
+        if (minCode > 0 && AppVersion.code < minCode) {
+            updateRequired = true
+            updateMessage = message.ifBlank {
+                "Доступна новая версия приложения. Обновите Voitos, чтобы продолжить."
+            }
+            updateApkUrl = apkUrl
+            latestVersionName = latestName
+        } else {
+            updateRequired = false
+            updateMessage = ""
+            updateApkUrl = ""
+            latestVersionName = latestName
+        }
     }
 
     fun applyFound(hit: ru.voitos.app.LanServerDiscovery.Found) {
@@ -122,6 +147,7 @@ fun LoginScreen(
         scope.launch {
             scanning = true
             serverReady = false
+            updateRequired = false
             if (!auto) error = null
             serverStatus = "Ищем сервер в Wi‑Fi…"
             try {
@@ -136,6 +162,20 @@ fun LoginScreen(
                 )
                 if (hit != null) {
                     applyFound(hit)
+                    val health = runCatching {
+                        client().healthCheck(AppVersion.code)
+                    }.getOrNull()
+                    if (health != null) {
+                        applyVersionGate(
+                            minCode = health.minAppVersionCode,
+                            message = health.updateMessage,
+                            apkUrl = health.apkUrl,
+                            latestName = health.latestAppVersionName,
+                        )
+                        if (health.updateRequired) {
+                            serverStatus = "Нужно обновить приложение"
+                        }
+                    }
                 } else {
                     serverStatus = "Сервер в Wi‑Fi не найден"
                     if (!auto) {
@@ -160,6 +200,12 @@ fun LoginScreen(
         runCatching {
             val cfg = client().authConfig()
             if (cfg.registrationHint.isNotBlank()) regHint = cfg.registrationHint
+            applyVersionGate(
+                minCode = cfg.minAppVersionCode,
+                message = cfg.updateMessage,
+                apkUrl = cfg.apkUrl,
+                latestName = cfg.latestAppVersionName,
+            )
         }
     }
 
@@ -185,7 +231,11 @@ fun LoginScreen(
         }
         Text(
             serverStatus,
-            color = if (serverReady) VoitosColors.Ok else VoitosColors.Muted,
+            color = when {
+                updateRequired -> VoitosColors.Warn
+                serverReady -> VoitosColors.Ok
+                else -> VoitosColors.Muted
+            },
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.align(Alignment.CenterHorizontally),
         )
@@ -196,6 +246,43 @@ fun LoginScreen(
             ) {
                 Text("Повторить поиск", color = VoitosColors.Accent)
             }
+        }
+
+        if (updateRequired) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                updateMessage.ifBlank {
+                    "Доступна новая версия приложения. Обновите Voitos, чтобы продолжить."
+                },
+                color = VoitosColors.Warn,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (latestVersionName.isNotBlank()) {
+                Text(
+                    "Актуальная версия: $latestVersionName (у вас ${AppVersion.name})",
+                    color = VoitosColors.Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (updateApkUrl.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateApkUrl)))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Скачать обновление") }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Вход недоступен до обновления приложения.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            return@Column
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -286,9 +373,11 @@ fun LoginScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                 colors = voitosOutlinedFieldColors(),
             )
-            debugHint?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Accent2)
-            }
+            Text(
+                "Код придёт в чат бота Max — введите его вручную.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
         error?.let {
             Spacer(modifier = Modifier.height(8.dp))
@@ -314,14 +403,9 @@ fun LoginScreen(
                         try {
                             persistDebug()
                             onSaveServer(baseUrl)
-                            val res = client().phoneLoginRequest(phone)
-                            if (!res.debugCode.isNullOrBlank()) {
-                                code = res.debugCode.orEmpty()
-                                debugHint = "Dev-код: ${res.debugCode}"
-                                persistDebug(res.debugCode.orEmpty())
-                            } else {
-                                debugHint = res.message.ifBlank { "Код отправлен в Max" }
-                            }
+                            client().phoneLoginRequest(phone)
+                            // Код только из бота Max — поле не заполняем автоматически.
+                            debugHint = "Код отправлен в Max"
                             step = 1
                         } catch (e: Exception) {
                             error = e.message?.takeIf { it.isNotBlank() }
@@ -365,6 +449,53 @@ fun LoginScreen(
             TextButton(onClick = { step = 0; code = ""; debugHint = null }) {
                 Text("Изменить номер", color = VoitosColors.Accent)
             }
+        }
+    }
+}
+
+@Composable
+fun ForceUpdateScreen(
+    message: String,
+    latestVersionName: String,
+    currentVersionName: String,
+    apkUrl: String,
+) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Обновление", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            message.ifBlank {
+                "Доступна новая версия приложения. Обновите Voitos, чтобы продолжить."
+            },
+            color = VoitosColors.Warn,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        if (latestVersionName.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Актуальная: $latestVersionName · у вас: $currentVersionName",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (apkUrl.isNotBlank()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosPrimaryButtonColors(),
+            ) { Text("Скачать обновление") }
         }
     }
 }
@@ -477,12 +608,8 @@ fun ChangePinScreen(
                     loading = true
                     error = null
                     try {
-                        val res = client.pinChangeRequest()
-                        hint = if (!res.debugCode.isNullOrBlank()) {
-                            "Dev-код: ${res.debugCode}"
-                        } else {
-                            "Код отправлен в Max"
-                        }
+                        client.pinChangeRequest()
+                        hint = "Код отправлен в Max — введите его вручную."
                     } catch (e: Exception) {
                         error = friendlyNetworkError(e)
                     } finally {

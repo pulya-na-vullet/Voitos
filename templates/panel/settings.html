@@ -28,6 +28,22 @@
       <input type="url" name="max_bot_open_url" value="{{ cfg.max_bot_open_url }}" placeholder="https://max.ru/your_bot">
       <div class="hint">Кнопка «Войти через Max» в приложении открывает этот URL</div>
     </div>
+    <div class="form-row">
+      <label>Мин. versionCode приложения</label>
+      <input type="number" name="mobile_min_version_code" value="{{ cfg.mobile_min_version_code }}" min="1" step="1">
+      <div class="hint">Клиенты со старее этой версии увидят «нужно обновить приложение»</div>
+    </div>
+    <div class="form-row">
+      <label>Актуальный versionCode / versionName</label>
+      <div class="grid two">
+        <input type="number" name="mobile_latest_version_code" value="{{ cfg.mobile_latest_version_code }}" min="1" step="1">
+        <input type="text" name="mobile_latest_version_name" value="{{ cfg.mobile_latest_version_name }}" placeholder="0.2.3-kmp">
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Ссылка на APK обновления</label>
+      <input type="url" name="mobile_apk_url" value="{{ cfg.mobile_apk_url }}" placeholder="https://…/voitos-debug.apk">
+    </div>
     <hr style="border:0; border-top:1px solid var(--line); margin:22px 0;">
     <h3 style="margin-top:0;">Yandex AI</h3>
     <div class="form-row">
