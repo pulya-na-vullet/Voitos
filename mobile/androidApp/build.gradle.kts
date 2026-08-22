@@ -12,8 +12,23 @@ android {
         applicationId = "ru.voitos.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-kmp"
+        versionCode = 2
+        versionName = "0.1.1-kmp"
+    }
+    // Стабильный debug-keystore в репо: обновление APK с разных агентов/машин
+    // не падает с INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+    signingConfigs {
+        create("voitosDebug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "voitos-debug"
+            keyPassword = "android"
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("voitosDebug")
+        }
     }
     buildFeatures {
         compose = true
