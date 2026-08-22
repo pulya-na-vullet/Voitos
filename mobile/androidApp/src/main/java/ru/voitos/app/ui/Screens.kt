@@ -209,6 +209,7 @@ fun InboxScreen(
 fun WorkRequestsScreen(
     client: VoitosApiClient,
     onConfirm: (Int) -> Unit,
+    onRate: (Int) -> Unit = {},
     onOpen: (Int) -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
@@ -363,6 +364,14 @@ fun WorkRequestsScreen(
                         ) { Text("Подтвердить сумму") }
                     }
 
+                    if (wr.needsRating) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            onClick = { onRate(wr.id) },
+                            colors = voitosPrimaryButtonColors(),
+                        ) { Text("Оценить мастера") }
+                    }
+
                     if (wr.status in cancellable) {
                         TextButton(
                             onClick = {
@@ -396,6 +405,7 @@ fun WorkRequestDetailScreen(
     workRequestId: Int,
     onBack: () -> Unit,
     onConfirmAmount: (Int) -> Unit,
+    onRate: (Int) -> Unit = {},
 ) {
     BackHandler(enabled = true) { onBack() }
     var detail by remember { mutableStateOf<WorkRequestDetail?>(null) }
@@ -522,6 +532,14 @@ fun WorkRequestDetailScreen(
                     colors = voitosPrimaryButtonColors(),
                 ) { Text("Подтвердить сумму") }
             }
+            if (wr.needsRating) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { onRate(wr.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Оценить работу мастера") }
+            }
         }
     }
 }
@@ -566,7 +584,7 @@ private fun workRequestStatusColor(status: String): Color = when (status) {
 fun ConfirmAmountScreen(
     client: VoitosApiClient,
     workRequestId: Int,
-    onDone: () -> Unit,
+    onDone: (needsRating: Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(enabled = true) { onBack() }
@@ -587,9 +605,9 @@ fun ConfirmAmountScreen(
                     loading = true
                     error = null
                     try {
-                        client.confirmAmount(workRequestId, confirmed = true)
-                        message = "Сумма подтверждена"
-                        onDone()
+                        val res = client.confirmAmount(workRequestId, confirmed = true)
+                        message = res.message.ifBlank { "Сумма подтверждена" }
+                        onDone(res.needsRating)
                     } catch (e: Exception) {
                         error = friendlyNetworkError(e)
                     } finally {
@@ -620,9 +638,13 @@ fun ConfirmAmountScreen(
                             error = "Нужно число"
                             return@launch
                         }
-                        client.confirmAmount(workRequestId, confirmed = false, amount = v)
-                        message = "Сохранено: $v ₽"
-                        onDone()
+                        val res = client.confirmAmount(
+                            workRequestId,
+                            confirmed = false,
+                            amount = v,
+                        )
+                        message = res.message.ifBlank { "Сохранено: $v ₽" }
+                        onDone(res.needsRating)
                     } catch (e: Exception) {
                         error = friendlyNetworkError(e)
                     } finally {
@@ -636,6 +658,122 @@ fun ConfirmAmountScreen(
         ) { Text("Отправить свою сумму") }
         message?.let { Text(it, color = VoitosColors.Ok) }
         error?.let { Text(it, color = VoitosColors.Danger) }
+    }
+}
+
+@Composable
+fun RateMasterScreen(
+    client: VoitosApiClient,
+    workRequestId: Int,
+    onDone: () -> Unit,
+    onBack: () -> Unit,
+) {
+    BackHandler(enabled = true) { onBack() }
+    var score by remember { mutableIntStateOf(0) }
+    var comment by remember { mutableStateOf("") }
+    var executorName by remember { mutableStateOf("") }
+    var alreadyRated by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var loadingMeta by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(workRequestId) {
+        loadingMeta = true
+        runCatching { client.workRequest(workRequestId) }
+            .onSuccess { wr ->
+                executorName = (wr.assignedExecutorName ?: wr.assignedName).orEmpty()
+                alreadyRated = !wr.needsRating
+                if (alreadyRated) {
+                    message = "Эта заявка уже оценена или оценка пока не нужна"
+                }
+            }
+            .onFailure { error = friendlyNetworkError(it) }
+        loadingMeta = false
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        VoitosBackButton(onClick = onBack)
+        Text("Оценка мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        Text("Заявка #$workRequestId", color = VoitosColors.Muted)
+        if (executorName.isNotBlank()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Оцените работу $executorName",
+                color = VoitosColors.Text,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        if (loadingMeta) {
+            CircularProgressIndicator(color = VoitosColors.Accent)
+        } else {
+            Text("Оценка от 1 до 5", color = VoitosColors.Text)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (1..5).forEach { n ->
+                    val selected = score == n
+                    Button(
+                        onClick = { score = n },
+                        enabled = !alreadyRated,
+                        colors = if (selected) voitosPrimaryButtonColors() else voitosSecondaryButtonColors(),
+                    ) { Text("$n") }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = comment,
+                onValueChange = { comment = it.take(2000) },
+                label = { Text("Комментарий (необязательно)", color = VoitosColors.Muted) },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                enabled = !alreadyRated,
+                colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            error?.let { Text(it, color = VoitosColors.Danger) }
+            message?.let { Text(it, color = VoitosColors.Ok) }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (!alreadyRated) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            if (score !in 1..5) {
+                                error = "Выберите оценку от 1 до 5"
+                                return@launch
+                            }
+                            loading = true
+                            error = null
+                            try {
+                                val res = client.rateWorkRequest(
+                                    workRequestId,
+                                    score = score,
+                                    comment = comment.trim(),
+                                )
+                                message = res.message.ifBlank { "Спасибо за оценку!" }
+                                onDone()
+                            } catch (e: Exception) {
+                                error = friendlyNetworkError(e)
+                            } finally {
+                                loading = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading && score in 1..5,
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text(if (loading) "Отправка…" else "Отправить оценку") }
+            }
+            TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                Text(if (alreadyRated) "Назад" else "Позже", color = VoitosColors.Muted)
+            }
+        }
     }
 }
 

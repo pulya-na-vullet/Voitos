@@ -51,6 +51,8 @@ object DeepLinks {
             if (entityId != null) Route.WorkRequest(entityId) else Route.Home
         "work_request.confirm_amount" ->
             if (entityId != null) Route.WorkRequest(entityId, "confirm") else Route.Home
+        "work_request.rate" ->
+            if (entityId != null) Route.WorkRequest(entityId, "rate") else Route.Home
         "work_request.slots_ready" ->
             if (entityId != null) Route.WorkRequest(entityId, "slots") else Route.Home
         "collection.offered",

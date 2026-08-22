@@ -308,6 +308,67 @@ class AppEmitHookTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         wr.refresh_from_db()
         self.assertEqual(wr.status, "awaiting_commission")
+        body = resp.json()
+        self.assertTrue(body.get("needs_rating"))
+
+    def test_rate_work_request_api(self):
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from database.models import (
+            WorkRequest,
+            WorkRequestPayMethod,
+            WorkRequestRating,
+            WorkRequestStatus,
+        )
+
+        wr = WorkRequest.objects.create(
+            user=self.client_user,
+            role=self.role,
+            description="Оценка",
+            status=WorkRequestStatus.AWAITING_COMMISSION,
+            pay_method=WorkRequestPayMethod.CASH,
+            reported_amount=Decimal("1500"),
+            confirmed_amount=Decimal("1500"),
+            assigned_contractor=self.profile,
+            rating_asked_at=timezone.now(),
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        detail = self.client.get(
+            f"/api/v1/work-requests/{wr.id}",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertTrue(detail.json().get("needs_rating"))
+
+        bad = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/rate",
+            data=json.dumps({"score": 9}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(bad.status_code, 400)
+
+        ok = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/rate",
+            data=json.dumps({"score": 5, "comment": "Отлично"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["score"], 5)
+        rating = WorkRequestRating.objects.get(work_request=wr)
+        self.assertEqual(rating.score, 5)
+        self.assertEqual(rating.comment, "Отлично")
+        self.assertEqual(rating.contractor_id, self.profile.id)
+
+        again = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/rate",
+            data=json.dumps({"score": 4}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(again.status_code, 409)
 
     def test_receipt_approve_emits(self):
         from decimal import Decimal

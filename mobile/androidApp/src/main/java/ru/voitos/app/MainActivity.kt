@@ -44,6 +44,7 @@ import ru.voitos.app.ui.CabinetScreen
 import ru.voitos.app.ui.ChangePinScreen
 import ru.voitos.app.ui.CollectionDetailScreen
 import ru.voitos.app.ui.CollectionsScreen
+import ru.voitos.app.ui.RateMasterScreen
 import ru.voitos.app.ui.ConfirmAmountScreen
 import ru.voitos.app.ui.ExecutorOffersScreen
 import ru.voitos.app.ui.ExecutorRegisterScreen
@@ -104,6 +105,7 @@ class MainActivity : ComponentActivity() {
         data object GroupChat : Screen()
         data object ExecutorRegister : Screen()
         data class Confirm(val id: Int) : Screen()
+        data class Rate(val id: Int) : Screen()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -244,7 +246,7 @@ class MainActivity : ComponentActivity() {
                         Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister, Screen.ChangePin, Screen.Wish ->
                             goMain(MainTab.Cabinet)
                         is Screen.WorkRequestPhotos -> goMain(MainTab.CallMaster)
-                        is Screen.WorkRequestDetail, is Screen.Confirm -> goMain(MainTab.WorkRequests)
+                        is Screen.WorkRequestDetail, is Screen.Confirm, is Screen.Rate -> goMain(MainTab.WorkRequests)
                     }
                 }
 
@@ -430,6 +432,7 @@ class MainActivity : ComponentActivity() {
                                         MainTab.WorkRequests -> WorkRequestsScreen(
                                             client = client,
                                             onConfirm = { id -> screen = Screen.Confirm(id) },
+                                            onRate = { id -> screen = Screen.Rate(id) },
                                             onOpen = { id -> screen = Screen.WorkRequestDetail(id) },
                                             onBack = null,
                                         )
@@ -507,6 +510,7 @@ class MainActivity : ComponentActivity() {
                                     screen = Screen.Main
                                 },
                                 onConfirmAmount = { id -> screen = Screen.Confirm(id) },
+                                onRate = { id -> screen = Screen.Rate(id) },
                             )
 
                             Screen.Subscription -> SubscriptionScreen(
@@ -565,6 +569,23 @@ class MainActivity : ComponentActivity() {
                             is Screen.Confirm -> ConfirmAmountScreen(
                                 client = client,
                                 workRequestId = s.id,
+                                onDone = { needsRating ->
+                                    if (needsRating) {
+                                        screen = Screen.Rate(s.id)
+                                    } else {
+                                        tab = MainTab.WorkRequests
+                                        screen = Screen.Main
+                                    }
+                                },
+                                onBack = {
+                                    tab = MainTab.WorkRequests
+                                    screen = Screen.Main
+                                },
+                            )
+
+                            is Screen.Rate -> RateMasterScreen(
+                                client = client,
+                                workRequestId = s.id,
                                 onDone = {
                                     tab = MainTab.WorkRequests
                                     screen = Screen.Main
@@ -619,8 +640,11 @@ class MainActivity : ComponentActivity() {
         return when (val route = DeepLinks.parse(link)) {
             is DeepLinks.Route.Collection -> Screen.CollectionDetail(route.id)
             is DeepLinks.Route.WorkRequest ->
-                if (route.action == "confirm") Screen.Confirm(route.id)
-                else Screen.WorkRequestDetail(route.id)
+                when (route.action) {
+                    "confirm" -> Screen.Confirm(route.id)
+                    "rate" -> Screen.Rate(route.id)
+                    else -> Screen.WorkRequestDetail(route.id)
+                }
             is DeepLinks.Route.Subscription -> Screen.Subscription
             is DeepLinks.Route.Feedback -> Screen.Feedback
             else -> Screen.Main

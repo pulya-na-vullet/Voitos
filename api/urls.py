@@ -42,6 +42,11 @@ urlpatterns = [
         name="work_request_confirm",
     ),
     path(
+        "work-requests/<int:pk>/rate",
+        views.work_request_rate,
+        name="work_request_rate",
+    ),
+    path(
         "work-requests/<int:pk>/confirm-slot",
         views.work_request_confirm_slot,
         name="work_request_confirm_slot",

@@ -173,6 +173,7 @@ data class WorkRequestBrief(
     @SerialName("agreed_slot") val agreedSlot: String = "",
     @SerialName("can_confirm_slot") val canConfirmSlot: Boolean = false,
     @SerialName("needs_confirm_amount") val needsConfirmAmount: Boolean = false,
+    @SerialName("needs_rating") val needsRating: Boolean = false,
 )
 
 @Serializable
@@ -196,6 +197,7 @@ data class WorkRequestDetail(
     @SerialName("agreed_slot") val agreedSlot: String = "",
     @SerialName("can_confirm_slot") val canConfirmSlot: Boolean = false,
     @SerialName("needs_confirm_amount") val needsConfirmAmount: Boolean = false,
+    @SerialName("needs_rating") val needsRating: Boolean = false,
     @SerialName("needs_photos") val needsPhotos: Boolean = false,
     @SerialName("photo_count") val photoCount: Int = 0,
     @SerialName("photo_urls") val photoUrls: List<String> = emptyList(),
@@ -205,6 +207,22 @@ data class WorkRequestDetail(
     @SerialName("reported_amount") val reportedAmount: Double? = null,
     @SerialName("confirmed_amount") val confirmedAmount: Double? = null,
     @SerialName("pay_method") val payMethod: String = "",
+)
+
+@Serializable
+data class ConfirmAmountResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("needs_rating") val needsRating: Boolean = false,
+)
+
+@Serializable
+data class RateWorkRequestResult(
+    val ok: Boolean = true,
+    val score: Int = 0,
+    val comment: String = "",
+    val message: String = "",
 )
 
 @Serializable

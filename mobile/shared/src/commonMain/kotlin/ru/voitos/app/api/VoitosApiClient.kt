@@ -42,6 +42,8 @@ import ru.voitos.app.model.OkResponse
 import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.PhotoUploadResult
 import ru.voitos.app.model.ReceiptList
+import ru.voitos.app.model.ConfirmAmountResult
+import ru.voitos.app.model.RateWorkRequestResult
 import ru.voitos.app.model.ReceiptUploadResult
 import ru.voitos.app.model.ServiceGroupList
 import ru.voitos.app.model.SubscriptionInfo
@@ -579,7 +581,11 @@ class VoitosApiClient(
             setBody(buildJsonObject {})
         }.body()
 
-    suspend fun confirmAmount(workRequestId: Int, confirmed: Boolean, amount: Double? = null) {
+    suspend fun confirmAmount(
+        workRequestId: Int,
+        confirmed: Boolean,
+        amount: Double? = null,
+    ): ConfirmAmountResult =
         http.post("$baseUrl/work-requests/$workRequestId/confirm-amount") {
             applyAuth()
             contentType(ContentType.Application.Json)
@@ -589,8 +595,23 @@ class VoitosApiClient(
                     if (amount != null) put("amount", amount)
                 },
             )
-        }
-    }
+        }.body()
+
+    suspend fun rateWorkRequest(
+        workRequestId: Int,
+        score: Int,
+        comment: String = "",
+    ): RateWorkRequestResult =
+        http.post("$baseUrl/work-requests/$workRequestId/rate") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("score", score)
+                    if (comment.isNotBlank()) put("comment", comment)
+                },
+            )
+        }.body()
 
     /** Register FCM/APNs token for the current session. */
     suspend fun registerDevice(pushToken: String, platform: String = "android") {

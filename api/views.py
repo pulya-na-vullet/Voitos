@@ -403,6 +403,8 @@ def _slot_labels(wr) -> list[str]:
 
 
 def _work_request_brief(wr) -> dict:
+    from services.work_request_rating import work_request_needs_rating
+
     slots = _slot_labels(wr)
     return {
         "id": wr.id,
@@ -418,6 +420,7 @@ def _work_request_brief(wr) -> dict:
         "agreed_slot": wr.agreed_slot or "",
         "can_confirm_slot": wr.status == "scheduling",
         "needs_confirm_amount": wr.status == "awaiting_client",
+        "needs_rating": work_request_needs_rating(wr),
     }
 
 
@@ -441,6 +444,8 @@ def work_request_detail(request, pk: int):
     )
     if not wr:
         return json_response({"error": "not_found"}, status=404)
+    from services.work_request_rating import work_request_needs_rating
+
     contractor = wr.assigned_contractor
     requires_photos = bool(
         getattr(wr.role, "requires_work_photos", True) if wr.role_id else True
@@ -451,7 +456,7 @@ def work_request_detail(request, pk: int):
         {
             "assigned_name": str(contractor) if contractor else None,
             "assigned_phone": getattr(contractor, "phone", None) if contractor else None,
-            "needs_rating": False,
+            "needs_rating": work_request_needs_rating(wr),
             "needs_photos": requires_photos and wr.status == "draft",
             "photo_count": len(photo_urls),
             "photo_urls": photo_urls,
@@ -1166,7 +1171,66 @@ def work_request_confirm_amount(request, pk: int):
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     reply = _apply_client_confirmation(wr, Decimal(money), pending)
     wr.refresh_from_db()
-    return json_response({"ok": True, "message": reply, "status": wr.status})
+    from services.work_request_rating import work_request_needs_rating
+
+    return json_response(
+        {
+            "ok": True,
+            "message": reply,
+            "status": wr.status,
+            "needs_rating": work_request_needs_rating(wr),
+        }
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_rate(request, pk: int):
+    """Клиент оценивает исполнителя (1–5) после выполнения заявки."""
+    from services.work_request_rating import submit_work_request_rating
+
+    user = request.bot_user
+    wr = (
+        WorkRequest.objects.select_related("assigned_contractor", "assigned_contractor__user")
+        .filter(pk=pk, user=user)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+
+    data = parse_json(request)
+    raw_score = data.get("score")
+    comment = str(data.get("comment") or "")
+    try:
+        rating = submit_work_request_rating(
+            user,
+            wr,
+            score=raw_score,
+            comment=comment,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        status = {
+            "forbidden": 403,
+            "already_rated": 409,
+            "not_ready_for_rating": 400,
+            "no_executor": 400,
+            "score_out_of_range": 400,
+            "score_invalid": 400,
+        }.get(code, 400)
+        return json_response({"error": code, "detail": code}, status=status)
+
+    return json_response(
+        {
+            "ok": True,
+            "score": rating.score,
+            "comment": rating.comment or "",
+            "message": (
+                f"Спасибо! Сохранили оценку {rating.score}/5"
+                + (" и комментарий." if rating.comment else ".")
+            ),
+        }
+    )
 
 
 @api_login_required
