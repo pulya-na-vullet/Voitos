@@ -577,22 +577,64 @@ def start_app_registration(
     AppRegistrationDraft.objects.filter(
         phone=phone, consumed_at__isnull=True
     ).update(consumed_at=timezone.now())
-    AppRegistrationDraft.objects.create(
+    draft = AppRegistrationDraft.objects.create(
         phone=phone,
         real_name=name[:255],
         gender=gender_norm,
         birth_date=birth,
         expires_at=timezone.now() + timedelta(hours=DRAFT_TTL_HOURS),
     )
+    bot_url = registration_max_deep_link(draft)
     return {
         "ok": True,
         "phone": phone,
-        "max_bot_open_url": max_bot_open_url(),
+        "max_bot_open_url": bot_url,
         "message": (
-            "Перейдите в бот Voitos в Max и напишите «код регистрации». "
-            "Введите полученный код в приложении."
+            "Нажмите «Перейти в Max» — бот сразу пришлёт код. "
+            "Если кода нет, напишите в боте «код»."
         ),
     }
+
+
+def registration_max_deep_link(draft: AppRegistrationDraft) -> str:
+    """Deep link с payload: при открытии бот сразу выдаёт код регистрации."""
+    base = max_bot_open_url().split("?")[0].rstrip("/")
+    return f"{base}?start=appreg-{draft.id}"
+
+
+def parse_app_register_payload(payload: str) -> tuple[str | None, int | None]:
+    """Разбор start-payload → (phone, draft_id)."""
+    raw = (payload or "").strip()
+    if not raw:
+        return None, None
+    lower = raw.lower()
+    m = re.match(r"^appreg[-_](\d+)$", lower)
+    if m:
+        return None, int(m.group(1))
+    m = re.match(r"^reg(\d{10,15})$", lower)
+    if m:
+        return normalize_user_phone(m.group(1)), None
+    return None, None
+
+
+def bot_handle_app_register_start_payload(user: BotUser, payload: str) -> str | None:
+    """Ответ на bot_started с payload из приложения; None если не наш payload."""
+    phone, draft_id = parse_app_register_payload(payload)
+    if draft_id is not None:
+        draft = (
+            AppRegistrationDraft.objects.filter(id=draft_id, consumed_at__isnull=True)
+            .order_by("-created_at")
+            .first()
+        )
+        if not draft or not draft.is_open():
+            return (
+                "Заявка из приложения не найдена или устарела.\n"
+                "Заполните регистрацию в приложении Voitos ещё раз."
+            )
+        return bot_issue_register_code(user, phone=draft.phone)
+    if phone:
+        return bot_issue_register_code(user, phone=phone)
+    return None
 
 
 @transaction.atomic
@@ -645,6 +687,16 @@ def looks_like_app_register(text: str) -> bool:
     lower = (text or "").strip().lower()
     if not lower:
         return False
+    # Короткие команды от нового клиента после перехода из приложения
+    if lower in {
+        "код",
+        "code",
+        "старт",
+        "start",
+        "/start",
+        "регистрация приложение",
+    }:
+        return True
     return any(k in lower for k in APP_REGISTER_KEYWORDS)
 
 

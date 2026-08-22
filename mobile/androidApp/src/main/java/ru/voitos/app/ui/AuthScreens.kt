@@ -416,7 +416,7 @@ fun LoginScreen(
                                         maxBotUrl = resp.maxBotOpenUrl
                                     }
                                     debugHint = resp.message.ifBlank {
-                                        "Перейдите в бот Voitos в Max и напишите «код регистрации»."
+                                        "Нажмите «Перейти в Max» — бот пришлёт код. Если кода нет, напишите в боте «код»."
                                     }
                                     code = ""
                                     regStep = 1
@@ -446,7 +446,7 @@ fun LoginScreen(
             } else {
                 Text(
                     debugHint
-                        ?: "Перейдите в бот Voitos в Max, напишите «код регистрации» и введите код ниже.",
+                        ?: "Нажмите «Перейти в Max» — бот пришлёт код. Если кода нет, напишите в боте «код» и введите его ниже.",
                     color = VoitosColors.Muted,
                     style = MaterialTheme.typography.bodyMedium,
                 )

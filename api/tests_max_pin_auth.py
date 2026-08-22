@@ -162,16 +162,22 @@ class MaxPinAuthTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(start.status_code, 200)
-        self.assertTrue(start.json()["ok"])
+        body = start.json()
+        self.assertTrue(body["ok"])
+        self.assertIn("?start=appreg-", body["max_bot_open_url"])
 
         max_user = BotUser.objects.create(
             max_user_id="max_reg_new",
             chat_id="chat_reg",
             display_name="MaxReg",
         )
-        reply = mobile_auth.bot_issue_register_code(max_user, phone=phone)
-        self.assertIn("Код для завершения регистрации", reply)
-        code = reply.split(":")[1].split()[0].strip()
+        draft_id = int(body["max_bot_open_url"].rsplit("-", 1)[-1])
+        auto = mobile_auth.bot_handle_app_register_start_payload(
+            max_user, f"appreg-{draft_id}"
+        )
+        self.assertIsNotNone(auto)
+        self.assertIn("Код для завершения регистрации", auto)
+        code = auto.split(":")[1].split()[0].strip()
         self.assertEqual(len(code), 4)
 
         confirm = self.client.post(
@@ -205,3 +211,19 @@ class MaxPinAuthTests(TestCase):
         )
         self.assertEqual(resp.status_code, 409)
         self.assertEqual(resp.json()["error"], "already_registered")
+
+    def test_plain_kod_triggers_register_flow(self):
+        self.assertTrue(mobile_auth.looks_like_app_register("код"))
+        self.assertTrue(mobile_auth.looks_like_app_register("Код"))
+        phone = "89625505555"
+        mobile_auth.start_app_registration(
+            phone=phone,
+            real_name="Петр",
+            gender="male",
+            birth_date="1992-02-02",
+        )
+        user = BotUser.objects.create(max_user_id="max_kod", chat_id="c")
+        reply = mobile_auth.bot_start_app_register(user)
+        self.assertIn("телефон", reply.lower())
+        reply2 = mobile_auth.bot_issue_register_code(user, phone=phone)
+        self.assertIn("Код для завершения регистрации", reply2)
