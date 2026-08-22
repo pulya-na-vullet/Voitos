@@ -67,6 +67,11 @@ class VoitosApiClient(
         return body.ok
     }
 
+    suspend fun healthCheck(clientVersionCode: Int? = null): HealthResponse {
+        val q = if (clientVersionCode != null) "?version_code=$clientVersionCode" else ""
+        return http.get("$baseUrl/health$q").body()
+    }
+
     suspend fun phoneStart(phone: String): Map<String, String?> =
         http.post("$baseUrl/auth/phone/start") {
             contentType(ContentType.Application.Json)

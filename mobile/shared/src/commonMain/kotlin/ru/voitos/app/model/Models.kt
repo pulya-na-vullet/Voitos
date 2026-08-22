@@ -7,6 +7,13 @@ import kotlinx.serialization.Serializable
 data class HealthResponse(
     val ok: Boolean = false,
     val service: String = "",
+    @SerialName("min_app_version_code") val minAppVersionCode: Int = 0,
+    @SerialName("latest_app_version_code") val latestAppVersionCode: Int = 0,
+    @SerialName("latest_app_version_name") val latestAppVersionName: String = "",
+    @SerialName("apk_url") val apkUrl: String = "",
+    @SerialName("update_message") val updateMessage: String = "",
+    @SerialName("update_required") val updateRequired: Boolean = false,
+    @SerialName("client_version_code") val clientVersionCode: Int = 0,
 )
 
 @Serializable
@@ -25,6 +32,11 @@ data class AuthConfig(
     @SerialName("app_deep_link") val appDeepLink: String = "",
     @SerialName("phone_otp_fallback") val phoneOtpFallback: Boolean = false,
     @SerialName("registration_hint") val registrationHint: String = "",
+    @SerialName("min_app_version_code") val minAppVersionCode: Int = 0,
+    @SerialName("latest_app_version_code") val latestAppVersionCode: Int = 0,
+    @SerialName("latest_app_version_name") val latestAppVersionName: String = "",
+    @SerialName("apk_url") val apkUrl: String = "",
+    @SerialName("update_message") val updateMessage: String = "",
 )
 
 @Serializable

@@ -130,16 +130,18 @@ def phone_login_verify(request):
 @require_http_methods(["GET"])
 def auth_config(request):
     """Публичные настройки экрана входа."""
-    return json_response(
-        {
-            "max_bot_open_url": mobile_auth.max_bot_open_url(),
-            "app_deep_link": mobile_auth.app_deep_link(),
-            "registration_hint": (
-                "Регистрация только в боте Max: укажите телефон — "
-                "мы привяжем его к вашему Max ID."
-            ),
-        }
-    )
+    from services.app_version import mobile_version_payload
+
+    body = {
+        "max_bot_open_url": mobile_auth.max_bot_open_url(),
+        "app_deep_link": mobile_auth.app_deep_link(),
+        "registration_hint": (
+            "Регистрация только в боте Max: укажите телефон — "
+            "мы привяжем его к вашему Max ID."
+        ),
+    }
+    body.update(mobile_version_payload())
+    return json_response(body)
 
 
 @api_public

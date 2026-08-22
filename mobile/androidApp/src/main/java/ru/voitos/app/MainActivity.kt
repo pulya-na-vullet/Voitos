@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import ru.voitos.app.AppVersion
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.debug.CrashFileLogger
 import ru.voitos.app.nav.DeepLinks
@@ -44,6 +45,7 @@ import ru.voitos.app.ui.ConfirmAmountScreen
 import ru.voitos.app.ui.ExecutorOffersScreen
 import ru.voitos.app.ui.ExecutorRegisterScreen
 import ru.voitos.app.ui.FeedbackScreen
+import ru.voitos.app.ui.ForceUpdateScreen
 import ru.voitos.app.ui.GroupChatScreen
 import ru.voitos.app.ui.LoginScreen
 import ru.voitos.app.ui.MainShell
@@ -72,6 +74,7 @@ class MainActivity : ComponentActivity() {
 
     private sealed class Screen {
         data object Login : Screen()
+        data object ForceUpdate : Screen()
         data object SetPin : Screen()
         data object ChangePin : Screen()
         data object Wish : Screen()
@@ -128,11 +131,21 @@ class MainActivity : ComponentActivity() {
                 var playSplash by remember { mutableStateOf(false) }
                 var pendingAfterBootstrap by remember { mutableStateOf(deepLinkScreen) }
                 var crashText by remember { mutableStateOf(lastCrash) }
+                var updateMessage by remember { mutableStateOf("") }
+                var updateApkUrl by remember { mutableStateOf("") }
+                var updateLatestName by remember { mutableStateOf("") }
                 val scope = rememberCoroutineScope()
 
                 fun enterMainWithSplash(splash: Boolean) {
                     playSplash = splash
                     screen = Screen.Main
+                }
+
+                fun goForceUpdate(message: String, apkUrl: String, latestName: String) {
+                    updateMessage = message
+                    updateApkUrl = apkUrl
+                    updateLatestName = latestName
+                    screen = Screen.ForceUpdate
                 }
 
                 fun goMain(targetTab: MainTab = tab, refreshCollections: Boolean = false) {
@@ -145,7 +158,7 @@ class MainActivity : ComponentActivity() {
 
                 fun handleSystemBack() {
                     when (val current = screen) {
-                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.SetPin, Screen.Main ->
+                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.SetPin, Screen.ForceUpdate, Screen.Main ->
                             moveTaskToBack(true)
                         is Screen.CollectionDetail, Screen.GroupChat ->
                             goMain(MainTab.Collections, refreshCollections = true)
@@ -242,6 +255,13 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
 
+                            Screen.ForceUpdate -> ForceUpdateScreen(
+                                message = updateMessage,
+                                latestVersionName = updateLatestName,
+                                currentVersionName = AppVersion.name,
+                                apkUrl = updateApkUrl,
+                            )
+
                             Screen.SetPin -> SetPinScreen(
                                 client = client,
                                 onDone = {
@@ -258,6 +278,21 @@ class MainActivity : ComponentActivity() {
                                     CircularProgressIndicator(color = VoitosColors.Accent2)
                                 }
                                 LaunchedEffect(Unit) {
+                                    val health = runCatching {
+                                        client.healthCheck(AppVersion.code)
+                                    }.getOrNull()
+                                    if (health != null &&
+                                        (health.updateRequired ||
+                                            (health.minAppVersionCode > 0 &&
+                                                AppVersion.code < health.minAppVersionCode))
+                                    ) {
+                                        goForceUpdate(
+                                            message = health.updateMessage,
+                                            apkUrl = health.apkUrl,
+                                            latestName = health.latestAppVersionName,
+                                        )
+                                        return@LaunchedEffect
+                                    }
                                     val needOnboarding = runCatching {
                                         val p = client.onboarding()
                                         !(p.completed || p.rewardGranted)
