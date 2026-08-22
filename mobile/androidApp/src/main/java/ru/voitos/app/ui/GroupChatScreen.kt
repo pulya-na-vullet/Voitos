@@ -63,6 +63,7 @@ fun GroupChatScreen(
     var groups by remember { mutableStateOf<List<ServiceGroupBrief>>(emptyList()) }
     var selectedGroupId by remember { mutableStateOf(initialGroupId) }
     var messages by remember { mutableStateOf<List<GroupChatMessage>>(emptyList()) }
+    var authorPaid by remember { mutableStateOf<Map<String, List<Boolean>>>(emptyMap()) }
     var draft by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -100,6 +101,7 @@ fun GroupChatScreen(
             try {
                 val res = client.groupMessages(gid)
                 messages = res.items
+                authorPaid = res.authorPaid
                 error = null
             } catch (e: Exception) {
                 if (!silent) error = friendlyNetworkError(e)
@@ -114,6 +116,7 @@ fun GroupChatScreen(
     LaunchedEffect(selectedGroupId) {
         if (selectedGroupId != null) {
             messages = emptyList()
+            authorPaid = emptyMap()
             loadMessages(silent = false)
         } else {
             loading = false
@@ -132,6 +135,7 @@ fun GroupChatScreen(
                 } else {
                     client.groupMessages(gid)
                 }
+                authorPaid = res.authorPaid
                 if (lastId == null) {
                     if (res.items.isNotEmpty()) messages = res.items
                 } else if (res.items.isNotEmpty()) {
@@ -268,7 +272,8 @@ fun GroupChatScreen(
                     }
                 }
                 items(messages, key = { it.id }) { msg ->
-                    ChatBubble(msg)
+                    val dots = msg.authorId?.let { authorPaid[it.toString()] }.orEmpty()
+                    ChatBubble(msg, paymentDots = dots)
                 }
             }
 
@@ -328,7 +333,7 @@ fun GroupChatScreen(
 }
 
 @Composable
-private fun ChatBubble(msg: GroupChatMessage) {
+private fun ChatBubble(msg: GroupChatMessage, paymentDots: List<Boolean> = emptyList()) {
     val mine = msg.isMine
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -360,11 +365,31 @@ private fun ChatBubble(msg: GroupChatMessage) {
             }
             Text(msg.text, color = VoitosColors.Text, style = MaterialTheme.typography.bodyMedium)
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                formatChatTime(msg.createdAt),
-                color = VoitosColors.Muted,
-                style = MaterialTheme.typography.labelSmall,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    formatChatTime(msg.createdAt),
+                    color = VoitosColors.Muted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                if (paymentDots.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        paymentDots.forEach { paid ->
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(if (paid) VoitosColors.Ok else VoitosColors.Danger),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -395,7 +420,16 @@ private fun AvatarDot(url: String, name: String) {
 
 private fun formatChatTime(raw: String): String {
     if (raw.isBlank()) return ""
-    return raw.replace('T', ' ').take(16)
+    // ISO → MM.DD HH:MM (месяц.день часы:минуты)
+    val normalized = raw.replace('T', ' ')
+    val datePart = normalized.take(10)
+    val timePart = normalized.drop(11).take(5)
+    if (datePart.length == 10 && datePart[4] == '-' && datePart[7] == '-') {
+        val mm = datePart.substring(5, 7)
+        val dd = datePart.substring(8, 10)
+        return if (timePart.length == 5) "$mm.$dd $timePart" else "$mm.$dd"
+    }
+    return normalized.take(16)
 }
 
 private fun formatRub(value: Double): String {

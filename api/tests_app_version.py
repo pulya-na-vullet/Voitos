@@ -5,10 +5,10 @@ from database.models import AppSettings
 
 @override_settings(
     MOBILE_OTP_DEBUG=True,
-    MOBILE_MIN_VERSION_CODE=24,
-    MOBILE_LATEST_VERSION_CODE=24,
-    MOBILE_LATEST_VERSION_NAME="0.2.20-kmp",
-    VOITOS_BACKEND_VERSION="0.2.20",
+    MOBILE_MIN_VERSION_CODE=25,
+    MOBILE_LATEST_VERSION_CODE=25,
+    MOBILE_LATEST_VERSION_NAME="0.2.21-kmp",
+    VOITOS_BACKEND_VERSION="0.2.21",
 )
 class AppVersionHealthTests(TestCase):
     def setUp(self):
@@ -24,11 +24,11 @@ class AppVersionHealthTests(TestCase):
         self.assertEqual(old.status_code, 200)
         data = old.json()
         self.assertTrue(data["ok"])
-        self.assertEqual(data["backend_version"], "0.2.20")
-        self.assertEqual(data["min_app_version_code"], 24)
+        self.assertEqual(data["backend_version"], "0.2.21")
+        self.assertEqual(data["min_app_version_code"], 25)
         self.assertTrue(data["update_required"])
 
-        cur = self.client.get("/api/v1/health?version_code=24")
+        cur = self.client.get("/api/v1/health?version_code=25")
         self.assertFalse(cur.json()["update_required"])
 
     def test_pin_login_rejects_old_version(self):
@@ -46,13 +46,13 @@ class AppVersionHealthTests(TestCase):
         )
         resp = self.client.post(
             "/api/v1/auth/pin/login",
-            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 23}),
+            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 24}),
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 426)
         ok = self.client.post(
             "/api/v1/auth/pin/login",
-            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 24}),
+            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 25}),
             content_type="application/json",
         )
         self.assertEqual(ok.status_code, 200)

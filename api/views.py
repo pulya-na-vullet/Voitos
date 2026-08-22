@@ -1339,10 +1339,13 @@ def group_messages(request, group_id: int):
         return json_response({"error": str(exc), "detail": str(exc)}, status=403)
 
     if request.method == "GET":
+        from services.group_chat import collection_payment_overlay
+
         after_raw = (request.GET.get("after_id") or "").strip()
         before_raw = (request.GET.get("before_id") or "").strip()
         after_id = int(after_raw) if after_raw.isdigit() else None
         before_id = int(before_raw) if before_raw.isdigit() else None
+        overlay = collection_payment_overlay(group)
         try:
             items = list_messages(
                 request.bot_user,
@@ -1352,7 +1355,13 @@ def group_messages(request, group_id: int):
                 request=request,
             )
         except Exception:
-            return json_response({"items": []})
+            return json_response(
+                {
+                    "group": {"id": group.id, "name": group.name or ""},
+                    "items": [],
+                    **overlay,
+                }
+            )
         # Открытие/опрос ленты без after_id — помечаем прочитанным
         if after_id is None and before_id is None and items:
             mark_group_read(
@@ -1366,7 +1375,13 @@ def group_messages(request, group_id: int):
                 group,
                 last_read_message_id=items[-1]["id"],
             )
-        return json_response({"group": {"id": group.id, "name": group.name or ""}, "items": items})
+        return json_response(
+            {
+                "group": {"id": group.id, "name": group.name or ""},
+                "items": items,
+                **overlay,
+            }
+        )
 
     data = parse_json(request)
     try:
