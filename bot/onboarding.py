@@ -36,7 +36,7 @@ STORIES: tuple[ComicStory, ...] = (
     ComicStory(
         code="playground",
         title="Ремонт детской площадки",
-        caption="Сломалась площадка — через Voitos двор скидывается и зовёт мастера.",
+        caption="Сломалась площадка — через Voitos двор скидывается и находит мастера.",
         image_name="02_playground.jpg",
     ),
     ComicStory(
@@ -48,13 +48,13 @@ STORIES: tuple[ComicStory, ...] = (
     ComicStory(
         code="manicure",
         title="Маникюр",
-        caption="Нужен мастер на дом — в Voitos находите маникюр рядом и записываетесь.",
+        caption="Нужен мастер на дом — Voitos находит мастера по маникюру рядом.",
         image_name="04_manicure.jpg",
     ),
     ComicStory(
         code="computer",
         title="Ремонт компьютера",
-        caption="Синий экран — Voitos находит проверенного мастера по компьютерам.",
+        caption="Сломался компьютер? Синий экран — Voitos находит проверенного мастера по компьютерам.",
         image_name="05_computer.jpg",
     ),
 )

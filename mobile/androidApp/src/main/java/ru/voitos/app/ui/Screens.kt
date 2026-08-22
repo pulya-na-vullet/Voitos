@@ -1319,18 +1319,12 @@ fun OnboardingScreen(
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
+            if (index > 0) {
                 TextButton(
-                    onClick = { if (index > 0) index -= 1 },
-                    enabled = index > 0 && !loading,
+                    onClick = { index -= 1 },
+                    enabled = !loading,
+                    modifier = Modifier.fillMaxWidth(),
                 ) { Text("← Предыдущий", color = VoitosColors.Accent) }
-                TextButton(
-                    onClick = { if (index < steps.lastIndex) index += 1 },
-                    enabled = index < steps.lastIndex && !loading,
-                ) { Text("Следующий →", color = VoitosColors.Accent) }
             }
             if (canClose && !requireCompletion) {
                 VoitosBackButton(
