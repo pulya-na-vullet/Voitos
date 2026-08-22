@@ -571,6 +571,12 @@ data class ServiceGroupList(
 )
 
 @Serializable
+data class GroupChatActiveCollection(
+    val id: Int = 0,
+    val title: String = "",
+)
+
+@Serializable
 data class GroupChatMessage(
     val id: Int = 0,
     @SerialName("group_id") val groupId: Int = 0,
@@ -586,6 +592,9 @@ data class GroupChatMessage(
 data class GroupChatMessagesResponse(
     val group: ServiceGroupBrief = ServiceGroupBrief(),
     val items: List<GroupChatMessage> = emptyList(),
+    @SerialName("active_collections") val activeCollections: List<GroupChatActiveCollection> = emptyList(),
+    /** author_id → оплатил ли каждый активный сбор (порядок = active_collections). */
+    @SerialName("author_paid") val authorPaid: Map<String, List<Boolean>> = emptyMap(),
 )
 
 @Serializable

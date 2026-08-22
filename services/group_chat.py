@@ -10,13 +10,73 @@ from django.db.models import Count
 from PIL import Image
 
 from api.media import unique_upload_filename
-from database.models import BotUser, GroupChatMessage, GroupChatReadState, ServiceGroup
+from database.models import (
+    BotUser,
+    CampaignStatus,
+    GroupChatMessage,
+    GroupChatReadState,
+    InviteStatus,
+    ServiceCampaign,
+    ServiceGroup,
+    ServiceInvite,
+)
 
 logger = logging.getLogger(__name__)
 
 AVATAR_SIZE = 500
 MAX_CHAT_TEXT = 2000
 CHAT_PAGE = 80
+# Совпадает с лимитом активных сборов в collections_list.
+ACTIVE_COLLECTION_LIMIT = 4
+
+
+def active_collections_for_group(group: ServiceGroup) -> list[ServiceCampaign]:
+    """Активные сборы группы (стабильный порядок: старые слева), макс. 4."""
+    return list(
+        ServiceCampaign.objects.filter(
+            group=group,
+            status=CampaignStatus.ACTIVE,
+        ).order_by("created_at", "id")[:ACTIVE_COLLECTION_LIMIT]
+    )
+
+
+def author_paid_map(group: ServiceGroup, campaigns: list[ServiceCampaign] | None = None) -> dict[str, list[bool]]:
+    """
+    author_id → список bool по активным сборам (True = оплатил).
+    Ключи — строки, чтобы JSON/Kotlin map стабильно десериализовались.
+    """
+    if campaigns is None:
+        campaigns = active_collections_for_group(group)
+    if not campaigns:
+        return {}
+
+    campaign_ids = [c.id for c in campaigns]
+    paid_pairs = set(
+        ServiceInvite.objects.filter(
+            campaign_id__in=campaign_ids,
+            status=InviteStatus.PAID,
+        ).values_list("user_id", "campaign_id")
+    )
+    # Все участники группы + авторы сообщений без членства (на всякий случай).
+    member_ids = set(group.members.values_list("id", flat=True))
+    result: dict[str, list[bool]] = {}
+    for uid in member_ids:
+        result[str(uid)] = [(uid, cid) in paid_pairs for cid in campaign_ids]
+    return result
+
+
+def collection_payment_overlay(group: ServiceGroup) -> dict:
+    campaigns = active_collections_for_group(group)
+    return {
+        "active_collections": [
+            {
+                "id": c.id,
+                "title": (c.title or "").strip() or f"Сбор #{c.id}",
+            }
+            for c in campaigns
+        ],
+        "author_paid": author_paid_map(group, campaigns),
+    }
 
 
 def groups_for_user(user: BotUser) -> list[ServiceGroup]:
