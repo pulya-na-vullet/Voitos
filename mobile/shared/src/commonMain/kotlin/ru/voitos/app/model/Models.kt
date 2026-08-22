@@ -47,6 +47,7 @@ data class OkResponse(
     @SerialName("has_pin") val hasPin: Boolean = false,
     val message: String = "",
     val phone: String = "",
+    @SerialName("max_bot_open_url") val maxBotOpenUrl: String = "",
 )
 
 @Serializable
@@ -54,6 +55,11 @@ data class ApiErrorBody(
     val error: String = "",
     val detail: String = "",
 )
+
+class ApiException(
+    val code: String,
+    override val message: String,
+) : Exception(message)
 
 @Serializable
 data class WishItem(

@@ -57,6 +57,8 @@ class BotUserAdmin(admin.ModelAdmin):
     list_display = (
         "max_user_id",
         "real_name",
+        "gender",
+        "birth_date",
         "locality",
         "profile_status",
         "subscription_until",
@@ -64,7 +66,7 @@ class BotUserAdmin(admin.ModelAdmin):
         "last_seen_at",
     )
     search_fields = ("max_user_id", "display_name", "real_name", "username", "locality", "phone")
-    list_filter = ("profile_status", "locality")
+    list_filter = ("profile_status", "locality", "gender")
 
 
 @admin.register(PaymentReceipt)

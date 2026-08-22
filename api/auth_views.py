@@ -19,12 +19,21 @@ from subscriptions.receipts import normalize_phone
 def _error(code: str, status: int = 400, detail: str | None = None):
     text = detail or {
         "not_registered": (
-            "Номер не найден. Пройдите регистрацию в боте Max "
-            "(укажите этот телефон) — после этого вход в приложение станет доступен."
+            "Номер не найден. Нажмите «Регистрация», заполните анкету "
+            "и подтвердите код из бота Voitos в Max."
         ),
+        "already_registered": "Этот номер уже зарегистрирован — нажмите «Войти».",
         "invalid_phone": "Укажите корректный номер телефона",
         "invalid_code": "Неверный или просроченный код",
         "max_required": "Сначала привяжите аккаунт в боте Max",
+        "name_required": "Укажите ФИО",
+        "gender_invalid": "Укажите пол",
+        "birth_date_required": "Укажите дату рождения",
+        "birth_date_invalid": "Проверьте дату рождения",
+        "draft_not_found": (
+            "Заявка на регистрацию не найдена или устарела. "
+            "Заполните анкету ещё раз."
+        ),
     }.get(code, code)
     return json_response({"error": code, "detail": text}, status=status)
 
@@ -127,6 +136,41 @@ def phone_login_verify(request):
 
 
 @api_public
+@require_http_methods(["POST"])
+def register_start(request):
+    """Анкета регистрации из приложения (до кода из Max)."""
+    data = parse_json(request)
+    try:
+        body = mobile_auth.start_app_registration(
+            phone=str(data.get("phone") or ""),
+            real_name=str(data.get("real_name") or data.get("name") or ""),
+            gender=str(data.get("gender") or ""),
+            birth_date=data.get("birth_date") or data.get("birthDate") or "",
+        )
+    except ValueError as exc:
+        code = str(exc)
+        status = 409 if code == "already_registered" else 400
+        return _error(code, status=status)
+    return json_response(body)
+
+
+@api_public
+@require_http_methods(["POST"])
+def register_confirm(request):
+    """Код из бота Max → завершение регистрации и access_token."""
+    data = parse_json(request)
+    try:
+        body = mobile_auth.confirm_app_registration(
+            phone=str(data.get("phone") or ""),
+            code=str(data.get("code") or ""),
+            device_name=str(data.get("device_name") or ""),
+        )
+    except ValueError as exc:
+        return _error(str(exc))
+    return json_response(body)
+
+
+@api_public
 @require_http_methods(["GET"])
 def auth_config(request):
     """Публичные настройки экрана входа."""
@@ -136,8 +180,8 @@ def auth_config(request):
         "max_bot_open_url": mobile_auth.max_bot_open_url(),
         "app_deep_link": mobile_auth.app_deep_link(),
         "registration_hint": (
-            "Регистрация только в боте Max: укажите телефон — "
-            "мы привяжем его к вашему Max ID."
+            "Если номера нет — «Регистрация»: ФИО, пол, дата рождения, "
+            "затем код из бота Voitos в Max."
         ),
     }
     body.update(mobile_version_payload())

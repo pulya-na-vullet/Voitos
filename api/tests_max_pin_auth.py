@@ -146,3 +146,62 @@ class MaxPinAuthTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 403)
+
+    def test_app_registration_with_max_code(self):
+        phone = "89625506666"
+        start = self.client.post(
+            "/api/v1/auth/register/start",
+            data=json.dumps(
+                {
+                    "phone": phone,
+                    "real_name": "Иван Иванов",
+                    "gender": "male",
+                    "birth_date": "15.05.1990",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(start.status_code, 200)
+        self.assertTrue(start.json()["ok"])
+
+        max_user = BotUser.objects.create(
+            max_user_id="max_reg_new",
+            chat_id="chat_reg",
+            display_name="MaxReg",
+        )
+        reply = mobile_auth.bot_issue_register_code(max_user, phone=phone)
+        self.assertIn("Код для завершения регистрации", reply)
+        code = reply.split(":")[1].split()[0].strip()
+        self.assertEqual(len(code), 4)
+
+        confirm = self.client.post(
+            "/api/v1/auth/register/confirm",
+            data=json.dumps({"phone": phone, "code": code}),
+            content_type="application/json",
+        )
+        self.assertEqual(confirm.status_code, 200)
+        data = confirm.json()
+        self.assertTrue(data["access_token"])
+        self.assertTrue(data["needs_pin_setup"])
+
+        max_user.refresh_from_db()
+        self.assertEqual(max_user.phone, phone)
+        self.assertEqual(max_user.real_name, "Иван Иванов")
+        self.assertEqual(max_user.gender, "male")
+        self.assertEqual(str(max_user.birth_date), "1990-05-15")
+
+    def test_register_start_rejects_existing_max_user(self):
+        resp = self.client.post(
+            "/api/v1/auth/register/start",
+            data=json.dumps(
+                {
+                    "phone": "89625507832",
+                    "real_name": "Уже Есть",
+                    "gender": "female",
+                    "birth_date": "1991-01-01",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["error"], "already_registered")

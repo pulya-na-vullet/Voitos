@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.voitos.app.AppVersion
 import ru.voitos.app.api.VoitosApiClient
+import ru.voitos.app.model.ApiException
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.WishGroupOption
 import ru.voitos.app.model.WishItem
@@ -55,6 +58,18 @@ data class LoginSuccess(
     val needsPinSetup: Boolean,
     val hasPin: Boolean,
 )
+
+/** ДД.ММ.ГГГГ → YYYY-MM-DD или null. */
+private fun birthDateToIso(raw: String): String? {
+    val parts = raw.trim().split(".")
+    if (parts.size != 3) return null
+    val d = parts[0].toIntOrNull() ?: return null
+    val m = parts[1].toIntOrNull() ?: return null
+    val y = parts[2].toIntOrNull() ?: return null
+    if (parts[2].length != 4) return null
+    if (d !in 1..31 || m !in 1..12 || y !in 1900..2100) return null
+    return "%04d-%02d-%02d".format(y, m, d)
+}
 
 @Composable
 fun LoginScreen(
@@ -85,6 +100,13 @@ fun LoginScreen(
     var pin by remember { mutableStateOf("") }
     var step by remember { mutableStateOf(0) } // 0 phone, 1 code from Max
     var showPin by remember { mutableStateOf(preferPinLogin && initialPhone.isNotBlank()) }
+    var showRegister by remember { mutableStateOf(false) }
+    var regStep by remember { mutableStateOf(0) } // 0 form, 1 max code
+    var realName by remember { mutableStateOf("") }
+    var gender by remember { mutableStateOf("") } // male | female | other
+    var birthDate by remember { mutableStateOf("") } // DD.MM.YYYY
+    var maxBotUrl by remember { mutableStateOf("") }
+    var canRegister by remember { mutableStateOf(false) }
     var debugHint by remember { mutableStateOf<String?>(null) }
     var serverStatus by remember {
         mutableStateOf(
@@ -92,7 +114,9 @@ fun LoginScreen(
         )
     }
     var regHint by remember {
-        mutableStateOf("Регистрация — в боте Max: укажите телефон, мы привяжем Max ID.")
+        mutableStateOf(
+            "Если номера нет — «Регистрация»: ФИО, пол, дата рождения, затем код из бота Max.",
+        )
     }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -200,6 +224,7 @@ fun LoginScreen(
         runCatching {
             val cfg = client().authConfig()
             if (cfg.registrationHint.isNotBlank()) regHint = cfg.registrationHint
+            if (cfg.maxBotOpenUrl.isNotBlank()) maxBotUrl = cfg.maxBotOpenUrl
             applyVersionGate(
                 minCode = cfg.minAppVersionCode,
                 message = cfg.updateMessage,
@@ -285,6 +310,208 @@ fun LoginScreen(
             return@Column
         }
 
+        if (showRegister) {
+            Text("Регистрация", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+            Spacer(modifier = Modifier.height(8.dp))
+            if (regStep == 0) {
+                OutlinedTextField(
+                    value = realName,
+                    onValueChange = { realName = it.take(120) },
+                    label = { Text("ФИО") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = voitosOutlinedFieldColors(),
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = {
+                        phone = it.filter { ch -> ch.isDigit() }.take(11)
+                        persistDebug()
+                    },
+                    label = { Text("Телефон") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = voitosOutlinedFieldColors(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Пол", color = VoitosColors.Muted, style = MaterialTheme.typography.bodySmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(
+                        "male" to "Мужской",
+                        "female" to "Женский",
+                        "other" to "Другой",
+                    ).forEach { (value, label) ->
+                        if (gender == value) {
+                            Button(
+                                onClick = { gender = value },
+                                modifier = Modifier.weight(1f),
+                                colors = voitosPrimaryButtonColors(),
+                            ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                        } else {
+                            OutlinedButton(
+                                onClick = { gender = value },
+                                modifier = Modifier.weight(1f),
+                            ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = birthDate,
+                    onValueChange = { raw ->
+                        birthDate = raw.filter { it.isDigit() || it == '.' }.take(10)
+                    },
+                    label = { Text("Дата рождения (ДД.ММ.ГГГГ)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = voitosOutlinedFieldColors(),
+                )
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = VoitosColors.Danger)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        color = VoitosColors.Accent,
+                    )
+                } else {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                if (!serverReady) {
+                                    error = "Дождитесь поиска сервера в Wi‑Fi"
+                                    return@launch
+                                }
+                                val iso = birthDateToIso(birthDate)
+                                if (iso == null) {
+                                    error = "Укажите дату рождения в формате ДД.ММ.ГГГГ"
+                                    return@launch
+                                }
+                                if (realName.trim().length < 2) {
+                                    error = "Укажите ФИО"
+                                    return@launch
+                                }
+                                if (gender.isBlank()) {
+                                    error = "Укажите пол"
+                                    return@launch
+                                }
+                                loading = true
+                                error = null
+                                try {
+                                    persistDebug()
+                                    onSaveServer(baseUrl)
+                                    val resp = client().registerStart(
+                                        phone = phone,
+                                        realName = realName.trim(),
+                                        gender = gender,
+                                        birthDate = iso,
+                                    )
+                                    if (resp.maxBotOpenUrl.isNotBlank()) {
+                                        maxBotUrl = resp.maxBotOpenUrl
+                                    }
+                                    debugHint = resp.message.ifBlank {
+                                        "Перейдите в бот Voitos в Max и напишите «код регистрации»."
+                                    }
+                                    code = ""
+                                    regStep = 1
+                                } catch (e: Exception) {
+                                    error = e.message?.takeIf { it.isNotBlank() }
+                                        ?: friendlyNetworkError(e)
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        },
+                        enabled = serverReady && !scanning,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = voitosPrimaryButtonColors(),
+                    ) { Text("Продолжить") }
+                    TextButton(
+                        onClick = {
+                            showRegister = false
+                            regStep = 0
+                            error = null
+                            debugHint = null
+                        },
+                    ) {
+                        Text("Назад ко входу", color = VoitosColors.Muted)
+                    }
+                }
+            } else {
+                Text(
+                    debugHint
+                        ?: "Перейдите в бот Voitos в Max, напишите «код регистрации» и введите код ниже.",
+                    color = VoitosColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                if (maxBotUrl.isNotBlank()) {
+                    Button(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(maxBotUrl)))
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = voitosSecondaryButtonColors(),
+                    ) { Text("Открыть бот Voitos в Max") }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it.filter { ch -> ch.isDigit() }.take(4) },
+                    label = { Text("Код из бота Max") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    colors = voitosOutlinedFieldColors(),
+                )
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = VoitosColors.Danger)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        color = VoitosColors.Accent,
+                    )
+                } else {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                loading = true
+                                error = null
+                                try {
+                                    persistDebug(code)
+                                    onSaveServer(baseUrl)
+                                    finish(client().registerConfirm(phone, code))
+                                } catch (e: Exception) {
+                                    error = e.message?.takeIf { it.isNotBlank() }
+                                        ?: friendlyNetworkError(e, fallback = "Неверный код")
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        },
+                        enabled = serverReady && code.length == 4,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = voitosPrimaryButtonColors(),
+                    ) { Text("Завершить регистрацию") }
+                    TextButton(onClick = { regStep = 0; code = ""; error = null }) {
+                        Text("Изменить анкету", color = VoitosColors.Accent)
+                    }
+                }
+            }
+            return@Column
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         Text(regHint, color = VoitosColors.Muted, style = MaterialTheme.typography.bodySmall)
         Spacer(modifier = Modifier.height(8.dp))
@@ -353,6 +580,7 @@ fun LoginScreen(
             value = phone,
             onValueChange = {
                 phone = it.filter { ch -> ch.isDigit() }.take(11)
+                canRegister = false
                 persistDebug()
             },
             label = { Text("Телефон") },
@@ -406,10 +634,15 @@ fun LoginScreen(
                             client().phoneLoginRequest(phone)
                             // Код только из бота Max — поле не заполняем автоматически.
                             debugHint = "Код отправлен в Max"
+                            canRegister = false
                             step = 1
+                        } catch (e: ApiException) {
+                            error = e.message
+                            canRegister = e.code == "not_registered"
                         } catch (e: Exception) {
                             error = e.message?.takeIf { it.isNotBlank() }
                                 ?: friendlyNetworkError(e)
+                            canRegister = false
                         } finally {
                             loading = false
                         }
@@ -419,6 +652,21 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosPrimaryButtonColors(),
             ) { Text("Войти") }
+            if (canRegister) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        showRegister = true
+                        regStep = 0
+                        error = null
+                        debugHint = null
+                        code = ""
+                    },
+                    enabled = serverReady,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosSecondaryButtonColors(),
+                ) { Text("Регистрация") }
+            }
             if (preferPinLogin && initialPhone.isNotBlank()) {
                 TextButton(onClick = { showPin = true }) {
                     Text("Войти по PIN", color = VoitosColors.Muted)

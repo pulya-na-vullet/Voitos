@@ -5,26 +5,28 @@ from __future__ import annotations
 import logging
 import random
 import re
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import MobileAuthToken, PinChallenge, PinChallengeKind
-from database.models import AppSettings, BotUser
+from api.models import AppRegistrationDraft, MobileAuthToken, PinChallenge, PinChallengeKind
+from database.models import AppSettings, BotUser, UserGender
 from subscriptions.receipts import normalize_phone
 
 logger = logging.getLogger(__name__)
 
 PIN_RE = re.compile(r"^\d{4}$")
 CODE_TTL_MINUTES = 10
+DRAFT_TTL_HOURS = 24
 PIN_MAX_ATTEMPTS = 5
 PIN_LOCK_MINUTES = 15
 CHALLENGE_MAX_ATTEMPTS = 8
 
 APP_LOGIN_PENDING = "app_login_phone"
+APP_REGISTER_PENDING = "app_register_phone"
 APP_LOGIN_KEYWORDS = (
     "войти в приложение",
     "код для приложения",
@@ -34,6 +36,13 @@ APP_LOGIN_KEYWORDS = (
     "/app",
     "/login",
     "приложение voitos",
+)
+APP_REGISTER_KEYWORDS = (
+    "код регистрации",
+    "подтвердить регистрацию",
+    "регистрация в приложении",
+    "код для регистрации",
+    "/register",
 )
 
 
@@ -199,6 +208,8 @@ def _send_max_code(user: BotUser, code: str, *, kind: str) -> None:
         lead = "Код для сброса PIN в приложении Voitos"
     elif kind == PinChallengeKind.CHANGE:
         lead = "Код подтверждения смены PIN в приложении Voitos"
+    elif kind == PinChallengeKind.REGISTER:
+        lead = "Код для завершения регистрации в приложении Voitos"
     else:
         lead = "Код для входа в приложение Voitos"
     text = (
@@ -476,3 +487,221 @@ def bot_handle_app_login_phone(user: BotUser, text: str) -> str:
     pending.pending_payload = {}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     return bot_start_app_login(user)
+
+
+def _parse_birth_date(raw) -> date:
+    if isinstance(raw, date) and not isinstance(raw, datetime):
+        value = raw
+    else:
+        text = str(raw or "").strip()
+        if not text:
+            raise ValueError("birth_date_required")
+        value = None
+        for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+            try:
+                value = datetime.strptime(text, fmt).date()
+                break
+            except ValueError:
+                continue
+        if value is None:
+            raise ValueError("birth_date_invalid")
+    today = timezone.localdate()
+    if value > today:
+        raise ValueError("birth_date_invalid")
+    age = today.year - value.year - (
+        (today.month, today.day) < (value.month, value.day)
+    )
+    if age < 5 or age > 120:
+        raise ValueError("birth_date_invalid")
+    return value
+
+
+def _normalize_gender(raw: str) -> str:
+    g = (raw or "").strip().lower()
+    aliases = {
+        "male": UserGender.MALE,
+        "m": UserGender.MALE,
+        "м": UserGender.MALE,
+        "муж": UserGender.MALE,
+        "мужской": UserGender.MALE,
+        "female": UserGender.FEMALE,
+        "f": UserGender.FEMALE,
+        "ж": UserGender.FEMALE,
+        "жен": UserGender.FEMALE,
+        "женский": UserGender.FEMALE,
+        "other": UserGender.OTHER,
+        "другое": UserGender.OTHER,
+        "другой": UserGender.OTHER,
+    }
+    if g not in aliases:
+        raise ValueError("gender_invalid")
+    return aliases[g]
+
+
+def get_open_registration_draft(phone: str) -> AppRegistrationDraft | None:
+    phone = normalize_user_phone(phone)
+    if len(phone) < 11:
+        return None
+    draft = (
+        AppRegistrationDraft.objects.filter(phone=phone, consumed_at__isnull=True)
+        .order_by("-created_at")
+        .first()
+    )
+    if not draft or not draft.is_open():
+        return None
+    return draft
+
+
+def start_app_registration(
+    *,
+    phone: str,
+    real_name: str,
+    gender: str,
+    birth_date,
+) -> dict:
+    """Сохранить анкету из приложения; код выдаёт бот Max."""
+    phone = normalize_user_phone(phone)
+    if len(phone) < 11:
+        raise ValueError("invalid_phone")
+    if find_registered_user(phone):
+        raise ValueError("already_registered")
+    name = (real_name or "").strip()
+    if len(name) < 2:
+        raise ValueError("name_required")
+    gender_norm = _normalize_gender(gender)
+    birth = _parse_birth_date(birth_date)
+
+    AppRegistrationDraft.objects.filter(
+        phone=phone, consumed_at__isnull=True
+    ).update(consumed_at=timezone.now())
+    AppRegistrationDraft.objects.create(
+        phone=phone,
+        real_name=name[:255],
+        gender=gender_norm,
+        birth_date=birth,
+        expires_at=timezone.now() + timedelta(hours=DRAFT_TTL_HOURS),
+    )
+    return {
+        "ok": True,
+        "phone": phone,
+        "max_bot_open_url": max_bot_open_url(),
+        "message": (
+            "Перейдите в бот Voitos в Max и напишите «код регистрации». "
+            "Введите полученный код в приложении."
+        ),
+    }
+
+
+@transaction.atomic
+def confirm_app_registration(
+    *,
+    phone: str,
+    code: str,
+    device_name: str = "",
+) -> dict:
+    phone = normalize_user_phone(phone)
+    draft = get_open_registration_draft(phone)
+    if not draft:
+        raise ValueError("draft_not_found")
+    verified = verify_challenge(
+        phone=phone,
+        code=code,
+        kind=PinChallengeKind.REGISTER,
+        issue_auth_token=False,
+    )
+    user = (
+        BotUser.objects.select_for_update()
+        .filter(id=verified["bot_user_id"])
+        .first()
+    )
+    if not user:
+        raise ValueError("user_not_found")
+    if not is_max_registered(user):
+        raise ValueError("max_required")
+
+    user.phone = phone
+    user.real_name = draft.real_name
+    user.gender = draft.gender
+    user.birth_date = draft.birth_date
+    user.save(
+        update_fields=[
+            "phone",
+            "real_name",
+            "gender",
+            "birth_date",
+            "last_seen_at",
+        ]
+    )
+    draft.consumed_at = timezone.now()
+    draft.save(update_fields=["consumed_at"])
+    token = issue_token(user, device_name=device_name)
+    return auth_payload(user, token)
+
+
+def looks_like_app_register(text: str) -> bool:
+    lower = (text or "").strip().lower()
+    if not lower:
+        return False
+    return any(k in lower for k in APP_REGISTER_KEYWORDS)
+
+
+def bot_issue_register_code(user: BotUser, phone: str | None = None) -> str:
+    """Выдать код регистрации Max-пользователю по заявке из приложения."""
+    phone_n = normalize_user_phone(phone or user.phone or "")
+    if len(phone_n) < 11:
+        from database.models import PendingAction
+
+        pending, _ = PendingAction.objects.get_or_create(user=user)
+        pending.pending_kind = APP_REGISTER_PENDING
+        pending.pending_payload = {"step": "phone"}
+        pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+        return (
+            "Чтобы завершить регистрацию в приложении Voitos, пришлите номер телефона, "
+            "который указали в приложении (например 89625507832)."
+        )
+
+    draft = get_open_registration_draft(phone_n)
+    if not draft:
+        return (
+            "По этому номеру нет заявки из приложения.\n"
+            "Сначала в приложении Voitos нажмите «Регистрация», заполните анкету "
+            "и снова напишите сюда «код регистрации»."
+        )
+
+    existing = find_registered_user(phone_n)
+    if existing and existing.id != user.id:
+        return (
+            "Этот номер уже привязан к другому аккаунту Max. "
+            "Войдите в приложение по телефону."
+        )
+
+    user, _ = upsert_max_user(
+        max_user_id=user.max_user_id,
+        phone=phone_n,
+        chat_id=user.chat_id or "",
+        display_name=user.display_name or "",
+    )
+    _ch, code = create_challenge(user, kind=PinChallengeKind.REGISTER)
+    return (
+        f"Код для завершения регистрации в приложении Voitos: {code}\n"
+        f"Действует {CODE_TTL_MINUTES} мин.\n\n"
+        "Вернитесь в приложение и введите этот код."
+    )
+
+
+def bot_start_app_register(user: BotUser) -> str:
+    return bot_issue_register_code(user)
+
+
+def bot_handle_app_register_phone(user: BotUser, text: str) -> str:
+    from database.models import PendingAction
+
+    phone = normalize_user_phone(text)
+    if len(phone) < 11:
+        return "Нужен номер из 11 цифр, например 89625507832."
+    pending, _ = PendingAction.objects.get_or_create(user=user)
+    pending.pending_kind = ""
+    pending.pending_payload = {}
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    return bot_issue_register_code(user, phone=phone)
+

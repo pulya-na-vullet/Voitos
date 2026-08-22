@@ -8,18 +8,18 @@ class AppVersionHealthTests(TestCase):
     def setUp(self):
         self.client = Client()
         cfg = AppSettings.load()
-        cfg.mobile_min_version_code = 7
-        cfg.mobile_latest_version_code = 7
-        cfg.mobile_latest_version_name = "0.2.3-kmp"
+        cfg.mobile_min_version_code = 8
+        cfg.mobile_latest_version_code = 8
+        cfg.mobile_latest_version_name = "0.2.4-kmp"
         cfg.save()
 
     def test_health_includes_version_and_update_flag(self):
-        old = self.client.get("/api/v1/health?version_code=6")
+        old = self.client.get("/api/v1/health?version_code=7")
         self.assertEqual(old.status_code, 200)
         data = old.json()
         self.assertTrue(data["ok"])
-        self.assertEqual(data["min_app_version_code"], 7)
+        self.assertEqual(data["min_app_version_code"], 8)
         self.assertTrue(data["update_required"])
 
-        cur = self.client.get("/api/v1/health?version_code=7")
+        cur = self.client.get("/api/v1/health?version_code=8")
         self.assertFalse(cur.json()["update_required"])

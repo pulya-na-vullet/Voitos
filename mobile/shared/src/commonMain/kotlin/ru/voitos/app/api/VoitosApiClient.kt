@@ -19,6 +19,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import ru.voitos.app.VoitosApi
 import ru.voitos.app.model.ApiErrorBody
+import ru.voitos.app.model.ApiException
 import ru.voitos.app.model.AuthConfig
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.AvatarUploadResult
@@ -101,10 +102,11 @@ class VoitosApiClient(
         }
         if (!response.status.isSuccess()) {
             val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            val code = err?.error?.ifBlank { null } ?: "error"
             val msg = err?.detail?.ifBlank { null }
                 ?: err?.error?.ifBlank { null }
                 ?: "Не удалось запросить код (HTTP ${response.status.value})"
-            throw IllegalStateException(msg)
+            throw ApiException(code, msg)
         }
         return response.body()
     }
@@ -121,7 +123,57 @@ class VoitosApiClient(
         }
         if (!response.status.isSuccess()) {
             val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
-            throw IllegalStateException(
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "invalid_code",
+                err?.detail?.ifBlank { null } ?: err?.error ?: "Неверный код",
+            )
+        }
+        val session: AuthSession = response.body()
+        accessToken = session.accessToken
+        return session
+    }
+
+    suspend fun registerStart(
+        phone: String,
+        realName: String,
+        gender: String,
+        birthDate: String,
+    ): OkResponse {
+        val response: HttpResponse = http.post("$baseUrl/auth/register/start") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("phone", phone)
+                    put("real_name", realName)
+                    put("gender", gender)
+                    put("birth_date", birthDate)
+                },
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "error",
+                err?.detail?.ifBlank { null } ?: err?.error ?: "Не удалось начать регистрацию",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun registerConfirm(phone: String, code: String): AuthSession {
+        val response: HttpResponse = http.post("$baseUrl/auth/register/confirm") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("phone", phone)
+                    put("code", code)
+                },
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "invalid_code",
                 err?.detail?.ifBlank { null } ?: err?.error ?: "Неверный код",
             )
         }
