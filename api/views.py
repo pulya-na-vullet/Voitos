@@ -254,6 +254,27 @@ def executor_roles(request):
 
 
 @api_login_required
+@api_subscription_required
+@require_http_methods(["POST"])
+def executor_role_propose(request):
+    """Житель просит добавить новую роль в каталог (не чаще 1 раза в сутки)."""
+    from services.role_proposals import propose_role, proposal_to_dict
+
+    data = parse_json(request)
+    try:
+        proposal = propose_role(
+            request.bot_user,
+            str(data.get("name") or data.get("proposed_name") or ""),
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    return json_response(
+        {"ok": True, "proposal": proposal_to_dict(proposal)},
+        status=201,
+    )
+
+
+@api_login_required
 @require_GET
 def me_executor(request):
     """Является ли пользователь исполнителем + его роли."""

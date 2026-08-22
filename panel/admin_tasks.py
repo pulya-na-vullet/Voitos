@@ -269,6 +269,31 @@ def sync_admin_tasks() -> dict[str, int]:
         )
         counts["feedback"] += 1
 
+    from database.models import ExecutorRoleProposal, ExecutorRoleProposalStatus
+
+    counts["role_proposals"] = 0
+    for proposal in ExecutorRoleProposal.objects.filter(
+        status=ExecutorRoleProposalStatus.OPEN
+    ).select_related("user"):
+        upsert_task(
+            kind=AdminTaskKind.ROLE_PROPOSAL,
+            title=f"Новая роль: «{proposal.proposed_name}»",
+            description=(
+                f"{proposal.user.real_name or proposal.user}\n"
+                f"Просит добавить роль: {proposal.proposed_name}"
+            ),
+            user=proposal.user,
+            action_url=f"/panel/role-proposals/{proposal.id}/",
+            source_model="ExecutorRoleProposal",
+            source_id=proposal.id,
+            priority=22,
+            meta={
+                "proposal_id": proposal.id,
+                "proposed_name": proposal.proposed_name,
+            },
+        )
+        counts["role_proposals"] += 1
+
     # Close stale source-backed tasks
     for task in AdminTask.objects.filter(
         status=AdminTaskStatus.OPEN,
@@ -306,6 +331,15 @@ def sync_admin_tasks() -> dict[str, int]:
     ):
         t = FeedbackTicket.objects.filter(id=task.source_id).first()
         if not t or t.status != FeedbackStatus.OPEN:
+            task.mark_done()
+            counts["closed"] += 1
+    for task in AdminTask.objects.filter(
+        status=AdminTaskStatus.OPEN,
+        kind=AdminTaskKind.ROLE_PROPOSAL,
+        source_model="ExecutorRoleProposal",
+    ):
+        p = ExecutorRoleProposal.objects.filter(id=task.source_id).first()
+        if not p or p.status != ExecutorRoleProposalStatus.OPEN:
             task.mark_done()
             counts["closed"] += 1
     return counts

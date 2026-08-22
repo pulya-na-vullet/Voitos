@@ -61,6 +61,9 @@ fun ExecutorRegisterScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var proposeOpen by remember { mutableStateOf(false) }
+    var proposeName by remember { mutableStateOf("") }
+    var proposeSending by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -131,6 +134,13 @@ fun ExecutorRegisterScreen(
                     modifier = Modifier.fillMaxWidth(),
                     colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { proposeOpen = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Прошу добавить новую роль", color = VoitosColors.Accent)
+                }
             }
             1 -> {
                 val r = role
@@ -321,6 +331,67 @@ fun ExecutorRegisterScreen(
                     colors = voitosPrimaryButtonColors(),
                 ) { Text("Отправить") }
             }
+        }
+
+        if (proposeOpen) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = {
+                    if (!proposeSending) proposeOpen = false
+                },
+                title = { Text("Новая роль", color = VoitosColors.Text) },
+                text = {
+                    Column {
+                        Text(
+                            "Напишите, какую роль нужно добавить. Одна заявка в сутки.",
+                            color = VoitosColors.Muted,
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = proposeName,
+                            onValueChange = { if (it.length <= 128) proposeName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Например: мастер по окнам") },
+                            singleLine = true,
+                            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val name = proposeName.trim()
+                            if (name.length < 2) {
+                                error = "Укажите название роли"
+                                return@TextButton
+                            }
+                            scope.launch {
+                                proposeSending = true
+                                error = null
+                                try {
+                                    client.proposeExecutorRole(name)
+                                    message = "Заявка отправлена администратору"
+                                    proposeOpen = false
+                                    proposeName = ""
+                                } catch (e: Exception) {
+                                    error = friendlyNetworkError(e)
+                                } finally {
+                                    proposeSending = false
+                                }
+                            }
+                        },
+                        enabled = !proposeSending,
+                    ) {
+                        Text(if (proposeSending) "…" else "Отправить", color = VoitosColors.Accent2)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { if (!proposeSending) proposeOpen = false },
+                        enabled = !proposeSending,
+                    ) { Text("Отмена", color = VoitosColors.Muted) }
+                },
+                containerColor = VoitosColors.Panel,
+            )
         }
     }
 }

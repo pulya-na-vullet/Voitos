@@ -73,6 +73,11 @@ urlpatterns = [
     ),
     path("me/executor", views.me_executor, name="me_executor"),
     path("executor/register", views.executor_register, name="executor_register"),
+    path(
+        "executor/role-proposals",
+        views.executor_role_propose,
+        name="executor_role_propose",
+    ),
     path("executor/offers", views.executor_offers, name="executor_offers"),
     path(
         "executor/offers/<int:pk>/respond",

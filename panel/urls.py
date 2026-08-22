@@ -36,8 +36,13 @@ urlpatterns = [
     path("services/ranking/", views.services_ranking, name="services_ranking"),
     path("clients-map/", views.clients_map, name="clients_map"),
     path("earnings-forecast/", views.earnings_forecast, name="earnings_forecast"),
-    path("contractors/", views.contractors_list, name="contractors"),
     path("executor-roles/", executor_views.executor_roles, name="executor_roles"),
+    path(
+        "role-proposals/<int:pk>/",
+        executor_views.role_proposal_detail,
+        name="role_proposal_detail",
+    ),
+    path("contractors/", views.contractors_list, name="contractors"),
     path("work-requests/", executor_views.work_requests_list, name="work_requests"),
     path(
         "work-requests/<int:pk>/",

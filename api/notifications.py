@@ -28,6 +28,8 @@ DEEP_LINKS: dict[str, str] = {
     "subscription.renewal_2d": "voitos://app/subscription",
     "subscription.renewal_2h": "voitos://app/subscription",
     "subscription.onboarding_reward": "voitos://app/subscription",
+    "executor.role_approved": "voitos://app/executor/register",
+    "executor.role_rejected": "voitos://app/executor/register",
     "profile.verified": "voitos://app/home",
     "wish_ballot.started": "voitos://app/ballots/{id}",
     "manager_survey.started": "voitos://app/manager-survey/{id}",

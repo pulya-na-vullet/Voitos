@@ -618,6 +618,24 @@ class VoitosApiClient(
             )
         }.body()
 
+    suspend fun proposeExecutorRole(name: String): OkResponse {
+        val response: HttpResponse = http.post("$baseUrl/executor/role-proposals") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("name", name) })
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "error",
+                err?.detail?.ifBlank { null }
+                    ?: err?.error
+                    ?: "Не удалось отправить заявку (HTTP ${response.status.value})",
+            )
+        }
+        return OkResponse(ok = true)
+    }
+
     suspend fun executorOffers(): ExecutorOfferList {
         val response: HttpResponse = http.get("$baseUrl/executor/offers") { applyAuth() }
         if (response.status.value == 404) {
