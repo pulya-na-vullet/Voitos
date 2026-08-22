@@ -65,51 +65,43 @@ fun LoginScreen(
     onSaveServer: (baseUrl: String) -> Unit = {},
 ) {
     val initialHp = remember(initialBaseUrl) { ru.voitos.app.DevServerSettings.parse(initialBaseUrl) }
-    var host by remember { mutableStateOf(initialHp.host) }
-    var portText by remember { mutableStateOf(initialHp.port.toString()) }
+    var baseUrl by remember {
+        mutableStateOf(
+            ru.voitos.app.DevServerSettings.HostPort(initialHp.host, initialHp.port).toBaseUrl(),
+        )
+    }
+    var serverReady by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf(initialPhone) }
     var code by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
-    var step by remember { mutableStateOf(0) } // 0 phone, 1 code from Max, 2 optional PIN return
+    var step by remember { mutableStateOf(0) } // 0 phone, 1 code from Max
     var showPin by remember { mutableStateOf(preferPinLogin && initialPhone.isNotBlank()) }
     var debugHint by remember { mutableStateOf<String?>(null) }
-    var healthHint by remember { mutableStateOf<String?>(null) }
+    var serverStatus by remember {
+        mutableStateOf(
+            if (restoredFromDisk) "Проверяем сохранённый адрес…" else "Ищем сервер в Wi‑Fi…",
+        )
+    }
     var regHint by remember {
         mutableStateOf("Регистрация — в боте Max: укажите телефон, мы привяжем Max ID.")
-    }
-    var savedHint by remember {
-        mutableStateOf(
-            if (restoredFromDisk) "IP восстановлен из файла на телефоне" else null,
-        )
     }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var scanning by remember { mutableStateOf(false) }
-    var recent by remember { mutableStateOf(recentBaseUrls) }
     val scope = rememberCoroutineScope()
 
-    fun currentBaseUrl(): String {
-        val port = portText.toIntOrNull() ?: 18765
-        return ru.voitos.app.DevServerSettings.HostPort(
-            host = host.trim().ifBlank { "10.0.2.2" },
-            port = port,
-        ).toBaseUrl()
-    }
-
-    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = currentBaseUrl())
+    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl)
 
     fun persistDebug(debugCode: String = "") {
-        onDebugPrefs(currentBaseUrl(), phone.trim(), debugCode)
+        onDebugPrefs(baseUrl, phone.trim(), debugCode)
     }
 
     fun applyFound(hit: ru.voitos.app.LanServerDiscovery.Found) {
-        host = hit.host
-        portText = hit.port.toString()
+        baseUrl = hit.baseUrl
+        serverReady = true
         persistDebug()
         onSaveServer(hit.baseUrl)
-        savedHint = "Найден сервер: ${hit.host}:${hit.port}"
-        recent = listOf(hit.baseUrl) + recent.filter { it != hit.baseUrl }
-        healthHint = "Сервер отвечает ✓"
+        serverStatus = "Подключено к серверу в Wi‑Fi"
     }
 
     fun finish(session: AuthSession) {
@@ -118,7 +110,7 @@ fun LoginScreen(
             LoginSuccess(
                 token = session.accessToken,
                 name = session.displayName,
-                baseUrl = currentBaseUrl(),
+                baseUrl = baseUrl,
                 phone = p,
                 needsPinSetup = session.needsPinSetup,
                 hasPin = session.hasPin || !session.needsPinSetup,
@@ -129,25 +121,29 @@ fun LoginScreen(
     fun scanWifi(auto: Boolean = false) {
         scope.launch {
             scanning = true
-            error = null
-            if (!auto) healthHint = null
+            serverReady = false
+            if (!auto) error = null
+            serverStatus = "Ищем сервер в Wi‑Fi…"
             try {
-                val port = portText.toIntOrNull() ?: 18765
                 val prefer = buildList {
-                    add(currentBaseUrl())
-                    addAll(recent)
-                }
+                    add(baseUrl)
+                    addAll(recentBaseUrls)
+                    add(initialBaseUrl)
+                }.distinct().filter { it.isNotBlank() }
                 val hit = ru.voitos.app.LanServerDiscovery.findFirst(
-                    port = port,
+                    port = 18765,
                     preferHosts = prefer,
                 )
                 if (hit != null) {
                     applyFound(hit)
-                } else if (!auto) {
-                    healthHint = null
-                    error = "Сервер в Wi‑Fi не найден. Проверьте, что бэкенд запущен на порту $port."
+                } else {
+                    serverStatus = "Сервер в Wi‑Fi не найден"
+                    if (!auto) {
+                        error = "Проверьте, что бэкенд запущен и телефон в той же сети Wi‑Fi."
+                    }
                 }
             } catch (e: Exception) {
+                serverStatus = "Не удалось найти сервер"
                 if (!auto) error = friendlyNetworkError(e)
             } finally {
                 scanning = false
@@ -156,12 +152,15 @@ fun LoginScreen(
     }
 
     LaunchedEffect(Unit) {
+        scanWifi(auto = true)
+    }
+
+    LaunchedEffect(serverReady, baseUrl) {
+        if (!serverReady) return@LaunchedEffect
         runCatching {
             val cfg = client().authConfig()
             if (cfg.registrationHint.isNotBlank()) regHint = cfg.registrationHint
         }
-        // Автопоиск IP в сети (как кнопка «Найти сервер в Wi‑Fi»).
-        scanWifi(auto = true)
     }
 
     Column(
@@ -175,59 +174,27 @@ fun LoginScreen(
         Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
         VpnDebugBanner()
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        Text("Сервер в локальной сети", color = VoitosColors.Accent2, style = MaterialTheme.typography.titleSmall)
-        OutlinedTextField(
-            value = host,
-            onValueChange = {
-                host = it
-                persistDebug()
-                savedHint = null
-            },
-            label = { Text("IP / host") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            colors = voitosOutlinedFieldColors(),
+        if (scanning) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                color = VoitosColors.Accent,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        Text(
+            serverStatus,
+            color = if (serverReady) VoitosColors.Ok else VoitosColors.Muted,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.align(Alignment.CenterHorizontally),
         )
-        OutlinedTextField(
-            value = portText,
-            onValueChange = {
-                portText = it.filter { ch -> ch.isDigit() }.take(5)
-                persistDebug()
-            },
-            label = { Text("Порт") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            colors = voitosOutlinedFieldColors(),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { scanWifi(auto = false) },
-            enabled = !loading && !scanning,
-            modifier = Modifier.fillMaxWidth(),
-            colors = voitosSecondaryButtonColors(),
-        ) {
-            Text(if (scanning) "Ищем сервер в Wi‑Fi…" else "Найти сервер в Wi‑Fi")
-        }
-        savedHint?.let {
-            Text(it, color = VoitosColors.Ok, style = MaterialTheme.typography.bodySmall)
-        }
-        healthHint?.let {
-            Text(it, color = VoitosColors.Accent2, style = MaterialTheme.typography.bodySmall)
-        }
-        if (recent.isNotEmpty()) {
-            Text("Недавние:", color = VoitosColors.Muted, style = MaterialTheme.typography.labelSmall)
-            recent.take(3).forEach { url ->
-                val hp = ru.voitos.app.DevServerSettings.parse(url)
-                TextButton(onClick = {
-                    host = hp.host
-                    portText = hp.port.toString()
-                    persistDebug()
-                    onSaveServer(currentBaseUrl())
-                    savedHint = "Сохранено: ${currentBaseUrl()}"
-                }) { Text("${hp.host}:${hp.port}", color = VoitosColors.Accent) }
+        if (!scanning && !serverReady) {
+            TextButton(
+                onClick = { scanWifi(auto = false) },
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+                Text("Повторить поиск", color = VoitosColors.Accent)
             }
         }
 
@@ -267,11 +234,15 @@ fun LoginScreen(
                 Button(
                     onClick = {
                         scope.launch {
+                            if (!serverReady) {
+                                error = "Дождитесь поиска сервера в Wi‑Fi"
+                                return@launch
+                            }
                             loading = true
                             error = null
                             try {
                                 persistDebug()
-                                onSaveServer(currentBaseUrl())
+                                onSaveServer(baseUrl)
                                 finish(client().pinLogin(phone, pin))
                             } catch (e: Exception) {
                                 error = friendlyNetworkError(e, fallback = "Неверный PIN")
@@ -280,6 +251,7 @@ fun LoginScreen(
                             }
                         }
                     },
+                    enabled = serverReady,
                     modifier = Modifier.fillMaxWidth(),
                     colors = voitosPrimaryButtonColors(),
                 ) { Text("Войти по PIN") }
@@ -299,6 +271,7 @@ fun LoginScreen(
             label = { Text("Телефон") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            enabled = serverReady || !scanning,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
             colors = voitosOutlinedFieldColors(),
         )
@@ -322,7 +295,7 @@ fun LoginScreen(
             Text(it, color = VoitosColors.Danger)
         }
         Spacer(modifier = Modifier.height(16.dp))
-        if (loading || scanning) {
+        if (loading) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
                 color = VoitosColors.Accent,
@@ -331,12 +304,16 @@ fun LoginScreen(
             Button(
                 onClick = {
                     scope.launch {
+                        if (!serverReady) {
+                            error = "Дождитесь поиска сервера в Wi‑Fi"
+                            return@launch
+                        }
                         loading = true
                         error = null
                         debugHint = null
                         try {
                             persistDebug()
-                            onSaveServer(currentBaseUrl())
+                            onSaveServer(baseUrl)
                             val res = client().phoneLoginRequest(phone)
                             if (!res.debugCode.isNullOrBlank()) {
                                 code = res.debugCode.orEmpty()
@@ -354,6 +331,7 @@ fun LoginScreen(
                         }
                     }
                 },
+                enabled = serverReady && !scanning,
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosPrimaryButtonColors(),
             ) { Text("Войти") }
@@ -370,7 +348,7 @@ fun LoginScreen(
                         error = null
                         try {
                             persistDebug(code)
-                            onSaveServer(currentBaseUrl())
+                            onSaveServer(baseUrl)
                             finish(client().phoneLoginVerify(phone, code))
                         } catch (e: Exception) {
                             error = e.message?.takeIf { it.isNotBlank() }
@@ -380,6 +358,7 @@ fun LoginScreen(
                         }
                     }
                 },
+                enabled = serverReady,
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosPrimaryButtonColors(),
             ) { Text("Подтвердить код") }
