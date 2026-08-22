@@ -4,6 +4,15 @@
 <div class="topbar"><h1>Настройки</h1>
   <form method="post" action="{% url 'panel:check_max' %}">{% csrf_token %}<button class="btn secondary small" type="submit">Проверить MAX</button></form>
 </div>
+<div class="card" style="margin-bottom:16px; max-width:720px;">
+  <strong>Версии</strong>
+  <div style="margin-top:8px; color: var(--muted); font-size:0.95rem; line-height:1.5;">
+    Бэкенд: <strong style="color:var(--text);">{{ voitos_backend_version }}</strong><br>
+    Приложение (актуальная): <strong style="color:var(--text);">{{ voitos_mobile_version_name }}</strong>
+    (code {{ voitos_mobile_latest_code }})<br>
+    Минимум для входа: code <strong style="color:var(--text);">{{ voitos_mobile_min_code }}</strong>
+  </div>
+</div>
 {% if model_warning %}
 <div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ model_warning }}</div>
 {% endif %}

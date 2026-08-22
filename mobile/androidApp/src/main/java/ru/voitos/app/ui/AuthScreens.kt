@@ -311,6 +311,11 @@ fun LoginScreen(
     ) {
         Text("Voitos", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.secondary)
         Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
+        Text(
+            "Версия ${AppVersion.name} (${AppVersion.code})",
+            style = MaterialTheme.typography.bodySmall,
+            color = VoitosColors.Muted,
+        )
         Spacer(modifier = Modifier.height(8.dp))
         VpnDebugBanner()
         Spacer(modifier = Modifier.height(12.dp))
@@ -841,6 +846,13 @@ fun ForceUpdateScreen(
             "Просим обновить приложение",
             style = MaterialTheme.typography.headlineSmall,
             color = VoitosColors.Text,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "Сейчас: ${AppVersion.name} (${AppVersion.code})",
+            style = MaterialTheme.typography.bodyMedium,
+            color = VoitosColors.Muted,
             textAlign = TextAlign.Center,
         )
         if (apkUrl.isNotBlank()) {

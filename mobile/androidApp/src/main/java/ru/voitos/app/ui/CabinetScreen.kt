@@ -43,6 +43,7 @@ import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.voitos.app.AppVersion
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.ExecutorMe
 import ru.voitos.app.model.ExecutorProfileBrief
@@ -262,6 +263,14 @@ fun CabinetScreen(
         ) {
             Text("Выйти", color = VoitosColors.Danger)
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "Версия приложения ${AppVersion.name} (${AppVersion.code})",
+            style = MaterialTheme.typography.bodySmall,
+            color = VoitosColors.Muted,
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+        )
     }
 }
 

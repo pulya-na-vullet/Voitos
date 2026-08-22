@@ -18,6 +18,8 @@ env = environ.Env(
 
 environ.Env.read_env(BASE_DIR / ".env")
 
+from config.version import VOITOS_BACKEND_VERSION  # noqa: F401 — re-export for django.conf.settings
+
 SECRET_KEY = env("SECRET_KEY", default="voitos-dev-secret-change-me")
 DEBUG = env("DEBUG")
 # В TestCase Django ставит DEBUG=False; для локальной OTP-отладки / тестов API:
@@ -30,9 +32,9 @@ MAX_BOT_OPEN_URL = env(
     default="https://max.ru/se13602985_1_bot",
 )
 # Минимальный versionCode Android-клиента (перекрывается AppSettings в панели).
-MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=15)
-MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=15)
-MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.11-kmp")
+MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=16)
+MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=16)
+MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.12-kmp")
 MOBILE_APK_URL = env(
     "MOBILE_APK_URL",
     default=(

@@ -33,7 +33,9 @@ def mobile_version_payload() -> dict:
         or getattr(settings, "MOBILE_APK_URL", "")
         or ""
     ).strip()
+    backend_version = str(getattr(settings, "VOITOS_BACKEND_VERSION", "") or "").strip()
     return {
+        "backend_version": backend_version,
         "min_app_version_code": min_code,
         "latest_app_version_code": latest_code,
         "latest_app_version_name": latest_name,
