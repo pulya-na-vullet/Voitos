@@ -5,10 +5,10 @@ from database.models import AppSettings
 
 @override_settings(
     MOBILE_OTP_DEBUG=True,
-    MOBILE_MIN_VERSION_CODE=18,
-    MOBILE_LATEST_VERSION_CODE=18,
-    MOBILE_LATEST_VERSION_NAME="0.2.14-kmp",
-    VOITOS_BACKEND_VERSION="0.2.14",
+    MOBILE_MIN_VERSION_CODE=19,
+    MOBILE_LATEST_VERSION_CODE=19,
+    MOBILE_LATEST_VERSION_NAME="0.2.15-kmp",
+    VOITOS_BACKEND_VERSION="0.2.15",
 )
 class AppVersionHealthTests(TestCase):
     def setUp(self):
@@ -21,15 +21,15 @@ class AppVersionHealthTests(TestCase):
         cfg.save()
 
     def test_health_includes_version_and_update_flag(self):
-        old = self.client.get("/api/v1/health?version_code=17")
+        old = self.client.get("/api/v1/health?version_code=18")
         self.assertEqual(old.status_code, 200)
         data = old.json()
         self.assertTrue(data["ok"])
-        self.assertEqual(data["backend_version"], "0.2.14")
-        self.assertEqual(data["min_app_version_code"], 18)
+        self.assertEqual(data["backend_version"], "0.2.15")
+        self.assertEqual(data["min_app_version_code"], 19)
         self.assertTrue(data["update_required"])
 
-        cur = self.client.get("/api/v1/health?version_code=18")
+        cur = self.client.get("/api/v1/health?version_code=19")
         self.assertFalse(cur.json()["update_required"])
 
     def test_panel_higher_min_wins_over_settings(self):
@@ -37,6 +37,40 @@ class AppVersionHealthTests(TestCase):
         cfg.mobile_min_version_code = 20
         cfg.mobile_latest_version_code = 20
         cfg.save()
-        data = self.client.get("/api/v1/health?version_code=18").json()
+        data = self.client.get("/api/v1/health?version_code=19").json()
         self.assertEqual(data["min_app_version_code"], 20)
         self.assertTrue(data["update_required"])
+
+    def test_pin_login_rejects_old_version(self):
+        from django.contrib.auth.hashers import make_password
+
+        from database.models import BotUser, ProfileStatus
+
+        user = BotUser.objects.create(
+            max_user_id="vu_pin",
+            phone="89625501111",
+            chat_id="c1",
+            real_name="Pin",
+            profile_status=ProfileStatus.VERIFIED,
+            pin_hash=make_password("1234"),
+        )
+        resp = self.client.post(
+            "/api/v1/auth/pin/login",
+            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 18}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 426)
+        body = resp.json()
+        self.assertTrue(body["update_required"])
+        self.assertEqual(body["min_app_version_code"], 19)
+        self.assertNotIn("access_token", body)
+
+        ok = self.client.post(
+            "/api/v1/auth/pin/login",
+            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 19}),
+            content_type="application/json",
+        )
+        self.assertEqual(ok.status_code, 200)
+        self.assertTrue(ok.json()["access_token"])
+        self.assertFalse(ok.json().get("update_required"))
+

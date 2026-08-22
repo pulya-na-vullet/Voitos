@@ -32,9 +32,9 @@ MAX_BOT_OPEN_URL = env(
     default="https://max.ru/se13602985_1_bot",
 )
 # Минимальный versionCode Android-клиента (перекрывается AppSettings в панели).
-MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=18)
-MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=18)
-MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.14-kmp")
+MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=19)
+MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=19)
+MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.15-kmp")
 MOBILE_APK_URL = env(
     "MOBILE_APK_URL",
     default=(

@@ -86,6 +86,7 @@ def max_bot_open_url() -> str:
 def auth_payload(user: BotUser, token: MobileAuthToken) -> dict:
     from bot.onboarding import is_complete
     from database.models import AccessState
+    from services.app_version import mobile_version_payload
 
     if not user.is_active:
         raise ValueError("user_deactivated")
@@ -99,7 +100,7 @@ def auth_payload(user: BotUser, token: MobileAuthToken) -> dict:
         "grace_until": user.grace_until.isoformat() if user.grace_until else None,
         "label": user.subscription_label(),
     }
-    return {
+    body = {
         "access_token": token.token,
         "bot_user_id": user.id,
         "display_name": str(user),
@@ -110,7 +111,24 @@ def auth_payload(user: BotUser, token: MobileAuthToken) -> dict:
         "is_active": True,
         "needs_payment": state == AccessState.BLOCKED,
         "access": access,
+        "update_required": False,
     }
+    body.update(mobile_version_payload())
+    return body
+
+
+def apply_client_version_gate(body: dict, client_code: int | None) -> dict:
+    """Добавить update_required по versionCode клиента."""
+    from services.app_version import client_needs_update, mobile_version_payload
+
+    body.update(mobile_version_payload())
+    if client_code is None:
+        body.setdefault("update_required", False)
+        return body
+    body["client_version_code"] = int(client_code)
+    body["update_required"] = client_needs_update(client_code)
+    return body
+
 
 
 def issue_token(user: BotUser, *, device_name: str = "") -> MobileAuthToken:

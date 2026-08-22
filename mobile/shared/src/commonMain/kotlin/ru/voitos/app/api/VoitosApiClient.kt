@@ -64,6 +64,8 @@ class VoitosApiClient(
     private val baseUrl: String = VoitosApi.DEFAULT_BASE_URL,
 ) {
     var accessToken: String? = null
+    /** versionCode установленного APK — уходит в X-Voitos-App-Version и login body. */
+    var appVersionCode: Int? = null
     private val http: HttpClient = defaultClient()
 
     suspend fun health(): Boolean {
@@ -72,8 +74,11 @@ class VoitosApiClient(
     }
 
     suspend fun healthCheck(clientVersionCode: Int? = null): HealthResponse {
-        val q = if (clientVersionCode != null) "?version_code=$clientVersionCode" else ""
-        return http.get("$baseUrl/health$q").body()
+        val code = clientVersionCode ?: appVersionCode
+        val q = if (code != null) "?version_code=$code" else ""
+        return http.get("$baseUrl/health$q") {
+            applyAppVersionHeader()
+        }.body()
     }
 
     suspend fun phoneStart(phone: String): Map<String, String?> =
@@ -96,7 +101,13 @@ class VoitosApiClient(
         return session
     }
 
-    suspend fun authConfig(): AuthConfig = http.get("$baseUrl/auth/config").body()
+    suspend fun authConfig(): AuthConfig {
+        val code = appVersionCode
+        val q = if (code != null) "?version_code=$code" else ""
+        return http.get("$baseUrl/auth/config$q") {
+            applyAppVersionHeader()
+        }.body()
+    }
 
     suspend fun phoneLoginRequest(phone: String): OkResponse {
         val response: HttpResponse = http.post("$baseUrl/auth/phone/login-request") {
@@ -116,12 +127,21 @@ class VoitosApiClient(
 
     suspend fun phoneLoginVerify(phone: String, code: String): AuthSession {
         val response: HttpResponse = http.post("$baseUrl/auth/phone/login-verify") {
+            applyAppVersionHeader()
             contentType(ContentType.Application.Json)
             setBody(
                 buildJsonObject {
                     put("phone", phone)
                     put("code", code)
+                    appVersionCode?.let { put("version_code", it) }
                 },
+            )
+        }
+        if (response.status.value == 426) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                "update_required",
+                err?.detail?.ifBlank { null } ?: "Просим обновить приложение",
             )
         }
         if (!response.status.isSuccess()) {
@@ -204,15 +224,32 @@ class VoitosApiClient(
     }
 
     suspend fun pinLogin(phone: String, pin: String): AuthSession {
-        val session: AuthSession = http.post("$baseUrl/auth/pin/login") {
+        val response: HttpResponse = http.post("$baseUrl/auth/pin/login") {
+            applyAppVersionHeader()
             contentType(ContentType.Application.Json)
             setBody(
                 buildJsonObject {
                     put("phone", phone)
                     put("pin", pin)
+                    appVersionCode?.let { put("version_code", it) }
                 },
             )
-        }.body()
+        }
+        if (response.status.value == 426) {
+            val err = runCatching { response.body<HealthResponse>() }.getOrNull()
+            throw ApiException(
+                "update_required",
+                err?.updateMessage?.ifBlank { null } ?: "Просим обновить приложение",
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "invalid_pin",
+                err?.detail?.ifBlank { null } ?: err?.error ?: "Неверный PIN",
+            )
+        }
+        val session: AuthSession = response.body()
         accessToken = session.accessToken
         return session
     }
@@ -639,6 +676,11 @@ class VoitosApiClient(
             bearerAuth(token)
             header("X-Voitos-Token", token)
         }
+        applyAppVersionHeader()
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.applyAppVersionHeader() {
+        appVersionCode?.let { header("X-Voitos-App-Version", it.toString()) }
     }
 
     companion object {

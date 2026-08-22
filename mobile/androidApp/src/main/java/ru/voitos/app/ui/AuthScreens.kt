@@ -139,7 +139,9 @@ fun LoginScreen(
     var manualHost by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl)
+    fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl).also {
+        it.appVersionCode = AppVersion.code
+    }
 
     fun persistDebug(debugCode: String = "") {
         onDebugPrefs(baseUrl, phone.trim(), debugCode)
@@ -171,6 +173,17 @@ fun LoginScreen(
     }
 
     fun finish(session: AuthSession) {
+        val needsUpdate = session.updateRequired ||
+            (session.minAppVersionCode > 0 && AppVersion.code < session.minAppVersionCode)
+        if (needsUpdate) {
+            applyVersionGate(
+                minCode = session.minAppVersionCode,
+                message = session.updateMessage,
+                apkUrl = session.apkUrl,
+                latestName = session.latestAppVersionName,
+            )
+            return
+        }
         val p = session.phone.ifBlank { phone.trim() }
         onLoggedIn(
             LoginSuccess(
@@ -312,6 +325,10 @@ fun LoginScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
+        if (updateRequired) {
+            ForceUpdateScreen(apkUrl = updateApkUrl)
+            return@Column
+        }
         Text("Voitos", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.secondary)
         Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
         Text(
@@ -377,28 +394,6 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosSecondaryButtonColors(),
             ) { Text("Подключить по IP") }
-        }
-
-        if (updateRequired) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                "После входа попросим обновить приложение.",
-                color = VoitosColors.Warn,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (updateApkUrl.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateApkUrl)))
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = voitosSecondaryButtonColors(),
-                ) { Text("Скачать обновление") }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
         }
 
         if (showRegister) {
@@ -693,6 +688,20 @@ fun LoginScreen(
                                 persistDebug()
                                 onSaveServer(baseUrl)
                                 finish(client().pinLogin(phone, pin))
+                            } catch (e: ApiException) {
+                                if (e.code == "update_required") {
+                                    val health = runCatching {
+                                        client().healthCheck(AppVersion.code)
+                                    }.getOrNull()
+                                    applyVersionGate(
+                                        minCode = health?.minAppVersionCode ?: (AppVersion.code + 1),
+                                        message = health?.updateMessage ?: e.message.orEmpty(),
+                                        apkUrl = health?.apkUrl.orEmpty(),
+                                        latestName = health?.latestAppVersionName.orEmpty(),
+                                    )
+                                } else {
+                                    error = friendlyNetworkError(e, fallback = "Неверный PIN")
+                                }
                             } catch (e: Exception) {
                                 error = friendlyNetworkError(e, fallback = "Неверный PIN")
                             } finally {

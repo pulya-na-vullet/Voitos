@@ -30,6 +30,11 @@ data class AuthSession(
     /** Подписка закончилась — нужен чек, вход при этом разрешён. */
     @SerialName("needs_payment") val needsPayment: Boolean = false,
     val access: AccessInfo? = null,
+    @SerialName("update_required") val updateRequired: Boolean = false,
+    @SerialName("min_app_version_code") val minAppVersionCode: Int = 0,
+    @SerialName("apk_url") val apkUrl: String = "",
+    @SerialName("update_message") val updateMessage: String = "",
+    @SerialName("latest_app_version_name") val latestAppVersionName: String = "",
 )
 
 @Serializable

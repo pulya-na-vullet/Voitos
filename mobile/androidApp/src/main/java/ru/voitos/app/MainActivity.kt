@@ -128,8 +128,10 @@ class MainActivity : ComponentActivity() {
 
         session = SessionStore(this)
         val restoredServerUrl = DevServerSettings.restoreIfNeeded(this, session)
-        client = VoitosApiClient(baseUrl = session.baseUrl)
-        client.accessToken = session.accessToken
+        client = VoitosApiClient(baseUrl = session.baseUrl).also {
+            it.appVersionCode = AppVersion.code
+            it.accessToken = session.accessToken
+        }
 
         val lastCrash = CrashFileLogger.consumeLastCrash(this)
         val deepLinkScreen = resolveDeepLink(intent?.data)
@@ -338,6 +340,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     session.needsOnboarding = result.needsOnboarding
                                     client = VoitosApiClient(baseUrl = result.baseUrl).also {
+                                        it.appVersionCode = AppVersion.code
                                         it.accessToken = result.token
                                     }
                                     scope.launch { registerDevPushToken() }
@@ -376,7 +379,26 @@ class MainActivity : ComponentActivity() {
                                     CircularProgressIndicator(color = VoitosColors.Accent2)
                                 }
                                 LaunchedEffect(Unit) {
-                                    // Сначала онбординг (логика бэка), затем hard update на всё приложение.
+                                    // Сначала hard update — до онбординга и PIN-сессии.
+                                    var health: ru.voitos.app.model.HealthResponse? = null
+                                    repeat(3) {
+                                        health = runCatching {
+                                            client.healthCheck(AppVersion.code)
+                                        }.getOrNull()
+                                        if (health != null) return@repeat
+                                        delay(400)
+                                    }
+                                    if (health == null) {
+                                        val cfg = runCatching { client.authConfig() }.getOrNull()
+                                        if (cfg != null && cfg.minAppVersionCode > AppVersion.code) {
+                                            goForceUpdate(apkUrl = cfg.apkUrl)
+                                            return@LaunchedEffect
+                                        }
+                                    } else if (appNeedsUpdate(health)) {
+                                        goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
+                                        return@LaunchedEffect
+                                    }
+
                                     val needOnboarding = runCatching {
                                         client.onboarding().requiresOnboarding()
                                     }.getOrNull() ?: session.needsOnboarding

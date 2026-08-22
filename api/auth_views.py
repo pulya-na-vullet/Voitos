@@ -9,10 +9,11 @@ from django.conf import settings
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from api.http import api_login_required, api_public, json_response, parse_json
+from api.http import api_login_required, api_public, client_version_code, json_response, parse_json, update_required_response
 from api.models import MobileAuthToken, PhoneOtpChallenge, PinChallengeKind
 from database.models import BotUser
 from services import mobile_auth
+from services.app_version import client_needs_update
 from subscriptions.receipts import normalize_phone
 
 
@@ -135,6 +136,9 @@ def phone_login_request(request):
 def phone_login_verify(request):
     """Проверка кода из Max по телефону → access_token."""
     data = parse_json(request)
+    ver = client_version_code(request, data)
+    if ver is not None and client_needs_update(ver):
+        return update_required_response(ver)
     try:
         body = mobile_auth.verify_challenge(
             phone=str(data.get("phone") or ""),
@@ -144,7 +148,7 @@ def phone_login_verify(request):
         )
     except ValueError as exc:
         return _error(str(exc))
-    return json_response(body)
+    return json_response(mobile_auth.apply_client_version_gate(body, ver))
 
 
 @api_public
@@ -173,6 +177,9 @@ def register_start(request):
 def register_confirm(request):
     """Код из бота Max → завершение регистрации и access_token."""
     data = parse_json(request)
+    ver = client_version_code(request, data)
+    if ver is not None and client_needs_update(ver):
+        return update_required_response(ver)
     try:
         body = mobile_auth.confirm_app_registration(
             phone=str(data.get("phone") or ""),
@@ -181,7 +188,7 @@ def register_confirm(request):
         )
     except ValueError as exc:
         return _error(str(exc))
-    return json_response(body)
+    return json_response(mobile_auth.apply_client_version_gate(body, ver))
 
 
 @api_public
@@ -199,6 +206,10 @@ def auth_config(request):
         ),
     }
     body.update(mobile_version_payload())
+    ver = client_version_code(request)
+    if ver is not None:
+        body["client_version_code"] = ver
+        body["update_required"] = client_needs_update(ver)
     return json_response(body)
 
 
@@ -226,6 +237,9 @@ def max_start(request):
 @require_http_methods(["POST"])
 def max_verify(request):
     data = parse_json(request)
+    ver = client_version_code(request, data)
+    if ver is not None and client_needs_update(ver):
+        return update_required_response(ver)
     try:
         body = mobile_auth.verify_challenge(
             phone=str(data.get("phone") or ""),
@@ -235,7 +249,7 @@ def max_verify(request):
         )
     except ValueError as exc:
         return _error(str(exc))
-    return json_response(body)
+    return json_response(mobile_auth.apply_client_version_gate(body, ver))
 
 
 @api_login_required
@@ -253,6 +267,10 @@ def pin_set(request):
 @require_http_methods(["POST"])
 def pin_login(request):
     data = parse_json(request)
+    ver = client_version_code(request, data)
+    # Жёсткий отказ: старый клиент не получит токен и не пройдёт по PIN в приложение.
+    if ver is not None and client_needs_update(ver):
+        return update_required_response(ver)
     try:
         body = mobile_auth.pin_login(
             phone=str(data.get("phone") or ""),
@@ -262,8 +280,10 @@ def pin_login(request):
     except ValueError as exc:
         code = str(exc)
         status = 423 if code == "pin_locked" else 400
+        if code == "user_deactivated":
+            status = 403
         return _error(code, status=status)
-    return json_response(body)
+    return json_response(mobile_auth.apply_client_version_gate(body, ver))
 
 
 @api_public
