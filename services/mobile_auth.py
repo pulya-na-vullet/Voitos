@@ -77,7 +77,10 @@ def max_bot_open_url() -> str:
     url = (getattr(cfg, "max_bot_open_url", None) or "").strip()
     if url:
         return url
-    return (getattr(settings, "MAX_BOT_OPEN_URL", None) or "").strip()
+    url = (getattr(settings, "MAX_BOT_OPEN_URL", None) or "").strip()
+    if url:
+        return url
+    return "https://max.ru/se13602985_1_bot"
 
 
 def auth_payload(user: BotUser, token: MobileAuthToken) -> dict:

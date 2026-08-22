@@ -105,7 +105,7 @@ fun LoginScreen(
     var realName by remember { mutableStateOf("") }
     var gender by remember { mutableStateOf("") } // male | female | other
     var birthDate by remember { mutableStateOf("") } // DD.MM.YYYY
-    var maxBotUrl by remember { mutableStateOf("") }
+    var maxBotUrl by remember { mutableStateOf("https://max.ru/se13602985_1_bot") }
     var canRegister by remember { mutableStateOf(false) }
     var debugHint by remember { mutableStateOf<String?>(null) }
     var serverStatus by remember {
@@ -451,18 +451,17 @@ fun LoginScreen(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                if (maxBotUrl.isNotBlank()) {
-                    Button(
-                        onClick = {
-                            runCatching {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(maxBotUrl)))
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = voitosSecondaryButtonColors(),
-                    ) { Text("Открыть бот Voitos в Max") }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
+                val botUrl = maxBotUrl.ifBlank { "https://max.ru/se13602985_1_bot" }
+                Button(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(botUrl)))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosSecondaryButtonColors(),
+                ) { Text("Перейти в Max") }
+                Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = code,
                     onValueChange = { code = it.filter { ch -> ch.isDigit() }.take(4) },
