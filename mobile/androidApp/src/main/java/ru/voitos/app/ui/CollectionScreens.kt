@@ -70,18 +70,20 @@ fun CollectionsScreen(
     onOpenChat: () -> Unit = {},
     onBack: (() -> Unit)? = null,
     refreshKey: Int = 0,
+    chatUnread: Int = 0,
+    onChatUnreadChange: (Int) -> Unit = {},
 ) {
     var items by remember { mutableStateOf<List<CollectionBrief>>(emptyList()) }
-    var chatUnread by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     val listState = rememberLazyListState()
 
-    fun reloadChatUnread() {
+    fun refreshUnread() {
         scope.launch {
-            chatUnread = runCatching { client.groups().unreadTotal }.getOrDefault(chatUnread)
+            val n = runCatching { client.groups().unreadTotal }.getOrNull() ?: return@launch
+            onChatUnreadChange(n)
         }
     }
 
@@ -93,7 +95,8 @@ fun CollectionsScreen(
             }
             try {
                 items = client.collections().items
-                chatUnread = runCatching { client.groups().unreadTotal }.getOrDefault(0)
+                val n = runCatching { client.groups().unreadTotal }.getOrNull()
+                if (n != null) onChatUnreadChange(n)
                 if (silent) error = null
             } catch (e: Exception) {
                 if (!silent || items.isEmpty()) {
@@ -107,6 +110,15 @@ fun CollectionsScreen(
 
     LaunchedEffect(refreshKey) { reload(silent = items.isNotEmpty()) }
 
+    // Непрочитанные в чате — отдельно и чаще, чем список сборов.
+    LaunchedEffect(Unit) {
+        refreshUnread()
+        while (true) {
+            delay(5_000)
+            refreshUnread()
+        }
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
@@ -118,7 +130,7 @@ fun CollectionsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 reload(silent = items.isNotEmpty())
-                reloadChatUnread()
+                refreshUnread()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

@@ -3,6 +3,7 @@ package ru.voitos.app.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -419,33 +421,30 @@ fun LoginScreen(
                         "female" to "Женский",
                         "other" to "Другой",
                     ).forEach { (value, label) ->
-                        if (gender == value) {
-                            Button(
-                                onClick = { gender = value },
-                                modifier = Modifier.weight(1f),
-                                colors = voitosPrimaryButtonColors(),
-                            ) {
-                                Text(
-                                    label,
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = Color.White,
-                                    ),
-                                )
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = { gender = value },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(
-                                    label,
+                        val selected = gender == value
+                        OutlinedButton(
+                            onClick = { gender = value },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (selected) {
+                                    VoitosColors.BgSoft
+                                } else {
+                                    Color.Transparent
+                                },
+                                contentColor = VoitosColors.Text,
+                            ),
+                            border = BorderStroke(
+                                width = if (selected) 2.dp else 1.dp,
+                                color = if (selected) VoitosColors.Accent2 else Color(0xFF3A4656),
+                            ),
+                        ) {
+                            Text(
+                                label,
+                                color = VoitosColors.Text,
+                                style = MaterialTheme.typography.labelSmall.copy(
                                     color = VoitosColors.Text,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = VoitosColors.Text,
-                                    ),
-                                )
-                            }
+                                ),
+                            )
                         }
                     }
                 }

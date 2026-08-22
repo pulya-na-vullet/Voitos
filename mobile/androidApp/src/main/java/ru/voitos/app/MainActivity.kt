@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.voitos.app.AppVersion
 import ru.voitos.app.api.VoitosApiClient
@@ -127,6 +128,7 @@ class MainActivity : ComponentActivity() {
                 var screen by remember { mutableStateOf<Screen>(initial) }
                 var tab by remember { mutableStateOf(MainTab.Collections) }
                 var collectionsRefresh by remember { mutableStateOf(0) }
+                var chatUnread by remember { mutableStateOf(0) }
                 var isExecutor by remember { mutableStateOf(false) }
                 var playSplash by remember { mutableStateOf(false) }
                 var pendingAfterBootstrap by remember { mutableStateOf(deepLinkScreen) }
@@ -333,6 +335,16 @@ class MainActivity : ComponentActivity() {
                                         tab = MainTab.Cabinet
                                     }
                                 }
+                                // Бейдж чата обновляем на всём Main, не только на вкладке Сборы.
+                                LaunchedEffect(client.accessToken, screen) {
+                                    while (true) {
+                                        val n = runCatching {
+                                            client.groups().unreadTotal
+                                        }.getOrNull()
+                                        if (n != null) chatUnread = n
+                                        delay(5_000)
+                                    }
+                                }
                                 MainShell(
                                     selected = tab,
                                     onSelect = {
@@ -357,6 +369,8 @@ class MainActivity : ComponentActivity() {
                                             onOpenChat = { screen = Screen.GroupChat },
                                             onBack = null,
                                             refreshKey = collectionsRefresh,
+                                            chatUnread = chatUnread,
+                                            onChatUnreadChange = { chatUnread = it },
                                         )
                                         MainTab.WorkRequests -> WorkRequestsScreen(
                                             client = client,
@@ -490,6 +504,11 @@ class MainActivity : ComponentActivity() {
                             Screen.GroupChat -> GroupChatScreen(
                                 client = client,
                                 onBack = {
+                                    scope.launch {
+                                        chatUnread = runCatching {
+                                            client.groups().unreadTotal
+                                        }.getOrDefault(0)
+                                    }
                                     goMain(MainTab.Collections, refreshCollections = true)
                                 },
                             )
