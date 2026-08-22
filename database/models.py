@@ -244,18 +244,18 @@ class AppSettings(models.Model):
     )
     mobile_min_version_code = models.PositiveIntegerField(
         "Мин. versionCode приложения",
-        default=22,
+        default=23,
         help_text="Клиенты со меньшим versionCode увидят требование обновить приложение.",
     )
     mobile_latest_version_code = models.PositiveIntegerField(
         "Актуальный versionCode",
-        default=22,
+        default=23,
     )
     mobile_latest_version_name = models.CharField(
         "Актуальная versionName",
         max_length=64,
         blank=True,
-        default="0.2.18-kmp",
+        default="0.2.19-kmp",
     )
     mobile_apk_url = models.CharField(
         "Ссылка на APK для обновления",
@@ -877,7 +877,9 @@ class GroupChatMessage(models.Model):
     )
     author = models.ForeignKey(
         BotUser,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="group_chat_messages",
         verbose_name="Автор",
     )

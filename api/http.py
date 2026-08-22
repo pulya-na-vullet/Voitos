@@ -102,6 +102,33 @@ def api_login_required(view: Callable):
     return _wrapped
 
 
+def subscription_required_response():
+    return json_response(
+        {
+            "error": "subscription_required",
+            "detail": "Оплатите подписку для доступа к услугам",
+            "needs_payment": True,
+        },
+        status=403,
+    )
+
+
+def api_subscription_required(view: Callable):
+    """Сборы / вызов мастера / регистрация исполнителя — только при активном доступе."""
+
+    @wraps(view)
+    def _wrapped(request: HttpRequest, *args, **kwargs):
+        user = getattr(request, "bot_user", None)
+        if user is None:
+            return json_response({"error": "unauthorized"}, status=401)
+        user.ensure_grace_period()
+        if not user.has_feature_access():
+            return subscription_required_response()
+        return view(request, *args, **kwargs)
+
+    return _wrapped
+
+
 def api_public(view: Callable):
     @wraps(view)
     @csrf_exempt

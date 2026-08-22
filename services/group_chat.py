@@ -136,13 +136,17 @@ def message_to_dict(msg: GroupChatMessage, *, request=None, viewer: BotUser | No
                     avatar_url = request.build_absolute_uri(url)
         except Exception:
             avatar_url = ""
+    if author is not None:
+        author_name = str(author).strip() or (author.phone or f"#{author.id}")
+    else:
+        author_name = "Удалённый пользователь"
     return {
         "id": msg.id,
         "group_id": msg.group_id,
         "text": msg.text or "",
         "created_at": msg.created_at.isoformat() if msg.created_at else "",
         "author_id": author.id if author is not None else None,
-        "author_name": str(author) if author else "",
+        "author_name": author_name,
         "author_avatar_url": avatar_url,
         "is_mine": bool(viewer and author and author.id == viewer.id),
     }

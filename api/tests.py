@@ -537,6 +537,47 @@ class AppEmitHookTests(TestCase):
         self.assertEqual(body["active_limit"], 4)
         self.assertIn("created_at", body["items"][0])
 
+    def test_collections_blocked_without_subscription(self):
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from database.models import (
+            CampaignStatus,
+            ServiceCampaign,
+            ServiceCategory,
+            ServiceGroup,
+            ServiceInvite,
+        )
+
+        self.client_user.subscription_until = timezone.now() - timedelta(days=40)
+        self.client_user.grace_until = timezone.now() - timedelta(days=10)
+        self.client_user.save(update_fields=["subscription_until", "grace_until"])
+        self.assertEqual(self.client_user.access_state(), "blocked")
+
+        g = ServiceGroup.objects.create(name="Двор-блок")
+        g.members.add(self.client_user)
+        camp = ServiceCampaign.objects.create(
+            title="Снег",
+            category=ServiceCategory.SNOW,
+            group=g,
+            status=CampaignStatus.ACTIVE,
+            total_amount=Decimal("100"),
+            amount_per_user=Decimal("100"),
+        )
+        ServiceInvite.objects.create(
+            campaign=camp, user=self.client_user, amount_due=Decimal("100")
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.get(
+            "/api/v1/collections",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["error"], "subscription_required")
+        self.assertIn("Оплатите подписку", resp.json()["detail"])
+
     def test_create_work_request_api(self):
         tok = MobileAuthToken.objects.create(bot_user=self.client_user)
         resp = self.client.post(

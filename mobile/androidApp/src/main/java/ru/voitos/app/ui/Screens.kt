@@ -1,6 +1,10 @@
 package ru.voitos.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.util.Base64
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -783,6 +787,8 @@ fun SubscriptionScreen(
     onBack: () -> Unit,
     /** Подписка закрыта: нельзя уйти в приложение без оплаты. */
     paymentRequired: Boolean = false,
+    /** Доп. текст над реквизитами (например, после тапа на сборы/мастера). */
+    gateMessage: String = "",
     onAccessRestored: () -> Unit = {},
     onLogout: (() -> Unit)? = null,
 ) {
@@ -800,6 +806,12 @@ fun SubscriptionScreen(
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    fun copyPhone(phone: String) {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Телефон для оплаты", phone))
+        Toast.makeText(context, "Номер скопирован", Toast.LENGTH_SHORT).show()
+    }
 
     fun reload() {
         scope.launch {
@@ -866,23 +878,65 @@ fun SubscriptionScreen(
             VoitosBackButton(onClick = onBack)
         }
         Text(
-            if (paymentRequired) "Продление подписки" else "Подписка",
+            if (paymentRequired) "Оплата подписки" else "Подписка",
             style = MaterialTheme.typography.headlineSmall,
             color = VoitosColors.Text,
         )
         Spacer(modifier = Modifier.height(8.dp))
+        val topHint = gateMessage.ifBlank {
+            if (paymentRequired) "Оплатите подписку для доступа к услугам" else ""
+        }
+        if (topHint.isNotBlank()) {
+            Text(
+                topHint,
+                color = VoitosColors.Warn,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         if (paymentRequired) {
-                Text(
-                    "Подписка закончилась — основные функции закрыты. " +
-                        "Загрузите чек об оплате: после проверки администратором доступ откроется.",
-                    color = VoitosColors.Warn,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+            Text(
+                "Переведите оплату по реквизитам ниже и загрузите чек. " +
+                    "После проверки администратором доступ к сборам и вызову мастера откроется.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
             Spacer(modifier = Modifier.height(12.dp))
         }
         error?.let { Text(it, color = VoitosColors.Danger) }
         message?.let { Text(it, color = VoitosColors.Ok) }
+
         info?.let { s ->
+            // Реквизиты самозанятого — всегда сверху.
+            if (s.paymentPhone.isNotBlank() || s.paymentName.isNotBlank()) {
+                PanelCard {
+                    Text(
+                        "Реквизиты для оплаты",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = VoitosColors.Accent2,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (s.paymentName.isNotBlank()) {
+                        Text("Получатель: ${s.paymentName}", color = VoitosColors.Text)
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    if (s.paymentPhone.isNotBlank()) {
+                        Text("Телефон: ${s.paymentPhone}", color = VoitosColors.Text)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { copyPhone(s.paymentPhone) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = voitosPrimaryButtonColors(),
+                        ) {
+                            Text("Скопировать номер телефона")
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Цена: ${s.priceRub} ₽/мес", color = VoitosColors.Text)
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             PanelCard {
                 Text(
                     s.label.ifBlank {
@@ -904,34 +958,20 @@ fun SubscriptionScreen(
                 Text("Статус: ${s.state}", color = VoitosColors.Text)
                 s.subscriptionUntil?.let { Text("Была до: $it", color = VoitosColors.Text) }
                 s.graceUntil?.let { Text("Grace до: $it", color = VoitosColors.Muted) }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Цена: ${s.priceRub} ₽/мес", color = VoitosColors.Text)
-            }
-            if (s.paymentPhone.isNotBlank() || s.paymentName.isNotBlank() || s.family.members.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                PanelCard {
-                    Text("Оплата и семья", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+                if (s.pendingReceipts > 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Чеков на проверке: ${s.pendingReceipts}", color = VoitosColors.Warn)
+                }
+                val fam = s.family
+                if (fam.isPayer && fam.members.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    if (s.paymentPhone.isNotBlank()) {
-                        Text("Телефон: ${s.paymentPhone}", color = VoitosColors.Text)
+                    Text("К подписке подключены:", color = VoitosColors.Muted)
+                    fam.members.forEach { m ->
+                        Text("• ${m.name.ifBlank { m.phone }}", color = VoitosColors.Text)
                     }
-                    if (s.paymentName.isNotBlank()) {
-                        Text("Получатель: ${s.paymentName}", color = VoitosColors.Text)
-                    }
-                    if (s.pendingReceipts > 0) {
-                        Text("Чеков на проверке: ${s.pendingReceipts}", color = VoitosColors.Warn)
-                    }
-                    val fam = s.family
-                    if (fam.isPayer && fam.members.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("К подписке подключены:", color = VoitosColors.Muted)
-                        fam.members.forEach { m ->
-                            Text("• ${m.name.ifBlank { m.phone }}", color = VoitosColors.Text)
-                        }
-                    } else if (fam.payerName.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Подписка через: ${fam.payerName}", color = VoitosColors.Text)
-                    }
+                } else if (fam.payerName.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Подписка через: ${fam.payerName}", color = VoitosColors.Text)
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -941,13 +981,7 @@ fun SubscriptionScreen(
                 enabled = !loading,
                 colors = voitosPrimaryButtonColors(),
             ) {
-                Text(
-                    when {
-                        loading -> "Отправка…"
-                        paymentRequired -> "Загрузить чек"
-                        else -> "Загрузить чек"
-                    },
-                )
+                Text(if (loading) "Отправка…" else "Загрузить чек")
             }
             Text(
                 "Фото перевода или PDF чека",

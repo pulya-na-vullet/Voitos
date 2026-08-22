@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from django.views.decorators.http import require_GET, require_http_methods
 
-from api.http import api_login_required, api_public, json_response, parse_json
+from api.http import (
+    api_login_required,
+    api_public,
+    api_subscription_required,
+    json_response,
+    parse_json,
+)
 from api.models import AppNotification
 from bot.onboarding import STORIES, panel_progress, progress_list
 from database.models import (
@@ -300,6 +306,7 @@ def _open_offers_qs(user):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def executor_register(request):
     from bot.contractor_registration import submit_contractor_registration_api
@@ -802,6 +809,7 @@ def _campaign_progress_payload(campaign) -> dict:
 
 
 @api_login_required
+@api_subscription_required
 @require_GET
 def collections_list(request):
     """Список инвайтов жителя в сборы (новые сверху)."""
@@ -912,6 +920,7 @@ def collections_list(request):
 
 
 @api_login_required
+@api_subscription_required
 @require_GET
 def collection_detail(request, pk: int):
     """Детали сбора по campaign id для текущего пользователя."""
@@ -966,6 +975,7 @@ def collection_detail(request, pk: int):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def collection_receipt(request, pk: int):
     """Загрузить чек оплаты сбора (base64)."""
@@ -1010,6 +1020,7 @@ def collection_receipt(request, pk: int):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def work_requests_create(request):
     from database.models import WorkRequestStatus
@@ -1053,6 +1064,7 @@ def work_requests_create(request):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def work_request_add_photo(request, pk: int):
     """Добавить фото к черновику заявки (base64 JSON — проще для KMP)."""
@@ -1091,6 +1103,7 @@ def work_request_add_photo(request, pk: int):
 
 
 @api_login_required
+@api_subscription_required
 @require_http_methods(["POST"])
 def work_request_submit(request, pk: int):
     """Черновик → pending + автоподбор (как «готово» в боте)."""

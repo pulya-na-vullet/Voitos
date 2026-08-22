@@ -164,6 +164,7 @@ class MainActivity : ComponentActivity() {
                 var pendingAfterBootstrap by remember { mutableStateOf(deepLinkScreen) }
                 var crashText by remember { mutableStateOf(lastCrash) }
                 var updateApkUrl by remember { mutableStateOf("") }
+                var paywallGateMessage by remember { mutableStateOf("") }
                 val scope = rememberCoroutineScope()
 
                 fun enterMainWithSplash(splash: Boolean) {
@@ -174,6 +175,24 @@ class MainActivity : ComponentActivity() {
                 fun goForceUpdate(apkUrl: String = "") {
                     updateApkUrl = apkUrl
                     screen = Screen.ForceUpdate
+                }
+
+                fun goPaywallForServices(message: String = "Оплатите подписку для доступа к услугам") {
+                    paywallGateMessage = message
+                    playSplash = false
+                    screen = Screen.Paywall
+                }
+
+                /** Сборы / мастер / регистрация исполнителя — только при активном доступе. */
+                fun withPaidAccess(onAllowed: () -> Unit) {
+                    scope.launch {
+                        val access = runCatching { client.access() }.getOrNull()
+                        if (access != null && (access.needsPayment || access.state == "blocked")) {
+                            goPaywallForServices()
+                            return@launch
+                        }
+                        onAllowed()
+                    }
                 }
 
                 fun appNeedsUpdate(health: ru.voitos.app.model.HealthResponse?): Boolean {
@@ -195,8 +214,7 @@ class MainActivity : ComponentActivity() {
                         val access = runCatching { client.access() }.getOrNull()
                         val needsPay = access?.needsPayment == true || access?.state == "blocked"
                         if (needsPay) {
-                            playSplash = false
-                            screen = Screen.Paywall
+                            goPaywallForServices()
                             return@launch
                         }
                         val next = pendingAfterBootstrap
@@ -251,8 +269,7 @@ class MainActivity : ComponentActivity() {
                         if (screen !is Screen.Paywall && screen !is Screen.Bootstrapping) {
                             val access = runCatching { client.access() }.getOrNull()
                             if (access?.needsPayment == true || access?.state == "blocked") {
-                                playSplash = false
-                                screen = Screen.Paywall
+                                goPaywallForServices()
                                 break
                             }
                         }
@@ -468,11 +485,20 @@ class MainActivity : ComponentActivity() {
                                 }
                                 MainShell(
                                     selected = tab,
-                                    onSelect = {
-                                        if (it == MainTab.Collections) {
-                                            collectionsRefresh += 1
+                                    onSelect = { next ->
+                                        val needsPaid = next == MainTab.Collections ||
+                                            next == MainTab.CallMaster ||
+                                            next == MainTab.Work
+                                        if (needsPaid) {
+                                            withPaidAccess {
+                                                if (next == MainTab.Collections) {
+                                                    collectionsRefresh += 1
+                                                }
+                                                tab = next
+                                            }
+                                        } else {
+                                            tab = next
                                         }
-                                        tab = it
                                     },
                                     playLogoSplash = playSplash,
                                     showWorkTab = isExecutor,
@@ -486,7 +512,11 @@ class MainActivity : ComponentActivity() {
                                     when (tab) {
                                         MainTab.Collections -> CollectionsScreen(
                                             client = client,
-                                            onOpen = { id -> screen = Screen.CollectionDetail(id) },
+                                            onOpen = { id ->
+                                                withPaidAccess {
+                                                    screen = Screen.CollectionDetail(id)
+                                                }
+                                            },
                                             onOpenChat = { screen = Screen.GroupChat },
                                             onBack = null,
                                             refreshKey = collectionsRefresh,
@@ -514,9 +544,16 @@ class MainActivity : ComponentActivity() {
                                         )
                                         MainTab.Cabinet -> CabinetScreen(
                                             client = client,
-                                            onOpenSubscription = { screen = Screen.Subscription },
+                                            onOpenSubscription = {
+                                                paywallGateMessage = ""
+                                                screen = Screen.Subscription
+                                            },
                                             onOpenOnboarding = { screen = Screen.Onboarding },
-                                            onRegisterExecutor = { screen = Screen.ExecutorRegister },
+                                            onRegisterExecutor = {
+                                                withPaidAccess {
+                                                    screen = Screen.ExecutorRegister
+                                                }
+                                            },
                                             onOpenFeedback = { screen = Screen.Feedback },
                                             onOpenWishes = { screen = Screen.Wish },
                                             onChangePin = { screen = Screen.ChangePin },
@@ -588,8 +625,12 @@ class MainActivity : ComponentActivity() {
                             Screen.Paywall -> SubscriptionScreen(
                                 client = client,
                                 paymentRequired = true,
+                                gateMessage = paywallGateMessage.ifBlank {
+                                    "Оплатите подписку для доступа к услугам"
+                                },
                                 onBack = { logoutToLogin() },
                                 onAccessRestored = {
+                                    paywallGateMessage = ""
                                     pendingAfterBootstrap = null
                                     enterMainWithSplash(splash = true)
                                 },

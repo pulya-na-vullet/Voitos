@@ -53,6 +53,35 @@ class GroupChatAndAvatarTests(TestCase):
         mid = resp.json()["message"]["id"]
         self.assertTrue(GroupChatMessage.objects.filter(pk=mid, group=self.g1).exists())
 
+        poll = self.client.get(
+            f"/api/v1/groups/{self.g1.id}/messages",
+            **self._auth(),
+        )
+        self.assertEqual(poll.status_code, 200)
+        texts = [m["text"] for m in poll.json()["items"]]
+        self.assertIn("Привет соседям", texts)
+
+    def test_messages_kept_when_author_deleted(self):
+        msg = GroupChatMessage.objects.create(
+            group=self.g1, author=self.other, text="Я ещё здесь"
+        )
+        other_id = self.other.id
+        self.other.delete()
+        msg.refresh_from_db()
+        self.assertIsNone(msg.author_id)
+        self.assertEqual(msg.text, "Я ещё здесь")
+        self.assertFalse(BotUser.objects.filter(pk=other_id).exists())
+
+        poll = self.client.get(
+            f"/api/v1/groups/{self.g1.id}/messages",
+            **self._auth(),
+        )
+        self.assertEqual(poll.status_code, 200)
+        row = next(m for m in poll.json()["items"] if m["id"] == msg.id)
+        self.assertEqual(row["text"], "Я ещё здесь")
+        self.assertEqual(row["author_name"], "Удалённый пользователь")
+        self.assertIsNone(row["author_id"])
+
         listed = self.client.get(f"/api/v1/groups/{self.g1.id}/messages", **self._auth())
         self.assertEqual(listed.status_code, 200)
         texts = [m["text"] for m in listed.json()["items"]]
@@ -63,6 +92,27 @@ class GroupChatAndAvatarTests(TestCase):
             **self._auth(),
         )
         self.assertEqual(after.json()["items"], [])
+
+    def test_messages_kept_when_author_deleted(self):
+        msg = GroupChatMessage.objects.create(
+            group=self.g1, author=self.other, text="Я ещё здесь"
+        )
+        other_id = self.other.id
+        self.other.delete()
+        msg.refresh_from_db()
+        self.assertIsNone(msg.author_id)
+        self.assertEqual(msg.text, "Я ещё здесь")
+        self.assertFalse(BotUser.objects.filter(pk=other_id).exists())
+
+        poll = self.client.get(
+            f"/api/v1/groups/{self.g1.id}/messages",
+            **self._auth(),
+        )
+        self.assertEqual(poll.status_code, 200)
+        row = next(m for m in poll.json()["items"] if m["id"] == msg.id)
+        self.assertEqual(row["text"], "Я ещё здесь")
+        self.assertEqual(row["author_name"], "Удалённый пользователь")
+        self.assertIsNone(row["author_id"])
 
     def test_foreign_group_forbidden(self):
         g3 = ServiceGroup.objects.create(name="Чужая")
