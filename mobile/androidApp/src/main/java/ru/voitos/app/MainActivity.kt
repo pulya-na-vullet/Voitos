@@ -51,6 +51,7 @@ import ru.voitos.app.ui.NewWorkRequestScreen
 import ru.voitos.app.ui.OnboardingScreen
 import ru.voitos.app.ui.SubscriptionScreen
 import ru.voitos.app.ui.VoitosBackground
+import ru.voitos.app.ui.WorkRequestDetailScreen
 import ru.voitos.app.ui.WorkRequestPhotosScreen
 import ru.voitos.app.ui.WorkRequestsScreen
 import ru.voitos.app.ui.theme.VoitosColors
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
         data object Main : Screen()
         data class CollectionDetail(val id: Int) : Screen()
         data class WorkRequestPhotos(val id: Int) : Screen()
+        data class WorkRequestDetail(val id: Int) : Screen()
         data object Subscription : Screen()
         data object Onboarding : Screen()
         data object Feedback : Screen()
@@ -144,7 +146,7 @@ class MainActivity : ComponentActivity() {
                         Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister ->
                             goMain(MainTab.Cabinet)
                         is Screen.WorkRequestPhotos -> goMain(MainTab.CallMaster)
-                        is Screen.Confirm -> goMain(MainTab.WorkRequests)
+                        is Screen.WorkRequestDetail, is Screen.Confirm -> goMain(MainTab.WorkRequests)
                     }
                 }
 
@@ -305,6 +307,7 @@ class MainActivity : ComponentActivity() {
                                         MainTab.WorkRequests -> WorkRequestsScreen(
                                             client = client,
                                             onConfirm = { id -> screen = Screen.Confirm(id) },
+                                            onOpen = { id -> screen = Screen.WorkRequestDetail(id) },
                                             onBack = null,
                                         )
                                         MainTab.CallMaster -> NewWorkRequestScreen(
@@ -375,6 +378,16 @@ class MainActivity : ComponentActivity() {
                                     tab = MainTab.CallMaster
                                     screen = Screen.Main
                                 },
+                            )
+
+                            is Screen.WorkRequestDetail -> WorkRequestDetailScreen(
+                                client = client,
+                                workRequestId = s.id,
+                                onBack = {
+                                    tab = MainTab.WorkRequests
+                                    screen = Screen.Main
+                                },
+                                onConfirmAmount = { id -> screen = Screen.Confirm(id) },
                             )
 
                             Screen.Subscription -> SubscriptionScreen(
@@ -456,7 +469,8 @@ class MainActivity : ComponentActivity() {
         return when (val route = DeepLinks.parse(link)) {
             is DeepLinks.Route.Collection -> Screen.CollectionDetail(route.id)
             is DeepLinks.Route.WorkRequest ->
-                if (route.action == "confirm") Screen.Confirm(route.id) else Screen.Main
+                if (route.action == "confirm") Screen.Confirm(route.id)
+                else Screen.WorkRequestDetail(route.id)
             is DeepLinks.Route.Subscription -> Screen.Subscription
             is DeepLinks.Route.Feedback -> Screen.Feedback
             else -> Screen.Main

@@ -5,7 +5,6 @@
   <h1>Сборы</h1>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <a class="btn secondary small" href="{% url 'panel:services_groups' %}">Группы</a>
-    <a class="btn secondary small" href="{% url 'panel:services_archive' %}">Архив</a>
     <a class="btn secondary small" href="{% url 'panel:services_wishes' %}">Пожелания</a>
     {% if panel_is_admin %}
     <a class="btn secondary small" href="{% url 'panel:contractors' %}">Мастера</a>

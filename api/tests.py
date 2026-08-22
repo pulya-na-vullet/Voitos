@@ -472,6 +472,51 @@ class AppEmitHookTests(TestCase):
         self.assertIn(wr.status, {WorkRequestStatus.PENDING, WorkRequestStatus.OFFERING})
         self.assertEqual(wr.photos.count(), 2)
 
+    def test_work_request_detail_includes_photo_urls(self):
+        import base64
+
+        from database.models import WorkRequest, WorkRequestStatus
+
+        wr = WorkRequest.objects.create(
+            user=self.client_user,
+            role=self.role,
+            description="Подробности заявки",
+            status=WorkRequestStatus.PENDING,
+            client_locality="Куюки",
+        )
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkS"
+            "Ew8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJ"
+            "CQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy"
+            "MjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAA"
+            "AAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAA"
+            "AAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQ"
+            "AQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAA"
+            "AAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
+        )
+        b64 = base64.b64encode(jpeg).decode("ascii")
+        with self.settings(MEDIA_ROOT="/tmp/voitos_kmp_wr_detail"):
+            add = self.client.post(
+                f"/api/v1/work-requests/{wr.id}/photos",
+                data=json.dumps({"content_base64": b64, "filename": "d.jpg"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+            )
+            self.assertEqual(add.status_code, 201)
+            detail = self.client.get(
+                f"/api/v1/work-requests/{wr.id}",
+                HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+            )
+        self.assertEqual(detail.status_code, 200)
+        data = detail.json()
+        self.assertEqual(data["id"], wr.id)
+        self.assertEqual(data["description"], "Подробности заявки")
+        self.assertEqual(data["photo_count"], 1)
+        self.assertEqual(len(data["photo_urls"]), 1)
+        self.assertTrue(data["photo_urls"][0].startswith("http"))
+        self.assertEqual(data["client_locality"], "Куюки")
+
     def test_work_request_cancel_api(self):
         from database.models import WorkRequest, WorkRequestStatus
 

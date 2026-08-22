@@ -53,11 +53,13 @@ import ru.voitos.app.model.CollectionBrief
 import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.OnboardingStep
 import ru.voitos.app.model.WorkRequestBrief
+import ru.voitos.app.model.WorkRequestDetail
 import ru.voitos.app.nav.DeepLinks
 import ru.voitos.app.ui.theme.VoitosColors
 import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
 import ru.voitos.app.ui.theme.voitosSecondaryButtonColors
 import ru.voitos.app.ui.theme.voitosAccent2ButtonColors
+import kotlin.math.roundToInt
 
 @Composable
 fun LoginScreen(
@@ -498,6 +500,7 @@ fun InboxScreen(
 fun WorkRequestsScreen(
     client: VoitosApiClient,
     onConfirm: (Int) -> Unit,
+    onOpen: (Int) -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
     var clientItems by remember { mutableStateOf<List<WorkRequestBrief>>(emptyList()) }
@@ -535,7 +538,7 @@ fun WorkRequestsScreen(
             }
             Text("Заявки", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
             Text(
-                "Статусы обновляются автоматически: поиск → согласование времени → в работе.",
+                "Нажмите на заявку, чтобы открыть подробности и фото.",
                 color = VoitosColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -554,7 +557,9 @@ fun WorkRequestsScreen(
 
         if (!loading) {
             items(clientItems, key = { "wr-${it.id}" }) { wr ->
-            PanelCard {
+            PanelCard(
+                modifier = Modifier.clickable { onOpen(wr.id) },
+            ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         "#${wr.id} ${wr.roleName}",
@@ -574,6 +579,12 @@ fun WorkRequestsScreen(
                         Text("Время: ${wr.agreedSlot}", color = VoitosColors.Muted)
                     }
                     Text(wr.description, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Text)
+                    Text(
+                        "Открыть подробности →",
+                        color = VoitosColors.Accent,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
 
                     if (wr.status == "scheduling") {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -668,6 +679,156 @@ fun WorkRequestsScreen(
             }
         }
     }
+}
+
+@Composable
+fun WorkRequestDetailScreen(
+    client: VoitosApiClient,
+    workRequestId: Int,
+    onBack: () -> Unit,
+    onConfirmAmount: (Int) -> Unit,
+) {
+    BackHandler(enabled = true) { onBack() }
+    var detail by remember { mutableStateOf<WorkRequestDetail?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+
+    fun reload() {
+        scope.launch {
+            loading = true
+            error = null
+            detail = runCatching { client.workRequest(workRequestId) }.getOrElse {
+                error = friendlyNetworkError(it)
+                null
+            }
+            loading = false
+        }
+    }
+
+    LaunchedEffect(workRequestId) { reload() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        VoitosBackButton(onClick = onBack)
+        Text("Заявка", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        Spacer(modifier = Modifier.height(8.dp))
+        error?.let { NetworkErrorText(it) }
+        if (loading && detail == null) {
+            VoitosDetailSkeleton()
+        }
+        detail?.let { wr ->
+            if (wr.photoUrls.isNotEmpty()) {
+                CollectionPhotoCarousel(
+                    photos = wr.photoUrls,
+                    contentDescription = "Заявка #${wr.id}",
+                    height = 220.dp,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp)
+                        .background(VoitosColors.BgSoft, androidx.compose.foundation.shape.RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (wr.needsPhotos) "Фото ещё не добавлены" else "Фото не прикладывались",
+                        color = VoitosColors.Muted,
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            PanelCard {
+                Text(
+                    "#${wr.id} ${wr.roleName}",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = VoitosColors.Text,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    wr.statusLabel.ifBlank { workRequestStatusLabel(wr.status) },
+                    color = workRequestStatusColor(wr.status),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                if (wr.createdAt.isNotBlank()) {
+                    Text(
+                        "Создана: ${formatIsoDateTime(wr.createdAt)}",
+                        color = VoitosColors.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            PanelCard {
+                Text("Описание", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    wr.description.ifBlank { "Без описания" },
+                    color = VoitosColors.Text,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            PanelCard {
+                Text("Детали", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+                Spacer(modifier = Modifier.height(6.dp))
+                DetailLine("Населённый пункт", wr.clientLocality)
+                DetailLine("Адрес", wr.clientAddress)
+                val masterName = wr.assignedExecutorName ?: wr.assignedName
+                DetailLine("Мастер", masterName.orEmpty())
+                DetailLine("Телефон мастера", wr.assignedPhone.orEmpty())
+                DetailLine("Адрес приёма", wr.masterAddress)
+                DetailLine("Согласованное время", wr.agreedSlot)
+                if (wr.proposedSlots.isNotEmpty()) {
+                    DetailLine("Предложенные окна", wr.proposedSlots.joinToString(", "))
+                }
+                wr.reportedAmount?.let {
+                    DetailLine("Сумма по отчёту", "${it.roundToInt()} ₽")
+                }
+                wr.confirmedAmount?.let {
+                    DetailLine("Подтверждённая сумма", "${it.roundToInt()} ₽")
+                }
+                if (wr.payMethod.isNotBlank()) {
+                    DetailLine("Способ оплаты", wr.payMethod)
+                }
+                if (wr.photoCount > 0) {
+                    DetailLine("Фото", "${wr.photoCount}")
+                }
+            }
+
+            if (wr.needsConfirmAmount || wr.status == "awaiting_client") {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { onConfirmAmount(wr.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Подтвердить сумму") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    if (value.isBlank()) return
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = VoitosColors.Muted)
+        Text(value, style = MaterialTheme.typography.bodyLarge, color = VoitosColors.Text)
+    }
+}
+
+private fun formatIsoDateTime(raw: String): String {
+    val cleaned = raw.replace('T', ' ').take(16)
+    return cleaned.ifBlank { raw }
 }
 
 private fun workRequestStatusLabel(status: String): String = when (status) {

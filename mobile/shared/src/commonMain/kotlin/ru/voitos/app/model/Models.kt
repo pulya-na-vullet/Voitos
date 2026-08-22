@@ -101,6 +101,33 @@ data class WorkRequestList(
 )
 
 @Serializable
+data class WorkRequestDetail(
+    val id: Int,
+    val status: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    @SerialName("role_name") val roleName: String = "",
+    val description: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
+    @SerialName("assigned_executor_name") val assignedExecutorName: String? = null,
+    @SerialName("assigned_name") val assignedName: String? = null,
+    @SerialName("assigned_phone") val assignedPhone: String? = null,
+    @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
+    @SerialName("agreed_slot") val agreedSlot: String = "",
+    @SerialName("can_confirm_slot") val canConfirmSlot: Boolean = false,
+    @SerialName("needs_confirm_amount") val needsConfirmAmount: Boolean = false,
+    @SerialName("needs_photos") val needsPhotos: Boolean = false,
+    @SerialName("photo_count") val photoCount: Int = 0,
+    @SerialName("photo_urls") val photoUrls: List<String> = emptyList(),
+    @SerialName("client_locality") val clientLocality: String = "",
+    @SerialName("client_address") val clientAddress: String = "",
+    @SerialName("master_address") val masterAddress: String = "",
+    @SerialName("reported_amount") val reportedAmount: Double? = null,
+    @SerialName("confirmed_amount") val confirmedAmount: Double? = null,
+    @SerialName("pay_method") val payMethod: String = "",
+)
+
+@Serializable
 data class CollectionBrief(
     val id: Int,
     val title: String = "",
