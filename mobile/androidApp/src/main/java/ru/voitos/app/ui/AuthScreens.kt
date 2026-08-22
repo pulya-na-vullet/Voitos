@@ -3,6 +3,7 @@ package ru.voitos.app.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -31,12 +33,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.voitos.app.AppVersion
+import ru.voitos.app.R
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.model.ApiException
 import ru.voitos.app.model.AuthSession
@@ -357,19 +363,10 @@ fun LoginScreen(
         if (updateRequired) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                updateMessage.ifBlank {
-                    "Доступна новая версия приложения. Обновите Voitos, чтобы продолжить."
-                },
+                "После входа попросим обновить приложение.",
                 color = VoitosColors.Warn,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            if (latestVersionName.isNotBlank()) {
-                Text(
-                    "Актуальная версия: $latestVersionName (у вас ${AppVersion.name})",
-                    color = VoitosColors.Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
             if (updateApkUrl.isNotBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
@@ -379,16 +376,10 @@ fun LoginScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = voitosPrimaryButtonColors(),
+                    colors = voitosSecondaryButtonColors(),
                 ) { Text("Скачать обновление") }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Вход недоступен до обновления приложения.",
-                color = VoitosColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            return@Column
         }
 
         if (showRegister) {
@@ -799,38 +790,34 @@ fun LoginScreen(
 
 @Composable
 fun ForceUpdateScreen(
-    message: String,
-    latestVersionName: String,
-    currentVersionName: String,
-    apkUrl: String,
+    apkUrl: String = "",
 ) {
     val context = LocalContext.current
+    BackHandler(enabled = true) { /* hard update — только обновить */ }
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Обновление", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            message.ifBlank {
-                "Доступна новая версия приложения. Обновите Voitos, чтобы продолжить."
-            },
-            color = VoitosColors.Warn,
-            style = MaterialTheme.typography.bodyMedium,
+        Image(
+            painter = painterResource(R.drawable.voitos_logo_mark),
+            contentDescription = "Voitos",
+            modifier = Modifier
+                .fillMaxWidth(0.55f)
+                .heightIn(max = 160.dp),
+            contentScale = ContentScale.Fit,
         )
-        if (latestVersionName.isNotBlank()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Актуальная: $latestVersionName · у вас: $currentVersionName",
-                color = VoitosColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
+        Spacer(modifier = Modifier.height(28.dp))
+        Text(
+            "Просим обновить приложение",
+            style = MaterialTheme.typography.headlineSmall,
+            color = VoitosColors.Text,
+            textAlign = TextAlign.Center,
+        )
         if (apkUrl.isNotBlank()) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             Button(
                 onClick = {
                     runCatching {
@@ -839,7 +826,7 @@ fun ForceUpdateScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosPrimaryButtonColors(),
-            ) { Text("Скачать обновление") }
+            ) { Text("Обновить") }
         }
     }
 }

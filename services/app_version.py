@@ -34,10 +34,7 @@ def mobile_version_payload() -> dict:
         "latest_app_version_code": latest_code,
         "latest_app_version_name": latest_name,
         "apk_url": apk_url,
-        "update_message": (
-            "Доступна новая версия приложения. "
-            "Обновите Voitos, чтобы продолжить работу."
-        ),
+        "update_message": "Просим обновить приложение",
     }
 
 

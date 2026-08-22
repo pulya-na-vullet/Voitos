@@ -131,9 +131,7 @@ class MainActivity : ComponentActivity() {
                 var playSplash by remember { mutableStateOf(false) }
                 var pendingAfterBootstrap by remember { mutableStateOf(deepLinkScreen) }
                 var crashText by remember { mutableStateOf(lastCrash) }
-                var updateMessage by remember { mutableStateOf("") }
                 var updateApkUrl by remember { mutableStateOf("") }
-                var updateLatestName by remember { mutableStateOf("") }
                 val scope = rememberCoroutineScope()
 
                 fun enterMainWithSplash(splash: Boolean) {
@@ -141,11 +139,36 @@ class MainActivity : ComponentActivity() {
                     screen = Screen.Main
                 }
 
-                fun goForceUpdate(message: String, apkUrl: String, latestName: String) {
-                    updateMessage = message
+                fun goForceUpdate(apkUrl: String = "") {
                     updateApkUrl = apkUrl
-                    updateLatestName = latestName
                     screen = Screen.ForceUpdate
+                }
+
+                fun appNeedsUpdate(health: ru.voitos.app.model.HealthResponse?): Boolean {
+                    if (health == null) return false
+                    if (health.updateRequired) return true
+                    return health.minAppVersionCode > 0 && AppVersion.code < health.minAppVersionCode
+                }
+
+                /** После онбординга (или если он не нужен) — hard update или главный экран. */
+                fun proceedAfterOnboarding() {
+                    scope.launch {
+                        val health = runCatching {
+                            client.healthCheck(AppVersion.code)
+                        }.getOrNull()
+                        if (appNeedsUpdate(health)) {
+                            goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
+                        } else {
+                            val next = pendingAfterBootstrap
+                            pendingAfterBootstrap = null
+                            if (next != null && next !is Screen.Main) {
+                                playSplash = false
+                                screen = next
+                            } else {
+                                enterMainWithSplash(splash = true)
+                            }
+                        }
+                    }
                 }
 
                 fun goMain(targetTab: MainTab = tab, refreshCollections: Boolean = false) {
@@ -257,9 +280,6 @@ class MainActivity : ComponentActivity() {
                             )
 
                             Screen.ForceUpdate -> ForceUpdateScreen(
-                                message = updateMessage,
-                                latestVersionName = updateLatestName,
-                                currentVersionName = AppVersion.name,
                                 apkUrl = updateApkUrl,
                             )
 
@@ -279,21 +299,7 @@ class MainActivity : ComponentActivity() {
                                     CircularProgressIndicator(color = VoitosColors.Accent2)
                                 }
                                 LaunchedEffect(Unit) {
-                                    val health = runCatching {
-                                        client.healthCheck(AppVersion.code)
-                                    }.getOrNull()
-                                    if (health != null &&
-                                        (health.updateRequired ||
-                                            (health.minAppVersionCode > 0 &&
-                                                AppVersion.code < health.minAppVersionCode))
-                                    ) {
-                                        goForceUpdate(
-                                            message = health.updateMessage,
-                                            apkUrl = health.apkUrl,
-                                            latestName = health.latestAppVersionName,
-                                        )
-                                        return@LaunchedEffect
-                                    }
+                                    // Сначала онбординг (логика бэка), затем hard update на всё приложение.
                                     val needOnboarding = runCatching {
                                         client.onboarding().requiresOnboarding()
                                     }.getOrNull() ?: session.needsOnboarding
@@ -302,14 +308,7 @@ class MainActivity : ComponentActivity() {
                                         screen = Screen.RequiredOnboarding
                                     } else {
                                         session.needsOnboarding = false
-                                        val next = pendingAfterBootstrap
-                                        pendingAfterBootstrap = null
-                                        if (next != null && next !is Screen.Main) {
-                                            playSplash = false
-                                            screen = next
-                                        } else {
-                                            enterMainWithSplash(splash = true)
-                                        }
+                                        proceedAfterOnboarding()
                                     }
                                 }
                             }
@@ -317,12 +316,11 @@ class MainActivity : ComponentActivity() {
                             Screen.RequiredOnboarding -> OnboardingScreen(
                                 client = client,
                                 apiBaseUrl = session.baseUrl,
-                                onBack = { enterMainWithSplash(splash = true) },
+                                onBack = { proceedAfterOnboarding() },
                                 requireCompletion = true,
                                 onFinished = {
                                     session.needsOnboarding = false
-                                    pendingAfterBootstrap = null
-                                    enterMainWithSplash(splash = true)
+                                    proceedAfterOnboarding()
                                 },
                             )
 
