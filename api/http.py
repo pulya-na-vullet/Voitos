@@ -37,11 +37,19 @@ def get_token(request: HttpRequest) -> MobileAuthToken | None:
     raw = bearer_token(request)
     if not raw:
         return None
-    return (
+    auth = (
         MobileAuthToken.objects.select_related("bot_user")
         .filter(token=raw, revoked_at__isnull=True)
         .first()
     )
+    if auth is None:
+        return None
+    # Удалённый пользователь → CASCADE уже снял токены (сюда не попадём).
+    # Деактивированный — отклоняем и отзываем токен, чтобы приложение разлогинилось.
+    if not getattr(auth.bot_user, "is_active", True):
+        auth.revoke()
+        return None
+    return auth
 
 
 def client_version_code(request: HttpRequest, data: dict[str, Any] | None = None) -> int | None:

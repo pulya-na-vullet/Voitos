@@ -54,6 +54,31 @@ class MobileApiTests(TestCase):
         resp = self.client.get("/api/v1/me")
         self.assertEqual(resp.status_code, 401)
 
+    def test_deleted_user_token_rejected(self):
+        tok = MobileAuthToken.objects.create(bot_user=self.user)
+        token = tok.token
+        self.user.delete()
+        resp = self.client.get(
+            "/api/v1/me",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()["error"], "unauthorized")
+        self.assertFalse(MobileAuthToken.objects.filter(token=token).exists())
+
+    def test_deactivated_user_token_revoked(self):
+        tok = MobileAuthToken.objects.create(bot_user=self.user)
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        resp = self.client.get(
+            "/api/v1/me",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()["error"], "unauthorized")
+        tok.refresh_from_db()
+        self.assertIsNotNone(tok.revoked_at)
+
     def test_me_subscription_family_members(self):
         dependent = BotUser.objects.create(
             max_user_id="app_family2",

@@ -33,11 +33,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import ru.voitos.app.AppVersion
 import ru.voitos.app.api.VoitosApiClient
 import ru.voitos.app.debug.CrashFileLogger
+import ru.voitos.app.model.ApiException
 import ru.voitos.app.nav.DeepLinks
 import ru.voitos.app.push.DevPushTokenProvider
 import ru.voitos.app.ui.CabinetScreen
@@ -73,6 +76,12 @@ class MainActivity : ComponentActivity() {
     /** Последнее касание / жест — для авто-разлогина по простою. */
     private val lastUserInteractionMs = AtomicLong(SystemClock.elapsedRealtime())
 
+    /** Бэкенд вернул 401 (пользователь удалён / токен отозван) — разлогинить в Compose. */
+    private val sessionExpired = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
     /**
      * Актуальный обработчик «назад» из Compose. Activity-callback нужен, потому что
      * жестовый свайп при predictive back часто не доходит до Compose BackHandler.
@@ -84,6 +93,13 @@ class MainActivity : ComponentActivity() {
         private const val IDLE_CHECK_EVERY_MS = 15_000L
         private const val VERSION_POLL_EVERY_MS = 30_000L
     }
+
+    private fun newApiClient(baseUrl: String, token: String?): VoitosApiClient =
+        VoitosApiClient(baseUrl = baseUrl).also { api ->
+            api.appVersionCode = AppVersion.code
+            api.accessToken = token
+            api.onUnauthorized = { sessionExpired.tryEmit(Unit) }
+        }
 
     private sealed class Screen {
         data object Login : Screen()
@@ -128,10 +144,7 @@ class MainActivity : ComponentActivity() {
 
         session = SessionStore(this)
         val restoredServerUrl = DevServerSettings.restoreIfNeeded(this, session)
-        client = VoitosApiClient(baseUrl = session.baseUrl).also {
-            it.appVersionCode = AppVersion.code
-            it.accessToken = session.accessToken
-        }
+        client = newApiClient(session.baseUrl, session.accessToken)
 
         val lastCrash = CrashFileLogger.consumeLastCrash(this)
         val deepLinkScreen = resolveDeepLink(intent?.data)
@@ -200,6 +213,7 @@ class MainActivity : ComponentActivity() {
                 fun logoutToLogin() {
                     session.clearSession()
                     client.accessToken = null
+                    client.onUnauthorized = null
                     isExecutor = false
                     playSplash = false
                     lastUserInteractionMs.set(SystemClock.elapsedRealtime())
@@ -212,6 +226,11 @@ class MainActivity : ComponentActivity() {
                         collectionsRefresh += 1
                     }
                     screen = Screen.Main
+                }
+
+                // Пользователя удалили в админке / токен отозвали → принудительный выход.
+                LaunchedEffect(Unit) {
+                    sessionExpired.collect { logoutToLogin() }
                 }
 
                 // Пока сессия жива — периодически сверяем min version с бэком (не только при старте).
@@ -339,10 +358,7 @@ class MainActivity : ComponentActivity() {
                                         session.hasPinSetup = true
                                     }
                                     session.needsOnboarding = result.needsOnboarding
-                                    client = VoitosApiClient(baseUrl = result.baseUrl).also {
-                                        it.appVersionCode = AppVersion.code
-                                        it.accessToken = result.token
-                                    }
+                                    client = newApiClient(result.baseUrl, result.token)
                                     scope.launch { registerDevPushToken() }
                                     pendingAfterBootstrap = null
                                     tab = MainTab.Collections
@@ -399,9 +415,17 @@ class MainActivity : ComponentActivity() {
                                         return@LaunchedEffect
                                     }
 
-                                    val needOnboarding = runCatching {
+                                    val needOnboarding = try {
                                         client.onboarding().requiresOnboarding()
-                                    }.getOrNull() ?: session.needsOnboarding
+                                    } catch (e: ApiException) {
+                                        if (e.code == "unauthorized") {
+                                            logoutToLogin()
+                                            return@LaunchedEffect
+                                        }
+                                        session.needsOnboarding
+                                    } catch (_: Exception) {
+                                        session.needsOnboarding
+                                    }
                                     if (needOnboarding) {
                                         session.needsOnboarding = true
                                         screen = Screen.RequiredOnboarding

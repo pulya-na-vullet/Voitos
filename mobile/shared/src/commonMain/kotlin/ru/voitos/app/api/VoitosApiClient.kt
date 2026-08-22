@@ -2,6 +2,7 @@ package ru.voitos.app.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
@@ -10,6 +11,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.request
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
@@ -63,10 +65,65 @@ import ru.voitos.app.model.WorkRequestSubmitResult
 class VoitosApiClient(
     private val baseUrl: String = VoitosApi.DEFAULT_BASE_URL,
 ) {
+    /**
+     * Bearer-токен сессии. При сбросе/новой выдаче снимаем флаг «уже уведомили о 401»,
+     * чтобы после повторного входа снова можно было разлогинить.
+     */
     var accessToken: String? = null
+        set(value) {
+            field = value
+            if (!value.isNullOrBlank()) {
+                unauthorizedNotified = false
+            }
+        }
+
     /** versionCode установленного APK — уходит в X-Voitos-App-Version и login body. */
     var appVersionCode: Int? = null
-    private val http: HttpClient = defaultClient()
+
+    /**
+     * Вызывается один раз при 401 на запросе с токеном (пользователь удалён/деактивирован,
+     * токен отозван). UI должен очистить сессию и показать Login.
+     */
+    var onUnauthorized: (() -> Unit)? = null
+
+    private var unauthorizedNotified: Boolean = false
+
+    private val http: HttpClient = HttpClient {
+        install(HttpTimeout) {
+            requestTimeoutMillis = 20_000
+            connectTimeoutMillis = 10_000
+            socketTimeoutMillis = 20_000
+        }
+        install(ContentNegotiation) {
+            json(
+                Json {
+                    ignoreUnknownKeys = true
+                    isLenient = true
+                },
+            )
+        }
+        HttpResponseValidator {
+            validateResponse { response ->
+                if (response.status.value != 401) return@validateResponse
+                val headers = response.request.headers
+                val hadAuth = !headers["Authorization"].isNullOrBlank() ||
+                    !headers["X-Voitos-Token"].isNullOrBlank()
+                if (!hadAuth) return@validateResponse
+                handleUnauthorized()
+                throw ApiException(
+                    "unauthorized",
+                    "Сессия больше недействительна. Войдите снова.",
+                )
+            }
+        }
+    }
+
+    private fun handleUnauthorized() {
+        accessToken = null
+        if (unauthorizedNotified) return
+        unauthorizedNotified = true
+        onUnauthorized?.invoke()
+    }
 
     suspend fun health(): Boolean {
         val body: HealthResponse = http.get("$baseUrl/health").body()
@@ -701,3 +758,4 @@ class VoitosApiClient(
         }
     }
 }
+
