@@ -52,6 +52,7 @@ class MaxPinAuthTests(TestCase):
         )
         self.assertEqual(verify.status_code, 200)
         self.assertTrue(verify.json()["access_token"])
+        self.assertTrue(verify.json().get("needs_onboarding", True))
 
     def test_max_start_and_verify_then_set_pin(self):
         start = self.client.post(

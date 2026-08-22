@@ -133,6 +133,7 @@ def panel_progress(user: BotUser) -> dict:
         "done_count": sum(1 for s in steps if s["done"]),
         "total": len(steps),
         "completed": is_complete(user),
+        "needs_onboarding": not is_complete(user),
         "reward_granted": bool(user.onboarding_reward_granted),
         "completed_at": user.onboarding_completed_at,
     }

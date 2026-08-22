@@ -24,6 +24,8 @@ data class AuthSession(
     @SerialName("needs_pin_setup") val needsPinSetup: Boolean = false,
     @SerialName("has_pin") val hasPin: Boolean = false,
     val phone: String = "",
+    /** Бэкенд решает, показывать ли комикс-онбординг. */
+    @SerialName("needs_onboarding") val needsOnboarding: Boolean = false,
 )
 
 @Serializable
@@ -406,11 +408,16 @@ data class OnboardingProgress(
     @SerialName("done_count") val doneCount: Int = 0,
     val total: Int = 5,
     val completed: Boolean = false,
+    /** Явный флаг с бэка: клиент обязан следовать ему. */
+    @SerialName("needs_onboarding") val needsOnboarding: Boolean = false,
     @SerialName("reward_granted") val rewardGranted: Boolean = false,
     @SerialName("reward_just_granted") val rewardJustGranted: Boolean = false,
     @SerialName("completed_at") val completedAt: String? = null,
     val steps: List<OnboardingStep> = emptyList(),
-)
+) {
+    fun requiresOnboarding(): Boolean =
+        if (needsOnboarding) true else !(completed || rewardGranted)
+}
 
 @Serializable
 data class ExecutorProfileBrief(

@@ -84,6 +84,8 @@ def max_bot_open_url() -> str:
 
 
 def auth_payload(user: BotUser, token: MobileAuthToken) -> dict:
+    from bot.onboarding import is_complete
+
     return {
         "access_token": token.token,
         "bot_user_id": user.id,
@@ -91,6 +93,7 @@ def auth_payload(user: BotUser, token: MobileAuthToken) -> dict:
         "needs_pin_setup": needs_pin_setup(user),
         "has_pin": has_pin(user),
         "phone": user.phone or "",
+        "needs_onboarding": not is_complete(user),
     }
 
 

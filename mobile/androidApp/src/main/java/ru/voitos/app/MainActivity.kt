@@ -237,6 +237,7 @@ class MainActivity : ComponentActivity() {
                                     if (result.hasPin || !result.needsPinSetup) {
                                         session.hasPinSetup = true
                                     }
+                                    session.needsOnboarding = result.needsOnboarding
                                     client = VoitosApiClient(baseUrl = result.baseUrl).also {
                                         it.accessToken = result.token
                                     }
@@ -294,12 +295,13 @@ class MainActivity : ComponentActivity() {
                                         return@LaunchedEffect
                                     }
                                     val needOnboarding = runCatching {
-                                        val p = client.onboarding()
-                                        !(p.completed || p.rewardGranted)
-                                    }.getOrDefault(false)
+                                        client.onboarding().requiresOnboarding()
+                                    }.getOrNull() ?: session.needsOnboarding
                                     if (needOnboarding) {
+                                        session.needsOnboarding = true
                                         screen = Screen.RequiredOnboarding
                                     } else {
+                                        session.needsOnboarding = false
                                         val next = pendingAfterBootstrap
                                         pendingAfterBootstrap = null
                                         if (next != null && next !is Screen.Main) {
@@ -318,6 +320,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { enterMainWithSplash(splash = true) },
                                 requireCompletion = true,
                                 onFinished = {
+                                    session.needsOnboarding = false
                                     pendingAfterBootstrap = null
                                     enterMainWithSplash(splash = true)
                                 },

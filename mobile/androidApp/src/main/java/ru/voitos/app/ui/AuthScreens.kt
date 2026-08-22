@@ -30,6 +30,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -57,6 +58,7 @@ data class LoginSuccess(
     val phone: String,
     val needsPinSetup: Boolean,
     val hasPin: Boolean,
+    val needsOnboarding: Boolean = false,
 )
 
 /** ДД.ММ.ГГГГ → YYYY-MM-DD или null. */
@@ -121,6 +123,8 @@ fun LoginScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var scanning by remember { mutableStateOf(false) }
+    var showManualHost by remember { mutableStateOf(false) }
+    var manualHost by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
     fun client(): VoitosApiClient = VoitosApiClient(baseUrl = baseUrl)
@@ -148,9 +152,10 @@ fun LoginScreen(
     fun applyFound(hit: ru.voitos.app.LanServerDiscovery.Found) {
         baseUrl = hit.baseUrl
         serverReady = true
+        showManualHost = false
         persistDebug()
         onSaveServer(hit.baseUrl)
-        serverStatus = "Подключено к серверу в Wi‑Fi"
+        serverStatus = "Подключено: ${hit.host}:${hit.port}"
     }
 
     fun finish(session: AuthSession) {
@@ -163,8 +168,49 @@ fun LoginScreen(
                 phone = p,
                 needsPinSetup = session.needsPinSetup,
                 hasPin = session.hasPin || !session.needsPinSetup,
+                needsOnboarding = session.needsOnboarding,
             ),
         )
+    }
+
+    fun tryManualHost() {
+        scope.launch {
+            val host = manualHost.trim().substringBefore(':').trim()
+            if (host.isBlank()) {
+                error = "Укажите IP компьютера с бэкендом (например 192.168.1.10)"
+                return@launch
+            }
+            loading = true
+            error = null
+            serverStatus = "Подключаемся к $host…"
+            try {
+                val hit = ru.voitos.app.LanServerDiscovery.findFirst(
+                    port = 18765,
+                    preferHosts = listOf(host),
+                    context = context,
+                )
+                if (hit != null) {
+                    applyFound(hit)
+                    val health = runCatching { client().healthCheck(AppVersion.code) }.getOrNull()
+                    if (health != null) {
+                        applyVersionGate(
+                            minCode = health.minAppVersionCode,
+                            message = health.updateMessage,
+                            apkUrl = health.apkUrl,
+                            latestName = health.latestAppVersionName,
+                        )
+                    }
+                } else {
+                    error = "Нет ответа на $host:18765. Проверьте, что бэкенд запущен и телефон в той же Wi‑Fi."
+                    serverStatus = "Сервер не найден"
+                }
+            } catch (e: Exception) {
+                error = friendlyNetworkError(e)
+                serverStatus = "Не удалось подключиться"
+            } finally {
+                loading = false
+            }
+        }
     }
 
     fun scanWifi(auto: Boolean = false) {
@@ -173,7 +219,12 @@ fun LoginScreen(
             serverReady = false
             updateRequired = false
             if (!auto) error = null
-            serverStatus = "Ищем сервер в Wi‑Fi…"
+            val net = ru.voitos.app.LanServerDiscovery.localNet(context)
+            serverStatus = if (net.phoneIp != null) {
+                "Ищем сервер в Wi‑Fi (ваш IP ${net.phoneIp})…"
+            } else {
+                "Ищем сервер в Wi‑Fi…"
+            }
             try {
                 val prefer = buildList {
                     add(baseUrl)
@@ -183,6 +234,7 @@ fun LoginScreen(
                 val hit = ru.voitos.app.LanServerDiscovery.findFirst(
                     port = 18765,
                     preferHosts = prefer,
+                    context = context,
                 )
                 if (hit != null) {
                     applyFound(hit)
@@ -201,12 +253,18 @@ fun LoginScreen(
                         }
                     }
                 } else {
-                    serverStatus = "Сервер в Wi‑Fi не найден"
+                    showManualHost = true
+                    serverStatus = if (net.phoneIp == null) {
+                        "Не удалось определить Wi‑Fi IP — укажите адрес сервера вручную"
+                    } else {
+                        "Сервер в Wi‑Fi не найден (подсеть ${net.prefix}.x)"
+                    }
                     if (!auto) {
-                        error = "Проверьте, что бэкенд запущен и телефон в той же сети Wi‑Fi."
+                        error = "Проверьте, что бэкенд запущен на порту 18765 и телефон в той же сети Wi‑Fi (не гостевая)."
                     }
                 }
             } catch (e: Exception) {
+                showManualHost = true
                 serverStatus = "Не удалось найти сервер"
                 if (!auto) error = friendlyNetworkError(e)
             } finally {
@@ -271,6 +329,29 @@ fun LoginScreen(
             ) {
                 Text("Повторить поиск", color = VoitosColors.Accent)
             }
+        }
+        if (!serverReady && showManualHost) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "IP компьютера с бэкендом (порт 18765)",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+                value = manualHost,
+                onValueChange = { manualHost = it.filter { ch -> ch.isDigit() || ch == '.' }.take(15) },
+                label = { Text("Например 192.168.1.10") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = voitosOutlinedFieldColors(),
+            )
+            Button(
+                onClick = { tryManualHost() },
+                enabled = !loading && !scanning && manualHost.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosSecondaryButtonColors(),
+            ) { Text("Подключить по IP") }
         }
 
         if (updateRequired) {
@@ -350,12 +431,28 @@ fun LoginScreen(
                                 onClick = { gender = value },
                                 modifier = Modifier.weight(1f),
                                 colors = voitosPrimaryButtonColors(),
-                            ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                            ) {
+                                Text(
+                                    label,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Color.White,
+                                    ),
+                                )
+                            }
                         } else {
                             OutlinedButton(
                                 onClick = { gender = value },
                                 modifier = Modifier.weight(1f),
-                            ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                            ) {
+                                Text(
+                                    label,
+                                    color = VoitosColors.Text,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = VoitosColors.Text,
+                                    ),
+                                )
+                            }
                         }
                     }
                 }

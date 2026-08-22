@@ -949,31 +949,38 @@ fun OnboardingScreen(
     val context = LocalContext.current
 
     fun isDone(p: OnboardingProgress?): Boolean =
-        p != null && (p.completed || p.rewardGranted)
+        p != null && !p.requiresOnboarding()
 
     fun finish() {
         (onFinished ?: onBack).invoke()
     }
 
-    LaunchedEffect(Unit) {
-        try {
-            val p = client.onboarding()
-            progress = p
-            index = 0
-            if (isDone(p)) {
-                if (requireCompletion) {
-                    finish()
-                    return@LaunchedEffect
+    fun reload() {
+        scope.launch {
+            loading = true
+            error = null
+            try {
+                val p = client.onboarding()
+                progress = p
+                index = 0
+                if (isDone(p)) {
+                    if (requireCompletion) {
+                        finish()
+                        return@launch
+                    }
+                    banner = "Обучение уже пройдено. Можно просто полистать комиксы."
                 }
-                banner = "Обучение уже пройдено. Можно просто полистать комиксы."
-            }
-        } catch (e: Exception) {
-            error = e.message
-            if (requireCompletion) {
-                // Сеть упала — не блокируем вход навсегда.
-                finish()
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось загрузить обучение"
+                // При обязательном онбординге не пропускаем вход из‑за сети.
+            } finally {
+                loading = false
             }
         }
+    }
+
+    LaunchedEffect(Unit) {
+        reload()
     }
 
     val steps = progress?.steps.orEmpty()
@@ -1010,7 +1017,15 @@ fun OnboardingScreen(
         Spacer(modifier = Modifier.height(12.dp))
         error?.let { Text(it, color = VoitosColors.Danger) }
         if (step == null) {
-            if (error == null) {
+            if (error != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { reload() },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosPrimaryButtonColors(),
+                    enabled = !loading,
+                ) { Text("Повторить загрузку") }
+            } else if (error == null) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                     color = VoitosColors.Accent,
