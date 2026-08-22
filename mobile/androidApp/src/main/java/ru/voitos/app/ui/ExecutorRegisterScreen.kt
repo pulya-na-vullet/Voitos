@@ -1,6 +1,7 @@
 package ru.voitos.app.ui
 
 import android.util.Base64
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ fun ExecutorRegisterScreen(
     onDone: () -> Unit,
     onBack: () -> Unit,
 ) {
+    BackHandler(enabled = true) { onBack() }
     var roles by remember { mutableStateOf<List<ExecutorRole>>(emptyList()) }
     var step by remember { mutableIntStateOf(0) }
     var role by remember { mutableStateOf<ExecutorRole?>(null) }

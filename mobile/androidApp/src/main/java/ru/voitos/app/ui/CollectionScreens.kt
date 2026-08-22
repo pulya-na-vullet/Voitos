@@ -1,5 +1,6 @@
 package ru.voitos.app.ui
 
+import androidx.activity.compose.BackHandler
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -245,6 +246,7 @@ fun CollectionDetailScreen(
     collectionId: Int,
     onBack: () -> Unit,
 ) {
+    BackHandler(enabled = true) { onBack() }
     var detail by remember { mutableStateOf<CollectionDetail?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -364,6 +366,13 @@ fun CollectionDetailScreen(
                     "К оплате: ${c.amountDue.toInt()} ₽",
                     style = MaterialTheme.typography.titleMedium,
                     color = VoitosColors.Accent2,
+                )
+                Text(
+                    c.sharePolicyNote.ifBlank {
+                        "Взнос зафиксирован при старте. Новые соседи в группе не уменьшают вашу сумму; сверх цели — в свободный баланс группы."
+                    },
+                    color = VoitosColors.Muted,
+                    style = MaterialTheme.typography.bodySmall,
                 )
                 if (c.amountPaid > 0) {
                     Text("Оплачено: ${c.amountPaid.toInt()} ₽", color = VoitosColors.Ok)

@@ -707,6 +707,12 @@ def collections_list(request):
                     "amount_due": float(getattr(inv, "amount_due", 0) or 0),
                     "status": inv.status,
                     "campaign_status": getattr(camp, "status", "") or "",
+                    "share_policy": "fixed",
+                    "share_policy_note": (
+                        "Взнос зафиксирован при старте сбора. Новые участники группы "
+                        "не уменьшают вашу сумму; кто уже оплатил — без изменений. "
+                        "Сверх цели уходит в свободный баланс группы."
+                    ),
                     "event_at": (
                         camp.event_at.isoformat()
                         if camp and getattr(camp, "event_at", None)
@@ -761,6 +767,12 @@ def collection_detail(request, pk: int):
         "amount_paid": float(inv.amount_paid or 0),
         "status": inv.status,
         "campaign_status": camp.status or "",
+        "share_policy": "fixed",
+        "share_policy_note": (
+            "Взнос зафиксирован при старте сбора. Новые участники группы "
+            "не уменьшают вашу сумму; кто уже оплатил — без изменений. "
+            "Сверх цели уходит в свободный баланс группы."
+        ),
         "event_at": camp.event_at.isoformat() if camp.event_at else None,
         "invite_id": inv.id,
         "can_pay": can_pay,

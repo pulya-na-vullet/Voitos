@@ -11,6 +11,7 @@ from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods, require_POST
@@ -1384,7 +1385,19 @@ def services_wishes(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_http_methods(["GET", "POST"])
 def services_archive(request: HttpRequest) -> HttpResponse:
+    """Архив сборов: сначала выбор группы, затем сборы и категории этой группы."""
     allowed_group_ids = manager_group_ids(request.user)
+    groups = list(
+        manager_groups_qs(request.user).order_by("name")
+    )
+
+    group_id_raw = (request.GET.get("group") or request.POST.get("group_id") or "").strip()
+    selected_group = None
+    if group_id_raw.isdigit():
+        gid = int(group_id_raw)
+        if gid in allowed_group_ids:
+            selected_group = next((g for g in groups if g.id == gid), None)
+
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "delete_campaign":
@@ -1395,13 +1408,46 @@ def services_archive(request: HttpRequest) -> HttpResponse:
             reason = (request.POST.get("reason") or "").strip()
             if not reason:
                 messages.error(request, "Укажите причину удаления сбора.")
-                return redirect("panel:services_archive")
+                redirect_url = (
+                    f"{reverse('panel:services_archive')}?group={selected_group.id}"
+                    if selected_group
+                    else reverse("panel:services_archive")
+                )
+                return redirect(redirect_url)
             label = delete_service_campaign(campaign, reason=reason)
             messages.success(request, f"Сбор удалён: {label}. Причина: {reason}")
+            if campaign.group_id:
+                return redirect(f"{reverse('panel:services_archive')}?group={campaign.group_id}")
             return redirect("panel:services_archive")
         return redirect("panel:services_archive")
 
-    campaigns_base = ServiceCampaign.objects.filter(group_id__in=allowed_group_ids)
+    if selected_group is None:
+        from services.service import budgets_by_group_ids
+
+        budget_map = budgets_by_group_ids([g.id for g in groups])
+        rows = []
+        for g in groups:
+            camp_count = ServiceCampaign.objects.filter(group=g).count()
+            rows.append(
+                {
+                    "group": g,
+                    "budget": budget_map.get(g.id) or Decimal("0"),
+                    "campaign_count": camp_count,
+                }
+            )
+        return render(
+            request,
+            "panel/services_archive.html",
+            {
+                "groups_picker": True,
+                "group_rows": rows,
+                "selected_group": None,
+                "categories": [],
+                "recent_campaigns": [],
+            },
+        )
+
+    campaigns_base = ServiceCampaign.objects.filter(group=selected_group)
     categories = []
     for value, label in ServiceCategory.choices:
         qs = campaigns_base.filter(category=value)
@@ -1413,7 +1459,7 @@ def services_archive(request: HttpRequest) -> HttpResponse:
                 "active": qs.filter(status=CampaignStatus.ACTIVE).count(),
                 "pending_receipts": ServiceReceipt.objects.filter(
                     campaign__category=value,
-                    campaign__group_id__in=allowed_group_ids,
+                    campaign__group=selected_group,
                     status=ReceiptStatus.PENDING,
                 ).count(),
             }
@@ -1421,12 +1467,18 @@ def services_archive(request: HttpRequest) -> HttpResponse:
     recent = (
         campaigns_base.select_related("group")
         .prefetch_related("invites")
-        .all()[:20]
+        .order_by("-id")[:40]
     )
+    from services.service import group_accumulated_budget
+
     return render(
         request,
         "panel/services_archive.html",
         {
+            "groups_picker": False,
+            "group_rows": [],
+            "selected_group": selected_group,
+            "group_budget": group_accumulated_budget(selected_group),
             "categories": categories,
             "recent_campaigns": recent,
         },
@@ -1639,11 +1691,15 @@ def services_category(request: HttpRequest, category: str) -> HttpResponse:
         return redirect("panel:services_archive")
     label = dict(ServiceCategory.choices)[category]
     allowed_group_ids = manager_group_ids(request.user)
-    campaigns = (
-        ServiceCampaign.objects.filter(category=category, group_id__in=allowed_group_ids)
-        .select_related("group")
-        .prefetch_related("invites")
-    )
+    group_id_raw = (request.GET.get("group") or "").strip()
+    selected_group = None
+    qs = ServiceCampaign.objects.filter(category=category, group_id__in=allowed_group_ids)
+    if group_id_raw.isdigit():
+        gid = int(group_id_raw)
+        if gid in allowed_group_ids:
+            selected_group = ServiceGroup.objects.filter(pk=gid).first()
+            qs = qs.filter(group_id=gid)
+    campaigns = qs.select_related("group").prefetch_related("invites")
     return render(
         request,
         "panel/services_category.html",
@@ -1651,6 +1707,7 @@ def services_category(request: HttpRequest, category: str) -> HttpResponse:
             "category": category,
             "category_label": label,
             "campaigns": campaigns,
+            "selected_group": selected_group,
             "tax_warning": AppSettings.load().tax_limit_warning()
             if is_panel_admin(request.user)
             else "",

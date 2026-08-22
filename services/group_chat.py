@@ -44,12 +44,16 @@ def group_to_dict(group: ServiceGroup, *, user: BotUser | None = None) -> dict:
     total = getattr(group, "_members_total", None)
     if total is None:
         total = group.members.count()
+    from services.service import group_accumulated_budget
+
+    free_balance = float(group_accumulated_budget(group) or 0)
     payload = {
         "id": group.id,
         "name": group.name or "",
         "description": (group.description or "")[:500],
         "member_count": int(total or 0),
         "unread_count": 0,
+        "free_balance": free_balance,
     }
     if user is not None:
         payload["unread_count"] = unread_count_for_group(user, group)

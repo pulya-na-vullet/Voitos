@@ -225,7 +225,7 @@ fun CabinetScreen(
                 onClick = onOpenFeedback,
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosSecondaryButtonColors(),
-            ) { Text("ОС") }
+            ) { Text("Обратная связь") }
 
             Spacer(modifier = Modifier.height(8.dp))
 

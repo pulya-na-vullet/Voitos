@@ -124,6 +124,8 @@ data class CollectionBrief(
     @SerialName("collected_amount") val collectedAmount: Double = 0.0,
     @SerialName("total_amount") val totalAmount: Double = 0.0,
     @SerialName("progress_percent") val progressPercent: Int = 0,
+    @SerialName("share_policy") val sharePolicy: String = "fixed",
+    @SerialName("share_policy_note") val sharePolicyNote: String = "",
 )
 
 @Serializable
@@ -158,6 +160,8 @@ data class CollectionDetail(
     @SerialName("payment_phone") val paymentPhone: String = "",
     @SerialName("payment_bank") val paymentBank: String = "",
     @SerialName("payment_status") val paymentStatus: String = "",
+    @SerialName("share_policy") val sharePolicy: String = "fixed",
+    @SerialName("share_policy_note") val sharePolicyNote: String = "",
 )
 
 @Serializable
@@ -409,6 +413,7 @@ data class ServiceGroupBrief(
     val description: String = "",
     @SerialName("member_count") val memberCount: Int = 0,
     @SerialName("unread_count") val unreadCount: Int = 0,
+    @SerialName("free_balance") val freeBalance: Double = 0.0,
 )
 
 @Serializable

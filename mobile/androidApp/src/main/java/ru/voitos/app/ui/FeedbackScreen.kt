@@ -1,5 +1,6 @@
 package ru.voitos.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +54,7 @@ fun FeedbackScreen(
     client: VoitosApiClient,
     onBack: () -> Unit,
 ) {
+    BackHandler(enabled = true) { onBack() }
     var items by remember { mutableStateOf<List<FeedbackTicket>>(emptyList()) }
     var managers by remember { mutableStateOf<List<ManagerFeedbackContext>>(emptyList()) }
     var notice by remember { mutableStateOf("Баги и обратная связь — администратор; ОС по менеджеру отвечает ИИ.") }

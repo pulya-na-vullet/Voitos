@@ -1,6 +1,7 @@
 package ru.voitos.app.ui
 
 import android.util.Base64
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -698,6 +699,7 @@ fun ConfirmAmountScreen(
     onDone: () -> Unit,
     onBack: () -> Unit,
 ) {
+    BackHandler(enabled = true) { onBack() }
     var amount by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -772,6 +774,7 @@ fun SubscriptionScreen(
     client: VoitosApiClient,
     onBack: () -> Unit,
 ) {
+    BackHandler(enabled = true) { onBack() }
     var info by remember { mutableStateOf<ru.voitos.app.model.SubscriptionInfo?>(null) }
     var receipts by remember { mutableStateOf<List<ru.voitos.app.model.ReceiptBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -876,7 +879,7 @@ fun SubscriptionScreen(
         }
         if (receipts.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
-            Text("История чеков", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
+            Text("История подписки", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Accent2)
             Spacer(modifier = Modifier.height(8.dp))
             receipts.forEach { r ->
                 PanelCard {
@@ -982,6 +985,7 @@ fun WorkRequestPhotosScreen(
     onSubmitted: () -> Unit,
     onBack: () -> Unit,
 ) {
+    BackHandler(enabled = true) { onBack() }
     var photoCount by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -1065,6 +1069,7 @@ fun OnboardingScreen(
     requireCompletion: Boolean = false,
     onFinished: (() -> Unit)? = null,
 ) {
+    BackHandler(enabled = !requireCompletion) { onBack() }
     var progress by remember { mutableStateOf<OnboardingProgress?>(null) }
     var index by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
