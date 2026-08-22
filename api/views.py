@@ -407,11 +407,21 @@ def _work_request_brief(wr) -> dict:
     }
 
 
+def _work_request_photo_urls(request, wr) -> list[str]:
+    urls: list[str] = []
+    for photo in wr.photos.all().order_by("id")[:20]:
+        u = _absolute_media_url(request, photo.image)
+        if u:
+            urls.append(u)
+    return urls
+
+
 @api_login_required
 @require_GET
 def work_request_detail(request, pk: int):
     wr = (
-        WorkRequest.objects.select_related("role", "assigned_contractor")
+        WorkRequest.objects.select_related("role", "assigned_contractor", "user")
+        .prefetch_related("photos")
         .filter(pk=pk, user=request.bot_user)
         .first()
     )
@@ -421,6 +431,7 @@ def work_request_detail(request, pk: int):
     requires_photos = bool(
         getattr(wr.role, "requires_work_photos", True) if wr.role_id else True
     )
+    photo_urls = _work_request_photo_urls(request, wr)
     payload = _work_request_brief(wr)
     payload.update(
         {
@@ -428,7 +439,20 @@ def work_request_detail(request, pk: int):
             "assigned_phone": getattr(contractor, "phone", None) if contractor else None,
             "needs_rating": False,
             "needs_photos": requires_photos and wr.status == "draft",
-            "photo_count": wr.photos.count(),
+            "photo_count": len(photo_urls),
+            "photo_urls": photo_urls,
+            "client_locality": (wr.client_locality or "").strip()
+            or (getattr(wr.user, "locality", None) or "").strip(),
+            "client_address": (getattr(wr.user, "address", None) or "").strip(),
+            "master_address": (wr.master_address or "").strip(),
+            "reported_amount": float(wr.reported_amount)
+            if wr.reported_amount is not None
+            else None,
+            "confirmed_amount": float(wr.confirmed_amount)
+            if wr.confirmed_amount is not None
+            else None,
+            "pay_method": wr.pay_method or "",
+            "updated_at": wr.updated_at.isoformat() if wr.updated_at else "",
         }
     )
     return json_response(payload)

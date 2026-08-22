@@ -525,7 +525,7 @@ private fun CollectionProgressBlock(
 }
 
 @Composable
-private fun CollectionPhotoCarousel(
+internal fun CollectionPhotoCarousel(
     photos: List<String>,
     contentDescription: String,
     height: Dp,

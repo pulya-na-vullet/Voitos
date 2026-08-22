@@ -44,6 +44,7 @@ import ru.voitos.app.model.SubscriptionInfo
 import ru.voitos.app.model.WorkRequestCancelResult
 import ru.voitos.app.model.WorkRequestConfirmSlotResult
 import ru.voitos.app.model.WorkRequestCreated
+import ru.voitos.app.model.WorkRequestDetail
 import ru.voitos.app.model.WorkRequestList
 import ru.voitos.app.model.WorkRequestSubmitResult
 
@@ -167,6 +168,8 @@ class VoitosApiClient(
     }
 
     suspend fun workRequests(): WorkRequestList = authedGet("/work-requests")
+
+    suspend fun workRequest(id: Int): WorkRequestDetail = authedGet("/work-requests/$id")
 
     suspend fun collections(): CollectionList = authedGet("/collections")
 
