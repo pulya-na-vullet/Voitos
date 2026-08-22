@@ -5,40 +5,39 @@ from database.models import AppSettings
 
 @override_settings(
     MOBILE_OTP_DEBUG=True,
-    MOBILE_MIN_VERSION_CODE=21,
-    MOBILE_LATEST_VERSION_CODE=21,
-    MOBILE_LATEST_VERSION_NAME="0.2.17-kmp",
-    VOITOS_BACKEND_VERSION="0.2.17",
+    MOBILE_MIN_VERSION_CODE=22,
+    MOBILE_LATEST_VERSION_CODE=22,
+    MOBILE_LATEST_VERSION_NAME="0.2.18-kmp",
+    VOITOS_BACKEND_VERSION="0.2.18",
 )
 class AppVersionHealthTests(TestCase):
     def setUp(self):
         self.client = Client()
         cfg = AppSettings.load()
-        # Устаревшее значение в БД — пол берётся из settings (deploy).
         cfg.mobile_min_version_code = 10
         cfg.mobile_latest_version_code = 10
         cfg.mobile_latest_version_name = "0.2.5-kmp"
         cfg.save()
 
     def test_health_includes_version_and_update_flag(self):
-        old = self.client.get("/api/v1/health?version_code=20")
+        old = self.client.get("/api/v1/health?version_code=21")
         self.assertEqual(old.status_code, 200)
         data = old.json()
         self.assertTrue(data["ok"])
-        self.assertEqual(data["backend_version"], "0.2.17")
-        self.assertEqual(data["min_app_version_code"], 21)
+        self.assertEqual(data["backend_version"], "0.2.18")
+        self.assertEqual(data["min_app_version_code"], 22)
         self.assertTrue(data["update_required"])
 
-        cur = self.client.get("/api/v1/health?version_code=21")
+        cur = self.client.get("/api/v1/health?version_code=22")
         self.assertFalse(cur.json()["update_required"])
 
     def test_panel_higher_min_wins_over_settings(self):
         cfg = AppSettings.load()
-        cfg.mobile_min_version_code = 22
-        cfg.mobile_latest_version_code = 22
+        cfg.mobile_min_version_code = 23
+        cfg.mobile_latest_version_code = 23
         cfg.save()
-        data = self.client.get("/api/v1/health?version_code=21").json()
-        self.assertEqual(data["min_app_version_code"], 22)
+        data = self.client.get("/api/v1/health?version_code=22").json()
+        self.assertEqual(data["min_app_version_code"], 23)
         self.assertTrue(data["update_required"])
 
     def test_pin_login_rejects_old_version(self):
@@ -46,7 +45,7 @@ class AppVersionHealthTests(TestCase):
 
         from database.models import BotUser, ProfileStatus
 
-        user = BotUser.objects.create(
+        BotUser.objects.create(
             max_user_id="vu_pin",
             phone="89625501111",
             chat_id="c1",
@@ -56,18 +55,18 @@ class AppVersionHealthTests(TestCase):
         )
         resp = self.client.post(
             "/api/v1/auth/pin/login",
-            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 20}),
+            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 21}),
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 426)
         body = resp.json()
         self.assertTrue(body["update_required"])
-        self.assertEqual(body["min_app_version_code"], 21)
+        self.assertEqual(body["min_app_version_code"], 22)
         self.assertNotIn("access_token", body)
 
         ok = self.client.post(
             "/api/v1/auth/pin/login",
-            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 21}),
+            data=__import__("json").dumps({"phone": "89625501111", "pin": "1234", "version_code": 22}),
             content_type="application/json",
         )
         self.assertEqual(ok.status_code, 200)

@@ -24,10 +24,17 @@ if str(BASE_DIR) not in sys.path:
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
+# Windows cp1251: иначе «Wi‑Fi» / «→» в логах роняют logging.emit.
+from config.logging_utf8 import SafeStreamHandler, configure_stdio_utf8
+
+configure_stdio_utf8()
+
 logging.basicConfig(
     level=logging.INFO,
     format="[{asctime}] {levelname} {name}: {message}",
     style="{",
+    handlers=[SafeStreamHandler(sys.stderr)],
+    force=True,
 )
 logger = logging.getLogger("voitos.app")
 
@@ -300,10 +307,11 @@ def main() -> int:
     logger.info("Admin panel (network): %s", access_origin + "/panel/")
     logger.info("Login URL for managers: %s", login_url)
     if is_local_lan_mode():
-        logger.info("LAN mode %s — HOST=%s (Wi‑Fi clients OK)", WIFI_WORKSHOP_NOTE, settings.HOST)
+        # ASCII hyphen only — Windows cp1251 console.
+        logger.info("LAN mode %s - HOST=%s (Wi-Fi clients OK)", WIFI_WORKSHOP_NOTE, settings.HOST)
         if settings.HOST not in {"0.0.0.0", "::", "[::]", "*"}:
             logger.warning(
-                "HOST=%s — для доступа из Wi‑Fi сети лучше HOST=0.0.0.0",
+                "HOST=%s - для доступа из Wi-Fi сети лучше HOST=0.0.0.0",
                 settings.HOST,
             )
     else:

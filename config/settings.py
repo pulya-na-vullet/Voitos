@@ -18,6 +18,14 @@ env = environ.Env(
 
 environ.Env.read_env(BASE_DIR / ".env")
 
+# Windows console: avoid UnicodeEncodeError in logging before LOGGING is applied.
+try:
+    from config.logging_utf8 import configure_stdio_utf8
+
+    configure_stdio_utf8()
+except Exception:
+    pass
+
 from config.version import VOITOS_BACKEND_VERSION  # noqa: F401 — re-export for django.conf.settings
 
 SECRET_KEY = env("SECRET_KEY", default="voitos-dev-secret-change-me")
@@ -32,9 +40,9 @@ MAX_BOT_OPEN_URL = env(
     default="https://max.ru/se13602985_1_bot",
 )
 # Минимальный versionCode Android-клиента (перекрывается AppSettings в панели).
-MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=21)
-MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=21)
-MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.17-kmp")
+MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=22)
+MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=22)
+MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.18-kmp")
 MOBILE_APK_URL = env(
     "MOBILE_APK_URL",
     default=(
@@ -152,7 +160,7 @@ LOGGING = {
     },
     "handlers": {
         "console": {
-            "class": "logging.StreamHandler",
+            "class": "config.logging_utf8.SafeStreamHandler",
             "formatter": "verbose",
         },
         "file": {
@@ -161,6 +169,7 @@ LOGGING = {
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 5,
             "formatter": "verbose",
+            "encoding": "utf-8",
         },
     },
     "root": {

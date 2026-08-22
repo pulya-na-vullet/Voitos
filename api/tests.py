@@ -486,6 +486,57 @@ class AppEmitHookTests(TestCase):
         self.assertIn("photo_urls", resp.json())
         self.assertTrue(resp.json()["can_pay"])
 
+    def test_collections_list_sorted_newest_and_limit_flag(self):
+        from decimal import Decimal
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from database.models import (
+            CampaignStatus,
+            ServiceCampaign,
+            ServiceCategory,
+            ServiceGroup,
+            ServiceInvite,
+        )
+
+        g = ServiceGroup.objects.create(name="Двор-лимит")
+        g.members.add(self.client_user)
+        now = timezone.now()
+        camps = []
+        for i in range(4):
+            camp = ServiceCampaign.objects.create(
+                title=f"Сбор-{i}",
+                category=ServiceCategory.SNOW,
+                group=g,
+                status=CampaignStatus.ACTIVE,
+                total_amount=Decimal("400"),
+                amount_per_user=Decimal("100"),
+            )
+            # Явно разводим created_at: старые раньше.
+            ServiceCampaign.objects.filter(pk=camp.pk).update(
+                created_at=now - timedelta(days=4 - i)
+            )
+            camp.refresh_from_db()
+            ServiceInvite.objects.create(
+                campaign=camp, user=self.client_user, amount_due=Decimal("100")
+            )
+            camps.append(camp)
+
+        tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        resp = self.client.get(
+            "/api/v1/collections",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        ids = [it["id"] for it in body["items"]]
+        # Новые сверху: последний созданный (i=3) первый.
+        self.assertEqual(ids[:4], [camps[3].id, camps[2].id, camps[1].id, camps[0].id])
+        self.assertTrue(body["at_active_limit"])
+        self.assertEqual(body["active_limit"], 4)
+        self.assertIn("created_at", body["items"][0])
+
     def test_create_work_request_api(self):
         tok = MobileAuthToken.objects.create(bot_user=self.client_user)
         resp = self.client.post(

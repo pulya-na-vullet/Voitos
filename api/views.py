@@ -804,9 +804,18 @@ def _campaign_progress_payload(campaign) -> dict:
 @api_login_required
 @require_GET
 def collections_list(request):
-    """Список инвайтов жителя в сборы."""
+    """Список инвайтов жителя в сборы (новые сверху)."""
     try:
-        from database.models import InviteStatus, ReceiptStatus, ServiceInvite
+        from database.models import (
+            CampaignStatus,
+            InviteStatus,
+            ReceiptStatus,
+            ServiceCampaign,
+            ServiceInvite,
+        )
+
+        # Лимит одновременных активных сборов на группу (для баннера в приложении).
+        active_limit = 4
 
         invites = (
             ServiceInvite.objects.filter(user=request.bot_user)
@@ -817,7 +826,7 @@ def collections_list(request):
                 "campaign__invites",
                 "receipts",
             )
-            .order_by("-id")[:50]
+            .order_by("-campaign__created_at", "-campaign_id", "-id")[:50]
         )
         pay = _service_payment_payload()
         items = []
@@ -854,13 +863,52 @@ def collections_list(request):
                     "description": (getattr(camp, "description", None) or "")[:400],
                     "pending_receipts": pending_n,
                     "rejected_receipts": rejected_n,
+                    "created_at": (
+                        camp.created_at.isoformat()
+                        if camp and getattr(camp, "created_at", None)
+                        else None
+                    ),
                     **_campaign_progress_payload(camp),
                     **pay,
                 }
             )
-        return json_response({"items": items})
+
+        # Лимит по группе: если у любой группы пользователя уже 4+ активных сбора.
+        from services.wishes import user_groups
+
+        group_ids = {g.id for g in user_groups(request.bot_user)}
+        at_active_limit = False
+        if group_ids:
+            from django.db.models import Count
+
+            at_active_limit = (
+                ServiceCampaign.objects.filter(
+                    group_id__in=group_ids,
+                    status=CampaignStatus.ACTIVE,
+                )
+                .values("group_id")
+                .annotate(n=Count("id"))
+                .filter(n__gte=active_limit)
+                .exists()
+            )
+        # Запасной критерий: на экране уже 4+ активных сбора у этого пользователя.
+        if not at_active_limit:
+            active_on_screen = sum(
+                1 for it in items if (it.get("campaign_status") or "") == CampaignStatus.ACTIVE
+            )
+            at_active_limit = active_on_screen >= active_limit
+
+        return json_response(
+            {
+                "items": items,
+                "active_limit": active_limit,
+                "at_active_limit": at_active_limit,
+            }
+        )
     except Exception:
-        return json_response({"items": []})
+        return json_response(
+            {"items": [], "active_limit": 4, "at_active_limit": False}
+        )
 
 
 @api_login_required

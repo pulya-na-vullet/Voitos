@@ -62,7 +62,7 @@ def send_fcm(push_token: str, payload: dict[str, Any]) -> tuple[bool, str]:
         # Dev / без Firebase: считаем «доставлено» в лог, чтобы inbox+тест жили.
         if getattr(settings, "FCM_DRY_RUN", True):
             logger.info(
-                "FCM dry-run → token=%s… type=%s",
+                "FCM dry-run -> token=%s... type=%s",
                 push_token[:12],
                 (payload.get("data") or {}).get("type"),
             )

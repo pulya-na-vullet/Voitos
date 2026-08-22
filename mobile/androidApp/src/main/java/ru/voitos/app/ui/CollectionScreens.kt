@@ -74,6 +74,7 @@ fun CollectionsScreen(
     onChatUnreadChange: (Int) -> Unit = {},
 ) {
     var items by remember { mutableStateOf<List<CollectionBrief>>(emptyList()) }
+    var atActiveLimit by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
@@ -94,7 +95,14 @@ fun CollectionsScreen(
                 error = null
             }
             try {
-                items = client.collections().items
+                val list = client.collections()
+                // Новые сверху (по дате создания / id кампании).
+                items = list.items.sortedWith(
+                    compareByDescending<CollectionBrief> { it.createdAt.orEmpty() }
+                        .thenByDescending { it.id },
+                )
+                atActiveLimit = list.atActiveLimit ||
+                    items.count { it.campaignStatus.equals("active", ignoreCase = true) } >= 4
                 val n = runCatching { client.groups().unreadTotal }.getOrNull()
                 if (n != null) onChatUnreadChange(n)
                 if (silent) error = null
@@ -147,6 +155,14 @@ fun CollectionsScreen(
                     VoitosBackButton(onClick = onBack)
                 }
                 Text("Сборы", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+                if (atActiveLimit) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Ваша группа достигла лимита по сборам. Завершите сборы денег, чтобы начать новые.",
+                        color = VoitosColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
             Box {
                 TextButton(onClick = onOpenChat) {

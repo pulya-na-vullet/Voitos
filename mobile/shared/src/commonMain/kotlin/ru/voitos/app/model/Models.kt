@@ -262,11 +262,16 @@ data class CollectionBrief(
     @SerialName("progress_percent") val progressPercent: Int = 0,
     @SerialName("share_policy") val sharePolicy: String = "fixed",
     @SerialName("share_policy_note") val sharePolicyNote: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
 )
 
 @Serializable
 data class CollectionList(
     val items: List<CollectionBrief> = emptyList(),
+    /** Макс. одновременных активных сборов на группу. */
+    @SerialName("active_limit") val activeLimit: Int = 4,
+    /** Группа достигла лимита — показать баннер в списке. */
+    @SerialName("at_active_limit") val atActiveLimit: Boolean = false,
 )
 
 @Serializable
