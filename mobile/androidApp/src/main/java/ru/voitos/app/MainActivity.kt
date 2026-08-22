@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +60,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var session: SessionStore
     private var client: VoitosApiClient = VoitosApiClient()
 
+    /**
+     * Актуальный обработчик «назад» из Compose. Activity-callback нужен, потому что
+     * жестовый свайп при predictive back часто не доходит до Compose BackHandler.
+     */
+    private var composeBackHandler: (() -> Unit)? = null
+
     private sealed class Screen {
         data object Login : Screen()
         /** Проверка онбординга перед сплэшем / главной. */
@@ -78,6 +86,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CrashFileLogger.install(this)
+
+        // Activity-level callback: жест «назад» идёт через OnBackPressedDispatcher.
+        // enableOnBackInvokedCallback=false в манифесте отключает predictive back,
+        // иначе система может сразу сворачивать Activity, минуя Compose BackHandler.
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    composeBackHandler?.invoke() ?: moveTaskToBack(true)
+                }
+            },
+        )
 
         session = SessionStore(this)
         val restoredServerUrl = DevServerSettings.restoreIfNeeded(this, session)
@@ -128,14 +148,27 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Системная кнопка / жест «назад». На экранах с собственным
-                // BackHandler (чат, деталь сбора) приоритет у них.
-                BackHandler(enabled = true) {
+                fun onBackPressedUnified() {
                     if (crashText != null) {
                         crashText = null
                     } else {
                         handleSystemBack()
                     }
+                }
+
+                // Держим Activity-callback в синхроне с актуальным screen/crashText.
+                androidx.compose.runtime.SideEffect {
+                    composeBackHandler = { onBackPressedUnified() }
+                }
+                DisposableEffect(Unit) {
+                    onDispose { composeBackHandler = null }
+                }
+
+                // Compose BackHandler: на вложенных экранах (чат, деталь) их свои
+                // BackHandler регистрируются выше в стеке и срабатывают первыми.
+                // Activity-callback ниже — запасной путь для жеста/кнопки.
+                BackHandler(enabled = true) {
+                    onBackPressedUnified()
                 }
 
                 VoitosTheme {
