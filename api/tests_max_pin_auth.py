@@ -260,3 +260,59 @@ class MaxPinAuthTests(TestCase):
         owner.refresh_from_db()
         self.assertEqual(owner.phone, "89625507832")
         self.assertEqual(owner.real_name, "Хозяин")
+
+    def test_expired_subscription_still_logs_in_with_needs_payment(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        self.user.subscription_until = timezone.now() - timedelta(days=40)
+        self.user.grace_until = timezone.now() - timedelta(days=10)
+        self.user.is_active = True
+        self.user.save(update_fields=["subscription_until", "grace_until", "is_active"])
+        self.user.ensure_grace_period()
+        self.assertEqual(self.user.access_state(), "blocked")
+
+        req = self.client.post(
+            "/api/v1/auth/phone/login-request",
+            data=json.dumps({"phone": "89625507832"}),
+            content_type="application/json",
+        )
+        self.assertEqual(req.status_code, 200)
+        code = req.json()["debug_code"]
+        verify = self.client.post(
+            "/api/v1/auth/phone/login-verify",
+            data=json.dumps({"phone": "89625507832", "code": code}),
+            content_type="application/json",
+        )
+        self.assertEqual(verify.status_code, 200)
+        body = verify.json()
+        self.assertTrue(body["access_token"])
+        self.assertTrue(body["needs_payment"])
+        self.assertEqual(body["access"]["state"], "blocked")
+
+        access = self.client.get(
+            "/api/v1/me/access",
+            HTTP_AUTHORIZATION=f"Bearer {body['access_token']}",
+        )
+        self.assertEqual(access.status_code, 200)
+        self.assertTrue(access.json()["needs_payment"])
+
+    def test_deactivated_user_cannot_login(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        req = self.client.post(
+            "/api/v1/auth/phone/login-request",
+            data=json.dumps({"phone": "89625507832"}),
+            content_type="application/json",
+        )
+        self.assertEqual(req.status_code, 200)
+        code = req.json()["debug_code"]
+        verify = self.client.post(
+            "/api/v1/auth/phone/login-verify",
+            data=json.dumps({"phone": "89625507832", "code": code}),
+            content_type="application/json",
+        )
+        self.assertEqual(verify.status_code, 403)
+        self.assertEqual(verify.json()["error"], "user_deactivated")
+

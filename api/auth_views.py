@@ -17,6 +17,8 @@ from subscriptions.receipts import normalize_phone
 
 
 def _error(code: str, status: int = 400, detail: str | None = None):
+    if status == 400 and code == "user_deactivated":
+        status = 403
     text = detail or {
         "not_registered": (
             "Номер не найден. Нажмите «Регистрация», заполните анкету "
@@ -39,6 +41,10 @@ def _error(code: str, status: int = 400, detail: str | None = None):
         "max_phone_bound": (
             "К этому аккаунту Max уже привязан другой номер телефона. "
             "Войдите под ним или используйте другой Max."
+        ),
+        "user_deactivated": (
+            "Аккаунт отключён администратором. "
+            "Обратитесь в поддержку — вход недоступен."
         ),
     }.get(code, code)
     return json_response({"error": code, "detail": text}, status=status)

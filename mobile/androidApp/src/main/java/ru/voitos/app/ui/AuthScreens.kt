@@ -67,6 +67,8 @@ data class LoginSuccess(
     val needsPinSetup: Boolean,
     val hasPin: Boolean,
     val needsOnboarding: Boolean = false,
+    /** Подписка закончилась — после входа ведём на загрузку чека. */
+    val needsPayment: Boolean = false,
 )
 
 /** ДД.ММ.ГГГГ → YYYY-MM-DD или null. */
@@ -179,6 +181,7 @@ fun LoginScreen(
                 needsPinSetup = session.needsPinSetup,
                 hasPin = session.hasPin || !session.needsPinSetup,
                 needsOnboarding = session.needsOnboarding,
+                needsPayment = session.needsPayment || session.access?.state == "blocked",
             ),
         )
     }
@@ -313,6 +316,13 @@ fun LoginScreen(
         Text("Вход по телефону", style = MaterialTheme.typography.bodyMedium, color = VoitosColors.Text)
         Text(
             "Версия ${AppVersion.name} (${AppVersion.code})",
+            style = MaterialTheme.typography.bodySmall,
+            color = VoitosColors.Muted,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            "Если подписка закончилась — всё равно войдите и загрузите чек. " +
+                "Доступ откроется после проверки.",
             style = MaterialTheme.typography.bodySmall,
             color = VoitosColors.Muted,
         )
@@ -637,6 +647,12 @@ fun LoginScreen(
 
         if (showPin) {
             Text("Быстрый вход по PIN", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+            Text(
+                "Даже если подписка закончилась — войдите и загрузите чек.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = phone,
                 onValueChange = {
@@ -771,6 +787,12 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosPrimaryButtonColors(),
             ) { Text("Войти") }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Подписка закончилась? Войдите как обычно — откроется загрузка чека.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
             if (canRegister) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(

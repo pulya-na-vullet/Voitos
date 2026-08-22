@@ -26,6 +26,10 @@ data class AuthSession(
     val phone: String = "",
     /** Бэкенд решает, показывать ли комикс-онбординг. */
     @SerialName("needs_onboarding") val needsOnboarding: Boolean = false,
+    @SerialName("is_active") val isActive: Boolean = true,
+    /** Подписка закончилась — нужен чек, вход при этом разрешён. */
+    @SerialName("needs_payment") val needsPayment: Boolean = false,
+    val access: AccessInfo? = null,
 )
 
 @Serializable
@@ -136,10 +140,12 @@ data class AvatarUploadResult(
 
 @Serializable
 data class AccessInfo(
-    val state: String,
+    val state: String = "",
     @SerialName("subscription_until") val subscriptionUntil: String? = null,
     @SerialName("grace_until") val graceUntil: String? = null,
     val label: String = "",
+    @SerialName("needs_payment") val needsPayment: Boolean = false,
+    @SerialName("is_active") val isActive: Boolean = true,
 )
 
 @Serializable
@@ -324,6 +330,8 @@ data class SubscriptionInfo(
     @SerialName("payment_phone") val paymentPhone: String = "",
     @SerialName("payment_name") val paymentName: String = "",
     @SerialName("pending_receipts") val pendingReceipts: Int = 0,
+    @SerialName("needs_payment") val needsPayment: Boolean = false,
+    @SerialName("is_active") val isActive: Boolean = true,
     val family: FamilySubscriptionInfo = FamilySubscriptionInfo(),
 )
 

@@ -212,7 +212,15 @@ fun CabinetScreen(
                 onClick = onOpenSubscription,
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosPrimaryButtonColors(),
-            ) { Text("Подписка") }
+            ) {
+                Text(
+                    when {
+                        sub?.state == "blocked" || sub?.needsPayment == true -> "Загрузить чек подписки"
+                        sub?.state == "grace" -> "Подписка · загрузить чек"
+                        else -> "Подписка"
+                    },
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 

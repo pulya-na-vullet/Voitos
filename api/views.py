@@ -59,12 +59,15 @@ def _me_payload(user, request=None) -> dict:
 
 
 def _access_payload(user) -> dict:
+    user.ensure_grace_period()
     until = user.effective_subscription_until()
     return {
         "state": user.access_state(),
         "subscription_until": until.isoformat() if until else None,
         "grace_until": user.grace_until.isoformat() if user.grace_until else None,
         "label": user.subscription_label(),
+        "needs_payment": user.access_state() == "blocked",
+        "is_active": bool(user.is_active),
     }
 
 

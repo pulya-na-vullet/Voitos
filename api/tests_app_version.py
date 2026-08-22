@@ -5,10 +5,10 @@ from database.models import AppSettings
 
 @override_settings(
     MOBILE_OTP_DEBUG=True,
-    MOBILE_MIN_VERSION_CODE=17,
-    MOBILE_LATEST_VERSION_CODE=17,
-    MOBILE_LATEST_VERSION_NAME="0.2.13-kmp",
-    VOITOS_BACKEND_VERSION="0.2.13",
+    MOBILE_MIN_VERSION_CODE=18,
+    MOBILE_LATEST_VERSION_CODE=18,
+    MOBILE_LATEST_VERSION_NAME="0.2.14-kmp",
+    VOITOS_BACKEND_VERSION="0.2.14",
 )
 class AppVersionHealthTests(TestCase):
     def setUp(self):
@@ -21,15 +21,15 @@ class AppVersionHealthTests(TestCase):
         cfg.save()
 
     def test_health_includes_version_and_update_flag(self):
-        old = self.client.get("/api/v1/health?version_code=16")
+        old = self.client.get("/api/v1/health?version_code=17")
         self.assertEqual(old.status_code, 200)
         data = old.json()
         self.assertTrue(data["ok"])
-        self.assertEqual(data["backend_version"], "0.2.13")
-        self.assertEqual(data["min_app_version_code"], 17)
+        self.assertEqual(data["backend_version"], "0.2.14")
+        self.assertEqual(data["min_app_version_code"], 18)
         self.assertTrue(data["update_required"])
 
-        cur = self.client.get("/api/v1/health?version_code=17")
+        cur = self.client.get("/api/v1/health?version_code=18")
         self.assertFalse(cur.json()["update_required"])
 
     def test_panel_higher_min_wins_over_settings(self):
@@ -37,6 +37,6 @@ class AppVersionHealthTests(TestCase):
         cfg.mobile_min_version_code = 20
         cfg.mobile_latest_version_code = 20
         cfg.save()
-        data = self.client.get("/api/v1/health?version_code=17").json()
+        data = self.client.get("/api/v1/health?version_code=18").json()
         self.assertEqual(data["min_app_version_code"], 20)
         self.assertTrue(data["update_required"])

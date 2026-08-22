@@ -85,7 +85,20 @@ def max_bot_open_url() -> str:
 
 def auth_payload(user: BotUser, token: MobileAuthToken) -> dict:
     from bot.onboarding import is_complete
+    from database.models import AccessState
 
+    if not user.is_active:
+        raise ValueError("user_deactivated")
+
+    user.ensure_grace_period()
+    until = user.effective_subscription_until()
+    state = user.access_state()
+    access = {
+        "state": state,
+        "subscription_until": until.isoformat() if until else None,
+        "grace_until": user.grace_until.isoformat() if user.grace_until else None,
+        "label": user.subscription_label(),
+    }
     return {
         "access_token": token.token,
         "bot_user_id": user.id,
@@ -94,6 +107,9 @@ def auth_payload(user: BotUser, token: MobileAuthToken) -> dict:
         "has_pin": has_pin(user),
         "phone": user.phone or "",
         "needs_onboarding": not is_complete(user),
+        "is_active": True,
+        "needs_payment": state == AccessState.BLOCKED,
+        "access": access,
     }
 
 
@@ -347,6 +363,8 @@ def verify_challenge(
     user = ch.bot_user or BotUser.objects.filter(phone=phone).order_by("-last_seen_at").first()
     if not user:
         raise ValueError("user_not_found")
+    if not user.is_active:
+        raise ValueError("user_deactivated")
     if not issue_auth_token:
         return {"ok": True, "bot_user_id": user.id, "phone": user.phone}
     token = issue_token(user, device_name=device_name)
@@ -372,6 +390,8 @@ def pin_login(*, phone: str, pin: str, device_name: str = "") -> dict:
     user = BotUser.objects.filter(phone=phone).order_by("-last_seen_at").first()
     if not user or not has_pin(user):
         raise ValueError("invalid_pin")
+    if not user.is_active:
+        raise ValueError("user_deactivated")
     _ensure_not_locked(user)
     if not check_password(pin, user.pin_hash):
         user.pin_failed_attempts = int(user.pin_failed_attempts or 0) + 1

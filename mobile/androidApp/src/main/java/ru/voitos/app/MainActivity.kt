@@ -100,6 +100,8 @@ class MainActivity : ComponentActivity() {
         data class WorkRequestPhotos(val id: Int) : Screen()
         data class WorkRequestDetail(val id: Int) : Screen()
         data object Subscription : Screen()
+        /** Подписка закрыта — только загрузка чека. */
+        data object Paywall : Screen()
         data object Onboarding : Screen()
         data object Feedback : Screen()
         data object GroupChat : Screen()
@@ -165,7 +167,7 @@ class MainActivity : ComponentActivity() {
                     return health.minAppVersionCode > 0 && AppVersion.code < health.minAppVersionCode
                 }
 
-                /** После онбординга (или если он не нужен) — hard update или главный экран. */
+                /** После онбординга — hard update, paywall или главный экран. */
                 fun proceedAfterOnboarding() {
                     scope.launch {
                         val health = runCatching {
@@ -173,15 +175,22 @@ class MainActivity : ComponentActivity() {
                         }.getOrNull()
                         if (appNeedsUpdate(health)) {
                             goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
+                            return@launch
+                        }
+                        val access = runCatching { client.access() }.getOrNull()
+                        val needsPay = access?.needsPayment == true || access?.state == "blocked"
+                        if (needsPay) {
+                            playSplash = false
+                            screen = Screen.Paywall
+                            return@launch
+                        }
+                        val next = pendingAfterBootstrap
+                        pendingAfterBootstrap = null
+                        if (next != null && next !is Screen.Main) {
+                            playSplash = false
+                            screen = next
                         } else {
-                            val next = pendingAfterBootstrap
-                            pendingAfterBootstrap = null
-                            if (next != null && next !is Screen.Main) {
-                                playSplash = false
-                                screen = next
-                            } else {
-                                enterMainWithSplash(splash = true)
-                            }
+                            enterMainWithSplash(splash = true)
                         }
                     }
                 }
@@ -217,6 +226,15 @@ class MainActivity : ComponentActivity() {
                             goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
                             break
                         }
+                        // Подписка могла закончиться, пока пользователь в приложении.
+                        if (screen !is Screen.Paywall && screen !is Screen.Bootstrapping) {
+                            val access = runCatching { client.access() }.getOrNull()
+                            if (access?.needsPayment == true || access?.state == "blocked") {
+                                playSplash = false
+                                screen = Screen.Paywall
+                                break
+                            }
+                        }
                         delay(VERSION_POLL_EVERY_MS)
                     }
                 }
@@ -239,7 +257,7 @@ class MainActivity : ComponentActivity() {
 
                 fun handleSystemBack() {
                     when (val current = screen) {
-                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.SetPin, Screen.ForceUpdate, Screen.Main ->
+                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.SetPin, Screen.ForceUpdate, Screen.Main, Screen.Paywall ->
                             moveTaskToBack(true)
                         is Screen.CollectionDetail, Screen.GroupChat ->
                             goMain(MainTab.Collections, refreshCollections = true)
@@ -519,6 +537,17 @@ class MainActivity : ComponentActivity() {
                                     tab = MainTab.Cabinet
                                     screen = Screen.Main
                                 },
+                            )
+
+                            Screen.Paywall -> SubscriptionScreen(
+                                client = client,
+                                paymentRequired = true,
+                                onBack = { logoutToLogin() },
+                                onAccessRestored = {
+                                    pendingAfterBootstrap = null
+                                    enterMainWithSplash(splash = true)
+                                },
+                                onLogout = { logoutToLogin() },
                             )
 
                             Screen.Onboarding -> OnboardingScreen(

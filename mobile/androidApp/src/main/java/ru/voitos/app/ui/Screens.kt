@@ -781,8 +781,18 @@ fun RateMasterScreen(
 fun SubscriptionScreen(
     client: VoitosApiClient,
     onBack: () -> Unit,
+    /** Подписка закрыта: нельзя уйти в приложение без оплаты. */
+    paymentRequired: Boolean = false,
+    onAccessRestored: () -> Unit = {},
+    onLogout: (() -> Unit)? = null,
 ) {
-    BackHandler(enabled = true) { onBack() }
+    BackHandler(enabled = true) {
+        if (paymentRequired) {
+            onLogout?.invoke()
+        } else {
+            onBack()
+        }
+    }
     var info by remember { mutableStateOf<ru.voitos.app.model.SubscriptionInfo?>(null) }
     var receipts by remember { mutableStateOf<List<ru.voitos.app.model.ReceiptBrief>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -794,8 +804,12 @@ fun SubscriptionScreen(
     fun reload() {
         scope.launch {
             try {
-                info = client.subscription()
+                val sub = client.subscription()
+                info = sub
                 receipts = client.receipts().items
+                if (paymentRequired && sub.state == "active") {
+                    onAccessRestored()
+                }
             } catch (e: Exception) {
                 error = friendlyNetworkError(e)
             }
@@ -803,6 +817,23 @@ fun SubscriptionScreen(
     }
 
     LaunchedEffect(Unit) { reload() }
+
+    // Пока ждём проверку чека — периодически обновляем статус.
+    LaunchedEffect(paymentRequired) {
+        if (!paymentRequired) return@LaunchedEffect
+        while (true) {
+            delay(12_000)
+            runCatching {
+                val sub = client.subscription()
+                info = sub
+                receipts = runCatching { client.receipts().items }.getOrDefault(receipts)
+                if (sub.state == "active") {
+                    onAccessRestored()
+                    return@LaunchedEffect
+                }
+            }
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -815,7 +846,7 @@ fun SubscriptionScreen(
                 val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                 val name = uri.lastPathSegment?.substringAfterLast('/') ?: "receipt.jpg"
                 val res = client.uploadReceipt(b64, name)
-                message = "Чек #${res.id} отправлен на проверку"
+                message = "Чек #${res.id} отправлен на проверку. Доступ откроется после одобрения."
                 reload()
             } catch (e: Exception) {
                 error = friendlyNetworkError(e)
@@ -831,21 +862,47 @@ fun SubscriptionScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        VoitosBackButton(onClick = onBack)
-        Text("Подписка", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        Spacer(modifier = Modifier.height(12.dp))
+        if (!paymentRequired) {
+            VoitosBackButton(onClick = onBack)
+        }
+        Text(
+            if (paymentRequired) "Продление подписки" else "Подписка",
+            style = MaterialTheme.typography.headlineSmall,
+            color = VoitosColors.Text,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (paymentRequired) {
+                Text(
+                    "Подписка закончилась — основные функции закрыты. " +
+                        "Загрузите чек об оплате: после проверки администратором доступ откроется.",
+                    color = VoitosColors.Warn,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
         error?.let { Text(it, color = VoitosColors.Danger) }
         message?.let { Text(it, color = VoitosColors.Ok) }
         info?.let { s ->
             PanelCard {
                 Text(
-                    s.label.ifBlank { s.state },
+                    s.label.ifBlank {
+                        when (s.state) {
+                            "blocked" -> "Доступ закрыт — нужна оплата"
+                            "grace" -> "Льготный период — оплатите заранее"
+                            "active" -> "Подписка активна"
+                            else -> s.state
+                        }
+                    },
                     style = MaterialTheme.typography.titleMedium,
-                    color = VoitosColors.Accent2,
+                    color = when (s.state) {
+                        "blocked" -> VoitosColors.Danger
+                        "grace" -> VoitosColors.Warn
+                        else -> VoitosColors.Accent2
+                    },
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Доступ: ${s.state}", color = VoitosColors.Text)
-                s.subscriptionUntil?.let { Text("До: $it", color = VoitosColors.Text) }
+                Text("Статус: ${s.state}", color = VoitosColors.Text)
+                s.subscriptionUntil?.let { Text("Была до: $it", color = VoitosColors.Text) }
                 s.graceUntil?.let { Text("Grace до: $it", color = VoitosColors.Muted) }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Цена: ${s.priceRub} ₽/мес", color = VoitosColors.Text)
@@ -879,11 +936,34 @@ fun SubscriptionScreen(
             }
             Spacer(modifier = Modifier.height(12.dp))
             Button(
-                onClick = { picker.launch("image/*") },
+                onClick = { picker.launch("*/*") },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
                 colors = voitosPrimaryButtonColors(),
-            ) { Text("Загрузить чек") }
+            ) {
+                Text(
+                    when {
+                        loading -> "Отправка…"
+                        paymentRequired -> "Загрузить чек"
+                        else -> "Загрузить чек"
+                    },
+                )
+            }
+            Text(
+                "Фото перевода или PDF чека",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            if (paymentRequired && onLogout != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = onLogout,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Выйти из аккаунта", color = VoitosColors.Danger)
+                }
+            }
         }
         if (receipts.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))

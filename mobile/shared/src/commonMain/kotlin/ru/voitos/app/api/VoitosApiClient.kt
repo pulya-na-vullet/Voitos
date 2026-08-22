@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import ru.voitos.app.VoitosApi
+import ru.voitos.app.model.AccessInfo
 import ru.voitos.app.model.ApiErrorBody
 import ru.voitos.app.model.ApiException
 import ru.voitos.app.model.AuthConfig
@@ -385,6 +386,8 @@ class VoitosApiClient(
                 },
             )
         }.body()
+
+    suspend fun access(): AccessInfo = authedGet("/me/access")
 
     suspend fun subscription(): SubscriptionInfo = authedGet("/me/subscription")
 
