@@ -37,6 +37,7 @@ import ru.voitos.app.debug.CrashFileLogger
 import ru.voitos.app.nav.DeepLinks
 import ru.voitos.app.push.DevPushTokenProvider
 import ru.voitos.app.ui.CabinetScreen
+import ru.voitos.app.ui.ChangePinScreen
 import ru.voitos.app.ui.CollectionDetailScreen
 import ru.voitos.app.ui.CollectionsScreen
 import ru.voitos.app.ui.ConfirmAmountScreen
@@ -49,8 +50,10 @@ import ru.voitos.app.ui.MainShell
 import ru.voitos.app.ui.MainTab
 import ru.voitos.app.ui.NewWorkRequestScreen
 import ru.voitos.app.ui.OnboardingScreen
+import ru.voitos.app.ui.SetPinScreen
 import ru.voitos.app.ui.SubscriptionScreen
 import ru.voitos.app.ui.VoitosBackground
+import ru.voitos.app.ui.WishScreen
 import ru.voitos.app.ui.WorkRequestDetailScreen
 import ru.voitos.app.ui.WorkRequestPhotosScreen
 import ru.voitos.app.ui.WorkRequestsScreen
@@ -69,6 +72,9 @@ class MainActivity : ComponentActivity() {
 
     private sealed class Screen {
         data object Login : Screen()
+        data object SetPin : Screen()
+        data object ChangePin : Screen()
+        data object Wish : Screen()
         /** Проверка онбординга перед сплэшем / главной. */
         data object Bootstrapping : Screen()
         /** Обязательный онбординг (ещё не пройден на бэкенде). */
@@ -139,11 +145,11 @@ class MainActivity : ComponentActivity() {
 
                 fun handleSystemBack() {
                     when (val current = screen) {
-                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.Main ->
+                        Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.SetPin, Screen.Main ->
                             moveTaskToBack(true)
                         is Screen.CollectionDetail, Screen.GroupChat ->
                             goMain(MainTab.Collections, refreshCollections = true)
-                        Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister ->
+                        Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister, Screen.ChangePin, Screen.Wish ->
                             goMain(MainTab.Cabinet)
                         is Screen.WorkRequestPhotos -> goMain(MainTab.CallMaster)
                         is Screen.WorkRequestDetail, is Screen.Confirm -> goMain(MainTab.WorkRequests)
@@ -209,18 +215,22 @@ class MainActivity : ComponentActivity() {
                                 initialDebugCode = session.lastDebugCode,
                                 recentBaseUrls = session.recentBaseUrls,
                                 restoredFromDisk = restoredServerUrl != null,
-                                onLoggedIn = { token, name, baseUrl, phone ->
-                                    DevServerSettings.save(this@MainActivity, session, baseUrl)
-                                    session.lastPhone = phone
-                                    session.accessToken = token
-                                    session.displayName = name
-                                    client = VoitosApiClient(baseUrl = baseUrl).also {
-                                        it.accessToken = token
+                                preferPinLogin = session.hasPinSetup && session.lastPhone.isNotBlank(),
+                                onLoggedIn = { result ->
+                                    DevServerSettings.save(this@MainActivity, session, result.baseUrl)
+                                    session.lastPhone = result.phone
+                                    session.accessToken = result.token
+                                    session.displayName = result.name
+                                    if (result.hasPin || !result.needsPinSetup) {
+                                        session.hasPinSetup = true
+                                    }
+                                    client = VoitosApiClient(baseUrl = result.baseUrl).also {
+                                        it.accessToken = result.token
                                     }
                                     scope.launch { registerDevPushToken() }
                                     pendingAfterBootstrap = null
                                     tab = MainTab.Collections
-                                    screen = Screen.Bootstrapping
+                                    screen = if (result.needsPinSetup) Screen.SetPin else Screen.Bootstrapping
                                 },
                                 onDebugPrefs = { url, phone, dbg ->
                                     session.baseUrl = url
@@ -229,6 +239,14 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onSaveServer = { url ->
                                     DevServerSettings.save(this@MainActivity, session, url)
+                                },
+                            )
+
+                            Screen.SetPin -> SetPinScreen(
+                                client = client,
+                                onDone = {
+                                    session.hasPinSetup = true
+                                    screen = Screen.Bootstrapping
                                 },
                             )
 
@@ -328,6 +346,8 @@ class MainActivity : ComponentActivity() {
                                             onOpenOnboarding = { screen = Screen.Onboarding },
                                             onRegisterExecutor = { screen = Screen.ExecutorRegister },
                                             onOpenFeedback = { screen = Screen.Feedback },
+                                            onOpenWishes = { screen = Screen.Wish },
+                                            onChangePin = { screen = Screen.ChangePin },
                                             onLogout = {
                                                 session.clearSession()
                                                 client.accessToken = null
@@ -408,6 +428,22 @@ class MainActivity : ComponentActivity() {
                             )
 
                             Screen.Feedback -> FeedbackScreen(
+                                client = client,
+                                onBack = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
+
+                            Screen.Wish -> WishScreen(
+                                client = client,
+                                onBack = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
+
+                            Screen.ChangePin -> ChangePinScreen(
                                 client = client,
                                 onBack = {
                                     tab = MainTab.Cabinet

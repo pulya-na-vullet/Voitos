@@ -879,6 +879,7 @@ def settings_view(request: HttpRequest) -> HttpResponse:
             cfg.max_bot_token = new_token
         if new_key:
             cfg.yandex_api_key = new_key
+        cfg.max_bot_open_url = request.POST.get("max_bot_open_url", "").strip()
         cfg.allowed_max_user_id = ""  # multi-user
         cfg.yandex_folder_id = request.POST.get("yandex_folder_id", "").strip()
         cfg.yandex_model = normalize_yandex_model(

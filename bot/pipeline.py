@@ -58,6 +58,23 @@ class MessagePipeline:
 
         pending, _ = PendingAction.objects.get_or_create(user=user)
 
+        from services.mobile_auth import (
+            APP_LOGIN_PENDING,
+            bot_handle_app_login_phone,
+            bot_start_app_login,
+            looks_like_app_login,
+        )
+
+        if pending.pending_kind == APP_LOGIN_PENDING:
+            reply = bot_handle_app_login_phone(user, text)
+            self._store_out(user, reply, "app_login")
+            return reply
+
+        if looks_like_app_login(text):
+            reply = bot_start_app_login(user)
+            self._store_out(user, reply, "app_login")
+            return reply
+
         from bot.registration import (
             REG_KIND,
             handle_registration_step,

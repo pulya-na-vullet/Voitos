@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import ru.voitos.app.VoitosApi
+import ru.voitos.app.model.AuthConfig
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.AvatarUploadResult
 import ru.voitos.app.model.CollectionDetail
@@ -35,12 +36,15 @@ import ru.voitos.app.model.GroupChatSendResult
 import ru.voitos.app.model.HealthResponse
 import ru.voitos.app.model.Me
 import ru.voitos.app.model.NotificationList
+import ru.voitos.app.model.OkResponse
 import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.PhotoUploadResult
 import ru.voitos.app.model.ReceiptList
 import ru.voitos.app.model.ReceiptUploadResult
 import ru.voitos.app.model.ServiceGroupList
 import ru.voitos.app.model.SubscriptionInfo
+import ru.voitos.app.model.WishCreated
+import ru.voitos.app.model.WishListResponse
 import ru.voitos.app.model.WorkRequestCancelResult
 import ru.voitos.app.model.WorkRequestConfirmSlotResult
 import ru.voitos.app.model.WorkRequestCreated
@@ -81,6 +85,97 @@ class VoitosApiClient(
         accessToken = session.accessToken
         return session
     }
+
+    suspend fun authConfig(): AuthConfig = http.get("$baseUrl/auth/config").body()
+
+    suspend fun maxVerify(phone: String, code: String): AuthSession {
+        val session: AuthSession = http.post("$baseUrl/auth/max/verify") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("phone", phone)
+                    put("code", code)
+                },
+            )
+        }.body()
+        accessToken = session.accessToken
+        return session
+    }
+
+    suspend fun pinLogin(phone: String, pin: String): AuthSession {
+        val session: AuthSession = http.post("$baseUrl/auth/pin/login") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("phone", phone)
+                    put("pin", pin)
+                },
+            )
+        }.body()
+        accessToken = session.accessToken
+        return session
+    }
+
+    suspend fun pinSet(pin: String): OkResponse =
+        http.post("$baseUrl/auth/pin/set") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("pin", pin) })
+        }.body()
+
+    suspend fun pinResetRequest(phone: String): OkResponse =
+        http.post("$baseUrl/auth/pin/reset-request") {
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("phone", phone) })
+        }.body()
+
+    suspend fun pinResetConfirm(phone: String, code: String, pin: String): AuthSession {
+        val session: AuthSession = http.post("$baseUrl/auth/pin/reset-confirm") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("phone", phone)
+                    put("code", code)
+                    put("pin", pin)
+                },
+            )
+        }.body()
+        accessToken = session.accessToken
+        return session
+    }
+
+    suspend fun pinChangeRequest(): OkResponse =
+        http.post("$baseUrl/auth/pin/change-request") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { })
+        }.body()
+
+    suspend fun pinChangeConfirm(code: String, pin: String): OkResponse =
+        http.post("$baseUrl/auth/pin/change-confirm") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("code", code)
+                    put("pin", pin)
+                },
+            )
+        }.body()
+
+    suspend fun wishes(): WishListResponse = authedGet("/me/wishes")
+
+    suspend fun createWish(text: String, groupId: Int? = null): WishCreated =
+        http.post("$baseUrl/me/wishes") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("text", text)
+                    if (groupId != null) put("group_id", groupId)
+                },
+            )
+        }.body()
 
     suspend fun me(): Me = authedGet("/me")
 

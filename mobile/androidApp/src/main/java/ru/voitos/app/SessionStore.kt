@@ -61,13 +61,18 @@ class SessionStore(context: Context) {
         get() = prefs.getString(KEY_DEBUG_CODE, "") ?: ""
         set(value) = prefs.edit(commit = true) { putString(KEY_DEBUG_CODE, value) }
 
+    /** На устройстве уже задавали постоянный PIN. */
+    var hasPinSetup: Boolean
+        get() = prefs.getBoolean(KEY_HAS_PIN, false)
+        set(value) = prefs.edit(commit = true) { putBoolean(KEY_HAS_PIN, value) }
+
     /** Уже был хотя бы один запуск после установки (не чистая установка). */
     var hasLaunchedBefore: Boolean
         get() = prefs.getBoolean(KEY_LAUNCHED, false)
         set(value) = prefs.edit(commit = true) { putBoolean(KEY_LAUNCHED, value) }
 
     fun clearSession() {
-        // Выход: только сессия. Debug-поля (URL, телефон, код) оставляем.
+        // Выход: только сессия. Debug-поля (URL, телефон, код) и флаг PIN оставляем.
         prefs.edit(commit = true) {
             remove(KEY_TOKEN)
             remove(KEY_NAME)
@@ -87,6 +92,7 @@ class SessionStore(context: Context) {
         private const val KEY_RECENT = "recent_base_urls"
         private const val KEY_PHONE = "last_phone"
         private const val KEY_DEBUG_CODE = "last_debug_code"
+        private const val KEY_HAS_PIN = "has_pin_setup"
         private const val KEY_LAUNCHED = "has_launched_before"
     }
 }
