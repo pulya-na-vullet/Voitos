@@ -270,6 +270,14 @@ def _campaign_date_lines(campaign: ServiceCampaign) -> tuple[str, str, str]:
     return date_s, date_label, group_line + desc
 
 
+FIXED_SHARE_NOTE = (
+    "Ваш взнос зафиксирован при старте сбора и не пересчитывается, "
+    "если в группу позже добавят новых соседей. "
+    "Кто уже оплатил — сумма не меняется. "
+    "Сверх цели уходит в свободный баланс группы."
+)
+
+
 def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
     date_s, date_label, extra = _campaign_date_lines(campaign)
     photo_n = campaign.offer_photos.count() if campaign.pk else 0
@@ -283,9 +291,10 @@ def offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) -> str:
         f"{campaign.title}\n"
         f"{extra}"
         f"{date_label}: {date_s}\n"
-        f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
+        f"Общая сумма (цель): {campaign.total_amount:.0f} ₽\n"
         f"Ваш взнос: {amount_per_user:.0f} ₽\n"
         f"{photo_line}\n"
+        f"{FIXED_SHARE_NOTE}\n\n"
         f"Реквизиты:\n{service_payment_requisites()}\n\n"
         f"{campaign_progress_line(campaign)}\n\n"
         "Пришлите фото или PDF чека о переводе в этот чат — всё прозрачно.\n"
@@ -338,8 +347,9 @@ def resend_offer_message(campaign: ServiceCampaign, amount_per_user: Decimal) ->
         f"{campaign.title}\n"
         f"{extra}"
         f"{date_label}: {date_s}\n"
-        f"Общая сумма: {campaign.total_amount:.0f} ₽\n"
+        f"Общая сумма (цель): {campaign.total_amount:.0f} ₽\n"
         f"Ваш взнос: {amount_per_user:.0f} ₽\n\n"
+        f"{FIXED_SHARE_NOTE}\n\n"
         f"Реквизиты:\n{service_payment_requisites()}\n\n"
         f"{campaign_progress_line(campaign)}\n\n"
         "Если ещё не оплатили — пришлите фото или PDF чека в этот чат.\n"
@@ -594,7 +604,7 @@ def maybe_notify_surplus(campaign: ServiceCampaign, send_fn=None) -> bool:
     text = (
         f"По сбору «{campaign.title}» подтверждена сумма сверх цели.\n"
         f"Собрано: {paid:.0f} ₽ при цели {total:.0f} ₽.\n"
-        f"Оставшаяся часть ({surplus:.0f} ₽) ушла в общий бюджет."
+        f"Оставшаяся часть ({surplus:.0f} ₽) ушла в свободный баланс группы."
     )
     sent = broadcast_campaign_message(
         campaign,
@@ -920,7 +930,11 @@ def invite_new_members_to_group_campaigns(
                     amount_due=amount,
                     status=InviteStatus.OFFERED,
                 )
-            text = offer_message(campaign, amount)
+            text = (
+                f"Вас добавили в группу «{group.name}».\n"
+                f"По активному сбору действует фиксированная доля на момент старта.\n\n"
+                + offer_message(campaign, amount)
+            )
             image_payloads = campaign_offer_image_payloads(campaign)
             ActivityLog.objects.create(
                 user=user,
@@ -1161,7 +1175,7 @@ def approved_service_message(receipt: ServiceReceipt) -> str:
     if paid > total and not campaign.receipts.filter(status=ReceiptStatus.PENDING).exists():
         surplus = paid - total
         lines.append(
-            f"Оставшаяся часть ({surplus:.0f} ₽) ушла в общий бюджет."
+            f"Оставшаяся часть ({surplus:.0f} ₽) ушла в свободный баланс группы."
         )
     return "\n".join(lines)
 

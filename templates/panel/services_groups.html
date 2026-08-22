@@ -16,9 +16,9 @@
 <div class="grid {% if can_manage_groups %}two{% endif %}" style="margin-bottom:16px;">
   <div class="card">
     <h3 style="margin-top:0;">Список групп</h3>
-    <p class="muted">Бюджет — остатки сверх цели после закрытых сборов.</p>
+    <p class="muted">Бюджет — свободный баланс группы (остатки сверх цели после закрытых сборов). Доля в активных сборах не пересчитывается назад.</p>
     <table>
-      <thead><tr><th>Группа</th><th>Участников</th><th>Менеджер</th><th>Бюджет</th><th>Пожелания</th><th></th></tr></thead>
+      <thead><tr><th>Группа</th><th>Участников</th><th>Менеджер</th><th>Свободный баланс</th><th>Пожелания</th><th>Архив</th><th></th></tr></thead>
       <tbody>
       {% for g in groups %}
         <tr>
@@ -39,6 +39,7 @@
           </td>
           <td class="mono">{% if g.budget %}<strong>{{ g.budget }} ₽</strong>{% else %}0 ₽{% endif %}</td>
           <td class="mono">{% if g.wish_count %}<span class="badge">{{ g.wish_count }}</span>{% else %}0{% endif %}</td>
+          <td><a class="btn secondary small" href="{% url 'panel:services_archive' %}?group={{ g.id }}">Архив</a></td>
           <td style="white-space:nowrap; display:flex; gap:6px; flex-wrap:wrap;">
             <a class="btn small" href="{% url 'panel:service_group_edit' g.id %}">Состав</a>
             {% if can_manage_groups %}
@@ -52,7 +53,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="muted">{% if can_manage_groups %}Групп пока нет — создайте первую справа{% else %}Нет закреплённых групп{% endif %}</td></tr>
+        <tr><td colspan="7" class="muted">{% if can_manage_groups %}Групп пока нет — создайте первую справа{% else %}Нет закреплённых групп{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>

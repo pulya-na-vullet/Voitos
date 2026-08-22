@@ -1,12 +1,50 @@
 {% extends "panel/base.html" %}
-{% block title %}Архив мероприятий — Voitos{% endblock %}
+{% block title %}Архив сборов — Voitos{% endblock %}
 {% block content %}
 <div class="topbar">
-  <h1>Архив мероприятий</h1>
+  <h1>Архив сборов</h1>
   <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
 </div>
+
+{% if groups_picker %}
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
-  Последние сборы и архив по категориям: чистка снега, освещение, детская площадка, ремонт дороги.
+  Сначала выберите группу — затем увидите сборы по категориям:
+  освещение, чистка снега, детская площадка, ремонт дороги и другие.
+</p>
+<div class="card">
+  <h3 style="margin-top:0;">Группы</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Группа</th>
+        <th>Сборов</th>
+        <th>Свободный баланс</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in group_rows %}
+      <tr>
+        <td><strong>{{ row.group.name }}</strong></td>
+        <td class="mono">{{ row.campaign_count }}</td>
+        <td class="mono">{% if row.budget %}<strong>{{ row.budget }} ₽</strong>{% else %}0 ₽{% endif %}</td>
+        <td><a class="btn small" href="{% url 'panel:services_archive' %}?group={{ row.group.id }}">Открыть архив</a></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Групп пока нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted" style="margin-top:-6px; margin-bottom:12px;">
+  Группа: <strong>{{ selected_group.name }}</strong>
+  · свободный баланс: <span class="mono"><strong>{{ group_budget }} ₽</strong></span>
+  · доля в сборах фиксируется при старте; сверх цели уходит в баланс группы.
+</p>
+<p style="margin-bottom:16px;">
+  <a class="btn secondary small" href="{% url 'panel:services_archive' %}">← Все группы</a>
+  <a class="btn secondary small" href="{% url 'panel:service_group_edit' selected_group.id %}">Состав группы</a>
 </p>
 
 <div class="grid stats" style="grid-template-columns: repeat(2, minmax(0,1fr)); margin-bottom:16px;">
@@ -15,20 +53,19 @@
     <div class="stat-label">{{ c.label }}</div>
     <div class="stat-value">{{ c.count }}</div>
     <p class="muted">Активных: {{ c.active }}{% if c.pending_receipts %} · чеков: {{ c.pending_receipts }}{% endif %}</p>
-    <a class="btn secondary small" href="{% url 'panel:services_category' c.value %}">Открыть категорию</a>
+    <a class="btn secondary small" href="{% url 'panel:services_category' c.value %}?group={{ selected_group.id }}">Открыть категорию</a>
   </div>
   {% endfor %}
 </div>
 
 <div class="card">
-  <h3 style="margin-top:0;">Последние сборы</h3>
+  <h3 style="margin-top:0;">Сборы группы «{{ selected_group.name }}»</h3>
   <table>
-    <thead><tr><th>Мероприятие</th><th>Группа</th><th>Собрано</th><th>Сбор</th><th>Этап</th><th></th></tr></thead>
+    <thead><tr><th>Мероприятие</th><th>Собрано</th><th>Сбор</th><th>Этап</th><th></th></tr></thead>
     <tbody>
     {% for item in recent_campaigns %}
       <tr>
         <td>{{ item.get_category_display }} — {{ item.title }}</td>
-        <td>{% if item.group %}{{ item.group.name }}{% else %}{{ item.locality|default:"—" }}{% endif %}</td>
         <td style="min-width:160px;">
           <div class="mono" style="margin-bottom:4px;">{{ item.collected_amount }} / {{ item.total_amount }} ₽ · {{ item.progress_percent }}%</div>
           <div style="height:8px; background:var(--bg-soft); border-radius:999px; overflow:hidden;">
@@ -43,6 +80,7 @@
                 onsubmit="return confirm('Удалить сбор «{{ item.title|escapejs }}»? Чеки и приглашения этого сбора будут удалены.');">
             {% csrf_token %}
             <input type="hidden" name="action" value="delete_campaign">
+            <input type="hidden" name="group_id" value="{{ selected_group.id }}">
             <input type="hidden" name="campaign_id" value="{{ item.id }}">
             <input type="text" name="reason" required placeholder="Причина удаления"
                    style="width:140px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
@@ -51,9 +89,10 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="6" class="muted">Сборов ещё не было</td></tr>
+      <tr><td colspan="5" class="muted">По этой группе сборов ещё не было</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}

@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun handleSystemBack() {
-                    when (screen) {
+                    when (val current = screen) {
                         Screen.Login, Screen.Bootstrapping, Screen.RequiredOnboarding, Screen.Main ->
                             moveTaskToBack(true)
                         is Screen.CollectionDetail, Screen.GroupChat ->
@@ -128,6 +128,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Системная кнопка / жест «назад». На экранах с собственным
+                // BackHandler (чат, деталь сбора) приоритет у них.
                 BackHandler(enabled = true) {
                     if (crashText != null) {
                         crashText = null

@@ -4,10 +4,17 @@
 <div class="topbar">
   <h1>{{ category_label }}</h1>
   <div style="display:flex; gap:8px;">
+    {% if selected_group %}
+    <a class="btn secondary small" href="{% url 'panel:services_archive' %}?group={{ selected_group.id }}">← Архив группы</a>
+    {% else %}
     <a class="btn secondary small" href="{% url 'panel:services_archive' %}">← Архив</a>
+    {% endif %}
     <a class="btn secondary small" href="{% url 'panel:services' %}">Сервисы</a>
   </div>
 </div>
+{% if selected_group %}
+<p class="muted" style="margin-top:-6px;">Группа: <strong>{{ selected_group.name }}</strong></p>
+{% endif %}
 {% if tax_warning %}
 <div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ tax_warning }}</div>
 {% endif %}

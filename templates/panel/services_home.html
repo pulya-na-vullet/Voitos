@@ -104,7 +104,10 @@
       <div class="form-row">
         <label>С каждого участника, ₽</label>
         <input type="number" name="amount_per_user" id="launch-per-user" min="1" step="1" required readonly>
-        <div class="hint">Считается автоматически: общая сумма ÷ число людей в группе</div>
+        <div class="hint">
+          Считается при старте: цель ÷ число людей в группе на момент запуска.
+          Дальше доля не пересчитывается; сверх цели уходит в свободный баланс группы.
+        </div>
       </div>
     </div>
     <button class="btn" type="submit">Запустить и разослать</button>

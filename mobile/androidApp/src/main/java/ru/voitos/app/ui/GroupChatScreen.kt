@@ -1,5 +1,6 @@
 package ru.voitos.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -70,6 +71,14 @@ fun GroupChatScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val selected = groups.firstOrNull { it.id == selectedGroupId } ?: groups.firstOrNull()
+
+    BackHandler(enabled = true) {
+        if (menuOpen) {
+            menuOpen = false
+        } else {
+            onBack()
+        }
+    }
 
     fun loadGroups() {
         scope.launch {
@@ -152,7 +161,7 @@ fun GroupChatScreen(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 VoitosBackButton(onClick = onBack)
-                Text("Чат группы", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+                Text("Чаты", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
@@ -209,13 +218,30 @@ fun GroupChatScreen(
                         }
                     }
                 }
+                selected?.let { g ->
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Свободный баланс группы: ${formatRub(g.freeBalance)} ₽",
+                        color = VoitosColors.Accent2,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 Spacer(modifier = Modifier.height(10.dp))
             }
             selected != null -> {
                 Text(
                     selected.name.ifBlank { "Группа" },
-                    color = VoitosColors.Muted,
-                    style = MaterialTheme.typography.bodySmall,
+                    color = VoitosColors.Text,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Свободный баланс группы: ${formatRub(selected.freeBalance)} ₽",
+                    color = VoitosColors.Accent2,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -370,4 +396,9 @@ private fun AvatarDot(url: String, name: String) {
 private fun formatChatTime(raw: String): String {
     if (raw.isBlank()) return ""
     return raw.replace('T', ' ').take(16)
+}
+
+private fun formatRub(value: Double): String {
+    val n = value.toLong()
+    return "%,d".format(n).replace(',', ' ')
 }
