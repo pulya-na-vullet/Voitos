@@ -23,8 +23,10 @@ from services.master_booking import (
     contractor_blocked_for_commission,
     create_client_booking,
     free_slots_for_contractor,
+    role_has_local_masters,
     role_is_dispatch_only,
     role_uses_client_booking,
+    roles_for_client_call,
 )
 from services.work_request_schedule import format_slot_label
 
@@ -104,6 +106,65 @@ class MasterBookingApiTests(TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["contractor_id"], self.contractor.id)
         self.assertTrue(items[0]["can_accept"])
+
+    def test_call_roles_hide_when_only_self_is_master(self):
+        """Если клиент сам единственный мастер роли в НП — роль не в for=call."""
+        elec = ExecutorRole.objects.create(
+            code="r_elec_self",
+            name="Электрик",
+            is_active=True,
+            client_books_master=True,
+        )
+        ContractorProfile.objects.create(
+            user=self.client_user,
+            role=elec,
+            equipment_type=elec.code,
+            locality="Куюки",
+            status=ContractorStatus.VERIFIED,
+        )
+        self.assertFalse(role_has_local_masters(elec, self.client_user))
+        call_ids = {r.id for r in roles_for_client_call(self.client_user)}
+        self.assertNotIn(elec.id, call_ids)
+        # Сантехник (чужой мастер) остаётся
+        self.assertIn(self.role.id, call_ids)
+
+        api = self.client.get("/api/v1/executor-roles?for=call", **self.auth)
+        self.assertEqual(api.status_code, 200)
+        codes = {r["code"] for r in api.json()["items"]}
+        self.assertNotIn("r_elec_self", codes)
+        self.assertIn("r_plumb", codes)
+
+        # Полный каталог для регистрации — роль видна
+        full = self.client.get("/api/v1/executor-roles", **self.auth)
+        full_codes = {r["code"] for r in full.json()["items"]}
+        self.assertIn("r_elec_self", full_codes)
+
+    def test_call_roles_hide_when_no_local_masters(self):
+        """Роль без мастеров в НП клиента не показываем при вызове."""
+        remote = ExecutorRole.objects.create(
+            code="r_nails_x",
+            name="Маникюр",
+            is_active=True,
+            client_books_master=True,
+        )
+        other = BotUser.objects.create(
+            max_user_id="bk-nails",
+            phone="89625501999",
+            real_name="Мастер из другого посёлка",
+            locality="Казань",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+        ContractorProfile.objects.create(
+            user=other,
+            role=remote,
+            equipment_type=remote.code,
+            locality="Казань",
+            status=ContractorStatus.VERIFIED,
+        )
+        self.assertFalse(role_has_local_masters(remote, self.client_user))
+        api = self.client.get("/api/v1/executor-roles?for=call", **self.auth)
+        codes = {r["code"] for r in api.json()["items"]}
+        self.assertNotIn("r_nails_x", codes)
 
     def test_cross_role_slot_excluded(self):
         """Один исполнитель: занятый слот по роли A недоступен по роли B."""

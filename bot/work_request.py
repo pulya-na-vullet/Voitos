@@ -17,13 +17,17 @@ from database.models import (
 )
 from panel.admin_tasks import upsert_task
 from services.executor_roles import (
-    active_roles,
     extract_role_from_call_phrase,
     format_roles_list,
     match_role_from_text,
 )
+from services.master_booking import role_has_local_masters, roles_for_client_call
 
 WORK_REQUEST_KIND = "work_request"
+
+
+def _roles_for_call(user: BotUser):
+    return list(roles_for_client_call(user))
 
 
 def _role_requires_photos(role: ExecutorRole | None) -> bool:
@@ -42,12 +46,14 @@ def start_work_request(
     pending.pending_kind = WORK_REQUEST_KIND
     if role is None and text:
         role = extract_role_from_call_phrase(text) or match_role_from_text(text)
+    if role is not None and not role_has_local_masters(role, user):
+        role = None
     if role is None:
-        roles = list(active_roles())
+        roles = _roles_for_call(user)
         if not roles:
             pending.clear_pending()
             return (
-                "Пока нет ролей мастеров в каталоге.\n"
+                "В вашем населённом пункте пока нет доступных мастеров.\n"
                 "Напишите администратору или попробуйте позже."
             )
         pending.pending_payload = {"step": "role"}
@@ -76,9 +82,15 @@ def handle_work_request_step(user: BotUser, text: str, pending: PendingAction) -
     raw = (text or "").strip()
 
     if step == "role":
-        roles = list(active_roles())
+        roles = _roles_for_call(user)
         role = match_role_from_text(raw, roles)
         if not role:
+            if not roles:
+                pending.clear_pending()
+                return (
+                    "В вашем населённом пункте пока нет доступных мастеров.\n"
+                    "Напишите администратору или попробуйте позже."
+                )
             return (
                 "Не понял номер.\n"
                 "Напишите цифру из списка:\n\n"

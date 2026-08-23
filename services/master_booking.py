@@ -262,6 +262,73 @@ def list_masters_for_role(role, client_user: BotUser) -> list[dict]:
     return items
 
 
+def role_has_local_masters(role, client_user: BotUser) -> bool:
+    """Есть ли в НП клиента хотя бы один verified-мастер роли (не сам клиент)."""
+    from services.work_request_dispatch import verified_contractors_for_role
+
+    if role is None or client_user is None:
+        return False
+    client_loc = (getattr(client_user, "locality", None) or "").strip()
+    for c in verified_contractors_for_role(role):
+        if is_self_assignment(client_user.id, c):
+            continue
+        cloc = (c.locality or getattr(c.user, "locality", None) or "").strip()
+        if client_loc and cloc and not localities_match(client_loc, cloc):
+            continue
+        if client_loc and not cloc:
+            continue
+        return True
+    return False
+
+
+def roles_for_client_call(client_user: BotUser):
+    """
+    Активные роли, у которых в НП клиента есть другой мастер.
+
+    Если пользователь сам единственный электрик в посёлке — роль «Электрик»
+    ему не показываем (иначе «нет мастеров этой роли»).
+    Полный каталог (регистрация исполнителем) — без этого фильтра.
+    """
+    from database.models import ExecutorRole
+
+    roles = list(
+        ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
+    )
+    if not roles or client_user is None:
+        return roles
+
+    client_id = int(client_user.id)
+    client_loc = (getattr(client_user, "locality", None) or "").strip()
+    profiles = list(
+        ContractorProfile.objects.filter(status=ContractorStatus.VERIFIED)
+        .exclude(user_id=client_id)
+        .select_related("user", "role")
+        .order_by("id")
+    )
+    role_ids: set[int] = set()
+    role_codes: set[str] = set()
+    for c in profiles:
+        cloc = (c.locality or getattr(c.user, "locality", None) or "").strip()
+        if client_loc:
+            if not cloc or not localities_match(client_loc, cloc):
+                continue
+        if c.role_id:
+            role_ids.add(int(c.role_id))
+        code = (c.equipment_type or "").strip()
+        if code:
+            role_codes.add(code)
+        if c.role_id and getattr(c, "role", None) is not None:
+            rc = (c.role.code or "").strip()
+            if rc:
+                role_codes.add(rc)
+
+    return [
+        r
+        for r in roles
+        if int(r.id) in role_ids or (r.code or "").strip() in role_codes
+    ]
+
+
 def create_client_booking(
     *,
     client: BotUser,

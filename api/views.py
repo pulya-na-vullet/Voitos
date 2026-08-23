@@ -231,9 +231,17 @@ def me_receipts(request):
 @api_login_required
 @require_GET
 def executor_roles(request):
-    from services.master_booking import role_uses_client_booking
+    from services.master_booking import role_uses_client_booking, roles_for_client_call
 
-    roles = ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
+    # for=call — только роли, где в НП есть другой мастер (вызов).
+    # Без параметра — полный каталог (регистрация исполнителем).
+    purpose = (request.GET.get("for") or "").strip().lower()
+    if purpose in {"call", "book", "client"}:
+        roles = roles_for_client_call(request.bot_user)
+    else:
+        roles = list(
+            ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
+        )
     return json_response(
         {
             "items": [
