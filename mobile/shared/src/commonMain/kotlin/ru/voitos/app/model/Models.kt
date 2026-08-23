@@ -709,6 +709,8 @@ data class GroupChatMessage(
     @SerialName("author_name") val authorName: String = "",
     @SerialName("author_avatar_url") val authorAvatarUrl: String = "",
     @SerialName("is_mine") val isMine: Boolean = false,
+    /** Оплата сборов автором (семья). Дублирует author_paid[author_id]. */
+    @SerialName("payment_dots") val paymentDots: List<Boolean> = emptyList(),
 )
 
 @Serializable
