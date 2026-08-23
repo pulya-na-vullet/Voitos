@@ -207,28 +207,13 @@
 
   <form method="post" style="margin-top:16px;">
     {% csrf_token %}
-    <input type="hidden" name="action" value="save">
+    <input type="hidden" name="action" value="save_locality">
     <div class="form-row">
       <label>Населённый пункт (для подбора)</label>
       <input name="client_locality" value="{{ item.client_locality }}">
     </div>
-    <div class="form-row">
-      <label>Статус</label>
-      <select name="status">
-        {% for v,l in statuses %}
-          {% if v == "done" and not can_mark_done %}
-          {% else %}
-          <option value="{{ v }}" {% if item.status == v %}selected{% endif %}>{{ l }}</option>
-          {% endif %}
-        {% endfor %}
-      </select>
-      <p class="hint">«Ждём подтверждения клиента» — сразу спросит в MAX: оказана ли услуга, затем сумму или оценку сервиса.</p>
-    </div>
-    <div class="form-row">
-      <label>Заметка</label>
-      <textarea name="note" rows="3">{{ item.admin_note }}</textarea>
-    </div>
-    <button class="btn" type="submit">Сохранить</button>
+    <p class="muted" style="margin:0 0 10px;">Статус заявки меняется по флоу (мастер / клиент / комиссия), вручную не редактируется.</p>
+    <button class="btn" type="submit">Сохранить НП</button>
   </form>
 </div>
 {% endblock %}

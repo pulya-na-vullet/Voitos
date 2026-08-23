@@ -185,7 +185,7 @@ class WorkRequestStatus(models.TextChoices):
     SCHEDULING = "scheduling", "Согласование времени"
     IN_PROGRESS = "in_progress", "В работе"
     AWAITING_CLIENT = "awaiting_client", "Ждём подтверждения клиента"
-    AWAITING_COMMISSION = "awaiting_commission", "Ждём комиссию 10%"
+    AWAITING_COMMISSION = "awaiting_commission", "Ждём комиссию от мастера в 10%"
     DONE = "done", "Выполнена"
     CANCELLED = "cancelled", "Отменена"
 
@@ -246,18 +246,18 @@ class AppSettings(models.Model):
     )
     mobile_min_version_code = models.PositiveIntegerField(
         "Мин. versionCode приложения",
-        default=31,
+        default=33,
         help_text="Клиенты со меньшим versionCode увидят требование обновить приложение.",
     )
     mobile_latest_version_code = models.PositiveIntegerField(
         "Актуальный versionCode",
-        default=31,
+        default=33,
     )
     mobile_latest_version_name = models.CharField(
         "Актуальная versionName",
         max_length=64,
         blank=True,
-        default="0.2.27-kmp",
+        default="0.2.29-kmp",
     )
     mobile_apk_url = models.CharField(
         "Ссылка на APK для обновления",

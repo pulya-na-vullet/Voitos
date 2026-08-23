@@ -9,6 +9,9 @@
   <a class="btn secondary small" href="{% url 'panel:users' %}">← Жители</a>
   {% endif %}
 </div>
+{% if is_manager_view %}
+<p class="muted">Показаны только заявки жителей ваших групп.</p>
+{% endif %}
 <form method="get" style="margin-bottom:12px;">
   <select name="status" onchange="this.form.submit()">
     <option value="" {% if status_filter == "active" %}selected{% endif %}>Активные</option>
@@ -18,37 +21,47 @@
     {% endfor %}
   </select>
 </form>
-<div class="card">
-  <table>
-    <thead><tr><th>#</th><th>Когда</th><th>Кто</th><th>Роль</th><th>Описание</th><th>Фото</th><th>Статус</th><th></th></tr></thead>
-    <tbody>
-    {% for item in items %}
-      <tr>
-        <td class="mono">{{ item.id }}</td>
-        <td class="mono">{{ item.created_at|date:"d.m H:i" }}</td>
-        <td><a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></td>
-        <td>{{ item.role.name }}</td>
-        <td>{{ item.description|truncatechars:80 }}</td>
-        <td class="mono">{{ item.photos.count }}</td>
-        <td><span class="badge">{{ item.get_status_display }}</span></td>
-        <td style="white-space:nowrap;">
-          <a class="btn small" href="{% url 'panel:work_request_detail' item.id %}">Открыть</a>
-          {% if can_delete %}
-          <form method="post" style="display:inline;" onsubmit="return confirm('Удалить заявку #{{ item.id }}?');">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="delete">
-            <input type="hidden" name="request_id" value="{{ item.id }}">
-            <button class="btn danger small" type="submit">Удалить</button>
-          </form>
+
+{% for block in grouped_rows %}
+  {% if block.title %}
+  <h2 style="margin:18px 0 8px; font-size:1.05rem;">{{ block.title }}</h2>
+  {% endif %}
+  <div class="card" style="margin-bottom:12px;">
+    <table>
+      <thead><tr><th>#</th><th>Когда</th><th>Кто</th><th>Роль</th><th>Описание</th><th>Фото</th><th>Статус</th><th></th></tr></thead>
+      <tbody>
+      {% for item in block.items %}
+        <tr>
+          <td class="mono">{{ item.id }}</td>
+          <td class="mono">{{ item.created_at|date:"d.m H:i" }}</td>
+          <td><a href="{% url 'panel:user_dashboard' item.user_id %}">{{ item.user }}</a></td>
+          <td>{{ item.role.name }}</td>
+          <td>{{ item.description|truncatechars:80 }}</td>
+          <td class="mono">{{ item.photos.count }}</td>
+          <td><span class="badge">{{ item.get_status_display }}</span></td>
+          <td style="white-space:nowrap;">
+            <a class="btn small" href="{% url 'panel:work_request_detail' item.id %}">Открыть</a>
+            {% if can_delete %}
+            <form method="post" style="display:inline;" onsubmit="return confirm('Удалить заявку #{{ item.id }}?');">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="request_id" value="{{ item.id }}">
+              <button class="btn danger small" type="submit">Удалить</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="muted">
+          {% if is_manager_view %}В этой группе активных заявок нет.{% else %}
+          Активных заявок нет. Жители создают их в боте: «вызвать мастера».
           {% endif %}
-        </td>
-      </tr>
-    {% empty %}
-      <tr><td colspan="8" class="muted">
-        Активных заявок нет. Жители создают их в боте: «вызвать мастера».
-      </td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
+        </td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% empty %}
+  <div class="card"><p class="muted">Заявок нет.</p></div>
+{% endfor %}
 {% endblock %}

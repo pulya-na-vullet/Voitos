@@ -222,6 +222,7 @@ fun WorkRequestsScreen(
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var loadingId by remember { mutableStateOf<Int?>(null) }
+    var archiveOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     fun reload() {
@@ -238,9 +239,15 @@ fun WorkRequestsScreen(
 
     LaunchedEffect(Unit) { reload() }
 
+    val activeStatuses = setOf(
+        "draft", "pending", "offering", "scheduling", "in_progress",
+        "awaiting_client", "awaiting_commission",
+    )
     val cancellable = setOf(
         "draft", "pending", "offering", "scheduling", "in_progress", "awaiting_client",
     )
+    val activeItems = clientItems.filter { it.status in activeStatuses }
+    val archiveItems = clientItems.filter { it.status !in activeStatuses }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -269,117 +276,180 @@ fun WorkRequestsScreen(
             }
         }
 
-        if (!loading) {
-            items(clientItems, key = { "wr-${it.id}" }) { wr ->
-            PanelCard(
-                modifier = Modifier.clickable { onOpen(wr.id) },
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        "#${wr.id} ${wr.roleName}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = VoitosColors.Text,
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        wr.statusLabel.ifBlank { workRequestStatusLabel(wr.status) },
-                        color = workRequestStatusColor(wr.status),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    wr.assignedExecutorName?.let {
-                        Text("Мастер: $it", color = VoitosColors.Muted)
-                    }
-                    wr.assignedPhone?.takeIf { it.isNotBlank() }?.let {
-                        Text("Тел. мастера: $it", color = VoitosColors.Text)
-                    }
-                    if (wr.agreedSlot.isNotBlank()) {
-                        Text("Время: ${wr.agreedSlot}", color = VoitosColors.Muted)
-                    }
-                    Text(wr.description, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Text)
-                    Text(
-                        "Открыть подробности →",
-                        color = VoitosColors.Accent,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-
-                    if (wr.status == "scheduling") {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Согласуйте время с мастером",
-                            color = VoitosColors.Accent2,
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                        if (wr.proposedSlots.isNotEmpty()) {
-                            wr.proposedSlots.forEach { slot ->
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            loadingId = wr.id
-                                            error = null
-                                            try {
-                                                val res = client.confirmWorkRequestSlot(wr.id, slot)
-                                                message = res.message.ifBlank {
-                                                    "Время подтверждено — заявка в работе"
-                                                }
-                                                reload()
-                                            } catch (e: Exception) {
-                                                error = friendlyNetworkError(e)
-                                            } finally {
-                                                loadingId = null
-                                            }
-                                        }
-                                    },
-                                    enabled = loadingId != wr.id,
-                                ) { Text("Выбрать: $slot", color = VoitosColors.Accent2) }
+        if (!loading && activeItems.isNotEmpty()) {
+            item {
+                Text(
+                    "Активные",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = VoitosColors.Accent2,
+                )
+            }
+            items(activeItems, key = { "wr-a-${it.id}" }) { wr ->
+                ClientWorkRequestCard(
+                    wr = wr,
+                    cancellable = cancellable,
+                    loadingId = loadingId,
+                    onOpen = onOpen,
+                    onConfirm = onConfirm,
+                    onRate = onRate,
+                    onCancel = {
+                        scope.launch {
+                            loadingId = wr.id
+                            error = null
+                            try {
+                                client.cancelWorkRequest(wr.id)
+                                message = "Заявка #${wr.id} отменена"
+                                reload()
+                            } catch (e: Exception) {
+                                error = friendlyNetworkError(e)
+                            } finally {
+                                loadingId = null
                             }
-                        } else {
-                            Text(
-                                "Мастер ещё не прислал окна. Откройте заявку — там будут контакты мастера.",
-                                color = VoitosColors.Muted,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
                         }
-                    }
-
-                    if (wr.needsConfirmAmount || wr.status == "awaiting_client") {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Button(
-                            onClick = { onConfirm(wr.id) },
-                            colors = voitosPrimaryButtonColors(),
-                        ) { Text("Подтвердить сумму") }
-                    }
-
-                    if (wr.needsRating) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Button(
-                            onClick = { onRate(wr.id) },
-                            colors = voitosPrimaryButtonColors(),
-                        ) { Text("Оценить мастера") }
-                    }
-
-                    if (wr.status in cancellable) {
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    loadingId = wr.id
-                                    error = null
-                                    try {
-                                        client.cancelWorkRequest(wr.id)
-                                        message = "Заявка #${wr.id} отменена"
-                                        reload()
-                                    } catch (e: Exception) {
-                                        error = friendlyNetworkError(e)
-                                    } finally {
-                                        loadingId = null
-                                    }
+                    },
+                    onConfirmSlot = { slot ->
+                        scope.launch {
+                            loadingId = wr.id
+                            error = null
+                            try {
+                                val res = client.confirmWorkRequestSlot(wr.id, slot)
+                                message = res.message.ifBlank {
+                                    "Время подтверждено — заявка в работе"
                                 }
-                            },
-                            enabled = loadingId != wr.id,
-                        ) { Text("Отменить заявку", color = VoitosColors.Danger) }
-                    }
+                                reload()
+                            } catch (e: Exception) {
+                                error = friendlyNetworkError(e)
+                            } finally {
+                                loadingId = null
+                            }
+                        }
+                    },
+                )
+            }
+        }
+
+        if (!loading && archiveItems.isNotEmpty()) {
+            item {
+                TextButton(onClick = { archiveOpen = !archiveOpen }) {
+                    Text(
+                        if (archiveOpen) {
+                            "▾ Архив (${archiveItems.size})"
+                        } else {
+                            "▸ Архив (${archiveItems.size})"
+                        },
+                        color = VoitosColors.Muted,
+                    )
                 }
             }
+            if (archiveOpen) {
+                items(archiveItems, key = { "wr-z-${it.id}" }) { wr ->
+                    ClientWorkRequestCard(
+                        wr = wr,
+                        cancellable = emptySet(),
+                        loadingId = loadingId,
+                        onOpen = onOpen,
+                        onConfirm = onConfirm,
+                        onRate = onRate,
+                        onCancel = {},
+                        onConfirmSlot = {},
+                        compact = true,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClientWorkRequestCard(
+    wr: WorkRequestBrief,
+    cancellable: Set<String>,
+    loadingId: Int?,
+    onOpen: (Int) -> Unit,
+    onConfirm: (Int) -> Unit,
+    onRate: (Int) -> Unit,
+    onCancel: () -> Unit,
+    onConfirmSlot: (String) -> Unit,
+    compact: Boolean = false,
+) {
+    PanelCard(
+        modifier = Modifier.clickable { onOpen(wr.id) },
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "#${wr.id} ${wr.roleName}",
+                style = MaterialTheme.typography.titleMedium,
+                color = VoitosColors.Text,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                wr.statusLabel.ifBlank { workRequestStatusLabel(wr.status) },
+                color = workRequestStatusColor(wr.status),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            if (!compact) {
+                wr.assignedExecutorName?.let {
+                    Text("Мастер: $it", color = VoitosColors.Muted)
+                }
+                wr.assignedPhone?.takeIf { it.isNotBlank() }?.let {
+                    Text("Тел. мастера: $it", color = VoitosColors.Text)
+                }
+                if (wr.agreedSlot.isNotBlank()) {
+                    Text("Время: ${wr.agreedSlot}", color = VoitosColors.Muted)
+                }
+            }
+            Text(wr.description, style = MaterialTheme.typography.bodySmall, color = VoitosColors.Text)
+            Text(
+                "Открыть подробности →",
+                color = VoitosColors.Accent,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+
+            if (!compact && wr.status == "scheduling") {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Согласуйте время с мастером",
+                    color = VoitosColors.Accent2,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                if (wr.proposedSlots.isNotEmpty()) {
+                    wr.proposedSlots.forEach { slot ->
+                        TextButton(
+                            onClick = { onConfirmSlot(slot) },
+                            enabled = loadingId != wr.id,
+                        ) { Text("Выбрать: $slot", color = VoitosColors.Accent2) }
+                    }
+                } else {
+                    Text(
+                        "Мастер ещё не прислал окна. Откройте заявку — там будут контакты мастера.",
+                        color = VoitosColors.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            if (!compact && (wr.needsConfirmAmount || wr.status == "awaiting_client")) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(
+                    onClick = { onConfirm(wr.id) },
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Указать оплату по заказу") }
+            }
+
+            if (!compact && wr.needsRating) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(
+                    onClick = { onRate(wr.id) },
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Оценить мастера") }
+            }
+
+            if (!compact && wr.status in cancellable) {
+                TextButton(
+                    onClick = onCancel,
+                    enabled = loadingId != wr.id,
+                ) { Text("Отменить заявку", color = VoitosColors.Danger) }
             }
         }
     }
@@ -760,7 +830,7 @@ private fun workRequestStatusLabel(status: String): String = when (status) {
     "scheduling" -> "Согласование времени"
     "in_progress" -> "В работе"
     "awaiting_client" -> "Ждём подтверждения"
-    "awaiting_commission" -> "Ждём комиссию"
+    "awaiting_commission" -> "Ждём комиссию от мастера в 10%"
     "done" -> "Выполнена"
     "cancelled" -> "Отменена"
     else -> status
@@ -828,7 +898,7 @@ fun ConfirmAmountScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
             colors = voitosPrimaryButtonColors(),
-        ) { Text("Сумма как у мастера") }
+        ) { Text("Оплатил мастеру") }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = amount,
