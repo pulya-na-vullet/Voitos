@@ -37,7 +37,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
@@ -72,6 +74,7 @@ fun CabinetScreen(
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var uploadingAvatar by remember { mutableStateOf(false) }
+    var previewAvatar by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -117,6 +120,14 @@ fun CabinetScreen(
         }
     }
 
+    if (previewAvatar) {
+        AvatarPreviewDialog(
+            url = me?.avatarUrl.orEmpty(),
+            name = me?.realName.orEmpty(),
+            onDismiss = { previewAvatar = false },
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -128,13 +139,33 @@ fun CabinetScreen(
                 url = me?.avatarUrl.orEmpty(),
                 name = me?.realName.orEmpty(),
                 uploading = uploadingAvatar,
-                onClick = { avatarPicker.launch("image/*") },
+                onClick = { previewAvatar = true },
             )
+            Spacer(modifier = Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .border(1.dp, VoitosColors.Line, CircleShape)
+                    .background(VoitosColors.BgSoft)
+                    .clickable(enabled = !uploadingAvatar) { avatarPicker.launch("image/*") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "✎",
+                    color = if (uploadingAvatar) VoitosColors.Muted else VoitosColors.Accent2,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text("Личный кабинет", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
                 Text(
-                    if (uploadingAvatar) "Загрузка…" else "Нажмите фото · 500×500",
+                    when {
+                        uploadingAvatar -> "Загрузка…"
+                        me?.avatarUrl.isNullOrBlank() -> "Карандаш — добавить фото"
+                        else -> "Нажмите фото для просмотра"
+                    },
                     color = VoitosColors.Muted,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -402,6 +433,66 @@ private fun CabinetAvatarButton(
             )
         } else {
             Text(letter, color = VoitosColors.Accent2, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun AvatarPreviewDialog(
+    url: String,
+    name: String,
+    onDismiss: () -> Unit,
+) {
+    val letter = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "В"
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(VoitosColors.Panel)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                name.ifBlank { "Фото профиля" },
+                color = VoitosColors.Text,
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(VoitosColors.BgSoft)
+                    .border(1.dp, VoitosColors.Line, RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (url.isNotBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(url)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Аватар крупно",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(280.dp),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Text(
+                        letter,
+                        color = VoitosColors.Accent2,
+                        style = MaterialTheme.typography.displayMedium,
+                        modifier = Modifier.padding(48.dp),
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть", color = VoitosColors.Accent2)
+            }
         }
     }
 }
