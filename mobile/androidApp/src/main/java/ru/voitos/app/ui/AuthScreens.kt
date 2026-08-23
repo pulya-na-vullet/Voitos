@@ -995,7 +995,8 @@ fun ForceUpdateScreen(
                     TextButton(
                         onClick = {
                             runCatching {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+                                val openUrl = ApkUpdater.normalizeApkUrl(apkUrl)
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(openUrl)))
                             }
                         },
                     ) {
