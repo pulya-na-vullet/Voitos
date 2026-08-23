@@ -1730,7 +1730,7 @@ def group_messages(request, group_id: int):
         return json_response({"error": str(exc), "detail": str(exc)}, status=403)
 
     if request.method == "GET":
-        from services.group_chat import collection_payment_overlay
+        from services.group_chat import attach_payment_dots, collection_payment_overlay
 
         after_raw = (request.GET.get("after_id") or "").strip()
         before_raw = (request.GET.get("before_id") or "").strip()
@@ -1753,6 +1753,7 @@ def group_messages(request, group_id: int):
                     **overlay,
                 }
             )
+        attach_payment_dots(items, overlay.get("author_paid") or {})
         # Открытие/опрос ленты без after_id — помечаем прочитанным
         if after_id is None and before_id is None and items:
             mark_group_read(

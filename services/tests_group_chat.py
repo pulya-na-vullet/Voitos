@@ -211,6 +211,67 @@ class GroupChatAndAvatarTests(TestCase):
         self.assertEqual(body["author_paid"][str(self.user.id)], [True])
         self.assertEqual(body["author_paid"][str(dependent.id)], [True])
         self.assertEqual(body["author_paid"][str(self.other.id)], [False])
+        dep_msg = next(m for m in body["items"] if m["author_id"] == dependent.id)
+        self.assertEqual(dep_msg.get("payment_dots"), [True])
+
+    def test_family_dots_one_of_four_covers_two_dependents(self):
+        """Родитель оплатил 1 из 4 — у двух иждивенцев тот же паттерн кружков."""
+        dep1 = BotUser.objects.create(
+            max_user_id="chat-dep-a",
+            real_name="Ребёнок А",
+            phone="9625507211",
+            chat_id="c-chat-dep-a",
+            family_payer=self.user,
+        )
+        dep2 = BotUser.objects.create(
+            max_user_id="chat-dep-b",
+            real_name="Ребёнок Б",
+            phone="9625507212",
+            chat_id="c-chat-dep-b",
+            family_payer=self.user,
+        )
+        self.g1.members.add(dep1, dep2)
+
+        camps = []
+        for i, title in enumerate(("Снег", "Дорога", "Свет", "Мусор"), start=1):
+            camps.append(
+                ServiceCampaign.objects.create(
+                    category=ServiceCategory.SNOW,
+                    title=title,
+                    group=self.g1,
+                    total_amount=Decimal("4000"),
+                    amount_per_user=Decimal("1000"),
+                    status=CampaignStatus.ACTIVE,
+                )
+            )
+        # Небольшая пауза не нужна: порядок = created_at, id.
+        for camp in camps:
+            for u in (self.user, dep1, dep2, self.other):
+                ServiceInvite.objects.create(
+                    campaign=camp,
+                    user=u,
+                    amount_due=Decimal("1000"),
+                    status=InviteStatus.OFFERED,
+                )
+        paid = camps[0].invites.get(user=self.user)
+        paid.status = InviteStatus.PAID
+        paid.amount_paid = Decimal("1000")
+        paid.save(update_fields=["status", "amount_paid"])
+
+        GroupChatMessage.objects.create(group=self.g1, author=dep1, text="я первый")
+        GroupChatMessage.objects.create(group=self.g1, author=dep2, text="я второй")
+
+        body = self.client.get(
+            f"/api/v1/groups/{self.g1.id}/messages", **self._auth()
+        ).json()
+        expected = [True, False, False, False]
+        self.assertEqual(body["author_paid"][str(self.user.id)], expected)
+        self.assertEqual(body["author_paid"][str(dep1.id)], expected)
+        self.assertEqual(body["author_paid"][str(dep2.id)], expected)
+        self.assertEqual(body["author_paid"][str(self.other.id)], [False, False, False, False])
+        for mid in (dep1.id, dep2.id):
+            row = next(m for m in body["items"] if m["author_id"] == mid)
+            self.assertEqual(row.get("payment_dots"), expected)
 
     def test_foreign_group_forbidden(self):
         g3 = ServiceGroup.objects.create(name="Чужая")

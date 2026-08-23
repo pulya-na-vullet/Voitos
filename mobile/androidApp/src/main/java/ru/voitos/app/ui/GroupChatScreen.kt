@@ -272,7 +272,9 @@ fun GroupChatScreen(
                     }
                 }
                 items(messages, key = { it.id }) { msg ->
-                    val dots = msg.authorId?.let { authorPaid[it.toString()] }.orEmpty()
+                    val dots = msg.paymentDots.ifEmpty {
+                        msg.authorId?.let { authorPaid[it.toString()] }.orEmpty()
+                    }
                     ChatBubble(msg, paymentDots = dots)
                 }
             }

@@ -40,65 +40,105 @@ def active_collections_for_group(group: ServiceGroup) -> list[ServiceCampaign]:
     )
 
 
+def _household_root(uid: int, family_payer_by_id: dict[int, int | None]) -> int:
+    """Корень домохозяйства: family_payer, иначе сам пользователь."""
+    payer = family_payer_by_id.get(int(uid))
+    return int(payer) if payer else int(uid)
+
+
+def _family_payer_map_for_group(group: ServiceGroup) -> dict[int, int | None]:
+    """
+    id → family_payer_id для участников группы и связанных членов семьи.
+
+    values() вместо only() — стабильно тянет FK даже через M2M.
+    """
+    member_rows = list(group.members.values("id", "family_payer_id"))
+    member_ids = {int(r["id"]) for r in member_rows}
+    payer_ids = {
+        int(r["family_payer_id"]) for r in member_rows if r.get("family_payer_id")
+    }
+    # Иждивенцы участников (на случай, если кто-то из семьи ещё не в members,
+    # но уже оплатил / нужен для корня).
+    dep_rows = list(
+        BotUser.objects.filter(family_payer_id__in=member_ids).values(
+            "id", "family_payer_id"
+        )
+    ) if member_ids else []
+    payer_rows = list(
+        BotUser.objects.filter(id__in=payer_ids).values("id", "family_payer_id")
+    ) if payer_ids else []
+
+    family_payer_by_id: dict[int, int | None] = {}
+    for row in (*member_rows, *dep_rows, *payer_rows):
+        uid = int(row["id"])
+        fp = row.get("family_payer_id")
+        family_payer_by_id[uid] = int(fp) if fp else None
+    return family_payer_by_id
+
+
 def author_paid_map(group: ServiceGroup, campaigns: list[ServiceCampaign] | None = None) -> dict[str, list[bool]]:
     """
     author_id → список bool по активным сборам (True = семья/участник оплатил).
 
-    Оплата считается по домохозяйству: если плательщик (родитель) оплатил сбор,
-    у иждивенцев в чате тоже зелёные кружки — «семья оплатила».
+    Оплата по домохозяйству: если родитель (family_payer) или любой член семьи
+    оплатил сбор — у всех из этой семьи в чате зелёный кружок.
     """
     if campaigns is None:
         campaigns = active_collections_for_group(group)
     if not campaigns:
         return {}
 
-    campaign_ids = [c.id for c in campaigns]
+    campaign_ids = [int(c.id) for c in campaigns]
     paid_user_ids_by_campaign: dict[int, set[int]] = {cid: set() for cid in campaign_ids}
     for uid, cid in ServiceInvite.objects.filter(
         campaign_id__in=campaign_ids,
         status=InviteStatus.PAID,
     ).values_list("user_id", "campaign_id"):
-        paid_user_ids_by_campaign.setdefault(cid, set()).add(int(uid))
+        paid_user_ids_by_campaign.setdefault(int(cid), set()).add(int(uid))
 
-    members = list(group.members.only("id", "family_payer_id"))
-    # Корень семьи → участники группы из этой семьи.
-    household_members: dict[int, set[int]] = {}
-    member_root: dict[int, int] = {}
-    for m in members:
-        root = int(m.family_payer_id) if m.family_payer_id else int(m.id)
-        member_root[int(m.id)] = root
-        household_members.setdefault(root, set()).add(int(m.id))
+    family_payer_by_id = _family_payer_map_for_group(group)
+    member_ids = set(group.members.values_list("id", flat=True))
+    # Догрузим family_payer для тех, кто оплатил, но ещё не в карте.
+    missing_paid = {
+        uid
+        for paid in paid_user_ids_by_campaign.values()
+        for uid in paid
+        if uid not in family_payer_by_id
+    }
+    if missing_paid:
+        for row in BotUser.objects.filter(id__in=missing_paid).values(
+            "id", "family_payer_id"
+        ):
+            fp = row.get("family_payer_id")
+            family_payer_by_id[int(row["id"])] = int(fp) if fp else None
 
-    # Для каждого сбора: корни семей, у которых кто-то из семьи (в т.ч. родитель) оплатил.
     paid_roots_by_campaign: dict[int, set[int]] = {cid: set() for cid in campaign_ids}
     for cid, paid_uids in paid_user_ids_by_campaign.items():
-        roots: set[int] = set()
-        for uid in paid_uids:
-            if uid in member_root:
-                roots.add(member_root[uid])
-            else:
-                # Плательщик мог оплатить, не будучи в members prefetch — подтянем корень.
-                payer = BotUser.objects.filter(pk=uid).only("id", "family_payer_id").first()
-                if payer is not None:
-                    roots.add(
-                        int(payer.family_payer_id)
-                        if payer.family_payer_id
-                        else int(payer.id)
-                    )
-                else:
-                    roots.add(int(uid))
-        paid_roots_by_campaign[cid] = roots
+        paid_roots_by_campaign[cid] = {
+            _household_root(uid, family_payer_by_id) for uid in paid_uids
+        }
 
     result: dict[str, list[bool]] = {}
-    for m in members:
-        uid = int(m.id)
-        root = member_root[uid]
+    for uid in member_ids:
+        uid = int(uid)
+        root = _household_root(uid, family_payer_by_id)
         result[str(uid)] = [
             root in paid_roots_by_campaign.get(cid, set())
             or uid in paid_user_ids_by_campaign.get(cid, set())
             for cid in campaign_ids
         ]
     return result
+
+
+def attach_payment_dots(items: list[dict], author_paid: dict[str, list[bool]]) -> list[dict]:
+    """Проставить payment_dots на каждое сообщение (дубль author_paid для клиента)."""
+    for item in items:
+        aid = item.get("author_id")
+        if aid is None:
+            item["payment_dots"] = []
+        else:
+            item["payment_dots"] = list(author_paid.get(str(aid), []))
+    return items
 
 
 def collection_payment_overlay(group: ServiceGroup) -> dict:
