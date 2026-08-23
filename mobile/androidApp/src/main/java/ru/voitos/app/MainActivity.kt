@@ -82,6 +82,12 @@ class MainActivity : ComponentActivity() {
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
+    /** Бэкенд вернул 426 — показать hard update (apkUrl в payload). */
+    private val forceUpdateEvents = MutableSharedFlow<String>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
     /**
      * Актуальный обработчик «назад» из Compose. Activity-callback нужен, потому что
      * жестовый свайп при predictive back часто не доходит до Compose BackHandler.
@@ -91,7 +97,8 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val IDLE_LOGOUT_MS = 15 * 60 * 1000L
         private const val IDLE_CHECK_EVERY_MS = 15_000L
-        private const val VERSION_POLL_EVERY_MS = 30_000L
+        private const val VERSION_POLL_EVERY_MS = 8_000L
+        private const val VERSION_POLL_FIRST_MS = 1_500L
     }
 
     private fun newApiClient(baseUrl: String, token: String?): VoitosApiClient =
@@ -99,6 +106,7 @@ class MainActivity : ComponentActivity() {
             api.appVersionCode = AppVersion.code
             api.accessToken = token
             api.onUnauthorized = { sessionExpired.tryEmit(Unit) }
+            api.onUpdateRequired = { apk -> forceUpdateEvents.tryEmit(apk) }
         }
 
     private sealed class Screen {
@@ -254,13 +262,27 @@ class MainActivity : ComponentActivity() {
                     sessionExpired.collect { logoutToLogin() }
                 }
 
+                // 426 с любого API → ForceUpdate (Meizu и др., где health-poll мог не сработать).
+                LaunchedEffect(Unit) {
+                    forceUpdateEvents.collect { apk ->
+                        goForceUpdate(apkUrl = apk)
+                    }
+                }
+
                 // Пока сессия жива — периодически сверяем min version с бэком (не только при старте).
                 LaunchedEffect(screen, client.accessToken) {
                     val activeSession = !client.accessToken.isNullOrBlank() &&
                         screen !is Screen.Login &&
                         screen !is Screen.ForceUpdate
                     if (!activeSession) return@LaunchedEffect
+                    var first = true
                     while (true) {
+                        if (first) {
+                            delay(VERSION_POLL_FIRST_MS)
+                            first = false
+                        } else {
+                            delay(VERSION_POLL_EVERY_MS)
+                        }
                         val health = runCatching {
                             client.healthCheck(AppVersion.code)
                         }.getOrNull()
@@ -276,7 +298,6 @@ class MainActivity : ComponentActivity() {
                                 break
                             }
                         }
-                        delay(VERSION_POLL_EVERY_MS)
                     }
                 }
 
@@ -427,10 +448,17 @@ class MainActivity : ComponentActivity() {
                                     }
                                     if (health == null) {
                                         val cfg = runCatching { client.authConfig() }.getOrNull()
-                                        if (cfg != null && cfg.minAppVersionCode > AppVersion.code) {
+                                        if (cfg != null && (
+                                                cfg.updateRequired ||
+                                                    (cfg.minAppVersionCode > 0 &&
+                                                        AppVersion.code < cfg.minAppVersionCode)
+                                                )
+                                        ) {
                                             goForceUpdate(apkUrl = cfg.apkUrl)
                                             return@LaunchedEffect
                                         }
+                                        // Health недоступен — me() при 426 триггерит onUpdateRequired.
+                                        runCatching { client.me() }
                                     } else if (appNeedsUpdate(health)) {
                                         goForceUpdate(apkUrl = health?.apkUrl.orEmpty())
                                         return@LaunchedEffect

@@ -48,6 +48,7 @@ data class AuthConfig(
     @SerialName("latest_app_version_name") val latestAppVersionName: String = "",
     @SerialName("apk_url") val apkUrl: String = "",
     @SerialName("update_message") val updateMessage: String = "",
+    @SerialName("update_required") val updateRequired: Boolean = false,
 )
 
 @Serializable
@@ -65,11 +66,17 @@ data class OkResponse(
 data class ApiErrorBody(
     val error: String = "",
     val detail: String = "",
+    @SerialName("update_required") val updateRequired: Boolean = false,
+    @SerialName("min_app_version_code") val minAppVersionCode: Int = 0,
+    @SerialName("apk_url") val apkUrl: String = "",
+    @SerialName("update_message") val updateMessage: String = "",
+    @SerialName("latest_app_version_name") val latestAppVersionName: String = "",
 )
 
 class ApiException(
     val code: String,
     override val message: String,
+    val apkUrl: String = "",
 ) : Exception(message)
 
 @Serializable

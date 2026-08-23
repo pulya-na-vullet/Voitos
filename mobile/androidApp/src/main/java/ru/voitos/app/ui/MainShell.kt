@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -119,7 +121,11 @@ fun MainShell(
     var splashRunning by remember { mutableStateOf(playLogoSplash) }
     var showCabinetLabel by remember { mutableStateOf(!playLogoSplash) }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
         val screenW = constraints.maxWidth.toFloat()
         val screenH = constraints.maxHeight.toFloat()
 
@@ -184,6 +190,7 @@ private fun BottomNavBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(VoitosColors.Accent2.copy(alpha = 0.14f))
+            .navigationBarsPadding()
             .padding(horizontal = 2.dp, vertical = 8.dp)
             .height(64.dp),
         verticalAlignment = Alignment.CenterVertically,
