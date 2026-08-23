@@ -203,12 +203,16 @@ data class WorkRequestDetail(
     val description: String = "",
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("updated_at") val updatedAt: String = "",
+    /** client | executor — кто открыл карточку. */
+    val viewer: String = "client",
     @SerialName("assigned_executor_name") val assignedExecutorName: String? = null,
     @SerialName("assigned_name") val assignedName: String? = null,
     @SerialName("assigned_phone") val assignedPhone: String? = null,
     @SerialName("assigned_max_username") val assignedMaxUsername: String? = null,
     @SerialName("assigned_max_link") val assignedMaxLink: String? = null,
     @SerialName("assigned_contacts") val assignedContacts: List<String> = emptyList(),
+    @SerialName("client_name") val clientName: String? = null,
+    @SerialName("client_phone") val clientPhone: String? = null,
     @SerialName("role_accepts_at_home") val roleAcceptsAtHome: Boolean = false,
     @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
     @SerialName("agreed_slot") val agreedSlot: String = "",
@@ -548,6 +552,26 @@ data class ProposeSlotsResult(
     @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
     val detail: String = "",
     val error: String = "",
+)
+
+@Serializable
+data class ExecutorScheduleEvent(
+    @SerialName("work_request_id") val workRequestId: Int = 0,
+    @SerialName("role_name") val roleName: String = "",
+    @SerialName("client_name") val clientName: String = "",
+    val status: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    val label: String = "",
+    @SerialName("start_at") val startAt: String = "",
+    @SerialName("end_at") val endAt: String = "",
+    val day: String = "",
+)
+
+@Serializable
+data class ExecutorScheduleResponse(
+    @SerialName("week_start") val weekStart: String = "",
+    @SerialName("week_end") val weekEnd: String = "",
+    val items: List<ExecutorScheduleEvent> = emptyList(),
 )
 
 @Serializable

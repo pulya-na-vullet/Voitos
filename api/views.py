@@ -444,6 +444,81 @@ def executor_jobs(request):
 
 
 @api_login_required
+@require_GET
+def executor_schedule(request):
+    """Недельный график мастера: согласованные визиты."""
+    from datetime import datetime, timedelta
+
+    from django.utils import timezone as dj_tz
+    from django.utils.dateparse import parse_date
+
+    from database.models import WorkRequestStatus
+    from services.work_request_schedule import parse_slot_datetime_range
+
+    week_raw = (request.GET.get("week_start") or "").strip()
+    now = dj_tz.localtime(dj_tz.now())
+    if week_raw:
+        d0 = parse_date(week_raw)
+        if d0 is None:
+            return json_response({"error": "bad_week_start"}, status=400)
+        week_start = now.replace(
+            year=d0.year, month=d0.month, day=d0.day,
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+    else:
+        # Понедельник текущей недели
+        week_start = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+    week_end = week_start + timedelta(days=7)
+
+    active = {
+        WorkRequestStatus.IN_PROGRESS,
+        WorkRequestStatus.AWAITING_CLIENT,
+        WorkRequestStatus.AWAITING_COMMISSION,
+        WorkRequestStatus.SCHEDULING,
+    }
+    qs = (
+        WorkRequest.objects.filter(
+            assigned_contractor__user=request.bot_user,
+            status__in=active,
+        )
+        .exclude(agreed_slot="")
+        .select_related("role", "user")
+        .order_by("id")[:200]
+    )
+    events = []
+    for wr in qs:
+        parsed = parse_slot_datetime_range(wr.agreed_slot or "", ref_now=now)
+        if not parsed:
+            continue
+        start, end = parsed
+        if end < week_start or start >= week_end:
+            continue
+        events.append(
+            {
+                "work_request_id": wr.id,
+                "role_name": wr.role.name if wr.role_id else "",
+                "client_name": str(wr.user),
+                "status": wr.status,
+                "status_label": wr.get_status_display(),
+                "label": wr.agreed_slot or "",
+                "start_at": start.isoformat(),
+                "end_at": end.isoformat(),
+                "day": start.date().isoformat(),
+            }
+        )
+    events.sort(key=lambda e: e["start_at"])
+    return json_response(
+        {
+            "week_start": week_start.date().isoformat(),
+            "week_end": (week_end - timedelta(days=1)).date().isoformat(),
+            "items": events,
+        }
+    )
+
+
+@api_login_required
 @require_http_methods(["POST"])
 def work_request_propose_slots(request, pk: int):
     """Мастер предлагает окна клиенту из приложения."""
@@ -591,10 +666,17 @@ def work_request_detail(request, pk: int):
             "role", "assigned_contractor", "assigned_contractor__user", "user"
         )
         .prefetch_related("photos")
-        .filter(pk=pk, user=request.bot_user)
+        .filter(pk=pk)
         .first()
     )
     if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    is_client = wr.user_id == request.bot_user.id
+    is_executor = (
+        wr.assigned_contractor_id
+        and wr.assigned_contractor.user_id == request.bot_user.id
+    )
+    if not (is_client or is_executor):
         return json_response({"error": "not_found"}, status=404)
     from services.work_request_rating import work_request_needs_rating
 
@@ -605,15 +687,22 @@ def work_request_detail(request, pk: int):
     photo_urls = _work_request_photo_urls(request, wr)
     contacts = _executor_contacts_payload(contractor)
     payload = _work_request_brief(wr)
+    slots = _slot_labels(wr)
     payload.update(
         {
+            "viewer": "executor" if is_executor and not is_client else "client",
             "assigned_name": str(contractor) if contractor else None,
             "assigned_phone": contacts.get("assigned_phone"),
             "assigned_max_username": contacts.get("assigned_max_username"),
             "assigned_max_link": contacts.get("assigned_max_link"),
             "assigned_contacts": contacts.get("assigned_contacts") or [],
-            "needs_rating": work_request_needs_rating(wr),
-            "needs_photos": requires_photos and wr.status == "draft",
+            "client_name": str(wr.user),
+            "client_phone": (wr.user.phone or "").strip() or None,
+            # Действия клиента — только владельцу заявки.
+            "can_confirm_slot": is_client and wr.status == "scheduling" and bool(slots),
+            "needs_confirm_amount": is_client and wr.status == "awaiting_client",
+            "needs_rating": work_request_needs_rating(wr) if is_client else False,
+            "needs_photos": requires_photos and wr.status == "draft" and is_client,
             "photo_count": len(photo_urls),
             "photo_urls": photo_urls,
             "client_locality": (wr.client_locality or "").strip()

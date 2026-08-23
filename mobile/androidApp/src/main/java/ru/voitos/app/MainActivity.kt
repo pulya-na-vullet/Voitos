@@ -114,7 +114,10 @@ class MainActivity : ComponentActivity() {
         data object Main : Screen()
         data class CollectionDetail(val id: Int) : Screen()
         data class WorkRequestPhotos(val id: Int) : Screen()
-        data class WorkRequestDetail(val id: Int) : Screen()
+        data class WorkRequestDetail(
+            val id: Int,
+            val returnTab: MainTab = MainTab.WorkRequests,
+        ) : Screen()
         data object Subscription : Screen()
         /** Подписка закрыта — только загрузка чека. */
         data object Paywall : Screen()
@@ -302,7 +305,8 @@ class MainActivity : ComponentActivity() {
                         Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister, Screen.ChangePin, Screen.Wish ->
                             goMain(MainTab.Cabinet)
                         is Screen.WorkRequestPhotos -> goMain(MainTab.CallMaster)
-                        is Screen.WorkRequestDetail, is Screen.Confirm, is Screen.Rate -> goMain(MainTab.WorkRequests)
+                        is Screen.WorkRequestDetail -> goMain(current.returnTab)
+                        is Screen.Confirm, is Screen.Rate -> goMain(MainTab.WorkRequests)
                     }
                 }
 
@@ -562,6 +566,12 @@ class MainActivity : ComponentActivity() {
                                         MainTab.Work -> ExecutorOffersScreen(
                                             client = client,
                                             onBack = null,
+                                            onOpenWorkRequest = { id ->
+                                                screen = Screen.WorkRequestDetail(
+                                                    id = id,
+                                                    returnTab = MainTab.Work,
+                                                )
+                                            },
                                         )
                                     }
                                 }
@@ -607,7 +617,7 @@ class MainActivity : ComponentActivity() {
                                 client = client,
                                 workRequestId = s.id,
                                 onBack = {
-                                    tab = MainTab.WorkRequests
+                                    tab = s.returnTab
                                     screen = Screen.Main
                                 },
                                 onConfirmAmount = { id -> screen = Screen.Confirm(id) },
