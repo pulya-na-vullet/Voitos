@@ -7,6 +7,25 @@ from django.conf import settings
 from database.models import AppSettings
 
 
+def _normalize_apk_url(url: str) -> str:
+    """github.com/.../raw/... → raw.githubusercontent.com (без HTML-редиректа)."""
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    prefix = "https://github.com/"
+    marker = "/raw/"
+    if raw.startswith(prefix) and marker in raw:
+        rest = raw[len(prefix) :]
+        owner_repo, _, path = rest.partition(marker)
+        parts = owner_repo.split("/")
+        if len(parts) >= 2 and path:
+            owner, repo = parts[0], parts[1]
+            return f"https://raw.githubusercontent.com/{owner}/{repo}/{path}"
+    if raw.startswith("http://github.com/") and marker in raw:
+        return _normalize_apk_url("https://" + raw[len("http://") :])
+    return raw
+
+
 def mobile_version_payload() -> dict:
     cfg = AppSettings.load()
     settings_min = int(getattr(settings, "MOBILE_MIN_VERSION_CODE", 1) or 1)
@@ -28,11 +47,16 @@ def mobile_version_payload() -> dict:
     if not latest_name:
         latest_name = str(getattr(settings, "MOBILE_LATEST_VERSION_NAME", "") or "")
 
-    apk_url = (
-        getattr(cfg, "mobile_apk_url", None)
-        or getattr(settings, "MOBILE_APK_URL", "")
-        or ""
-    ).strip()
+    cfg_url = (getattr(cfg, "mobile_apk_url", None) or "").strip()
+    settings_url = (getattr(settings, "MOBILE_APK_URL", "") or "").strip()
+    # Если код на сервере новее записи в панели — берём URL из settings,
+    # иначе клиент качает старый APK и снова упирается в ForceUpdate.
+    if settings_latest > cfg_latest and settings_url:
+        apk_url = settings_url
+    else:
+        apk_url = cfg_url or settings_url
+    apk_url = _normalize_apk_url(apk_url)
+
     backend_version = str(getattr(settings, "VOITOS_BACKEND_VERSION", "") or "").strip()
     return {
         "backend_version": backend_version,

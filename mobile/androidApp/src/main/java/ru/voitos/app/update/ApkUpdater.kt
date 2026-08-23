@@ -57,6 +57,35 @@ object ApkUpdater {
     }
 
     /**
+     * github.com/owner/repo/raw/branch/path → raw.githubusercontent.com/owner/repo/branch/path
+     * (часть прошивок/прокси ломается на HTML-редиректе GitHub).
+     */
+    fun normalizeApkUrl(apkUrl: String): String {
+        val raw = apkUrl.trim()
+        if (raw.isEmpty()) return raw
+        val https = if (raw.startsWith("http://github.com/", ignoreCase = true)) {
+            "https://" + raw.removePrefix("http://")
+        } else {
+            raw
+        }
+        val prefix = "https://github.com/"
+        val marker = "/raw/"
+        if (https.startsWith(prefix, ignoreCase = true) && marker in https) {
+            val rest = https.substring(prefix.length)
+            val idx = rest.indexOf(marker)
+            if (idx > 0) {
+                val ownerRepo = rest.substring(0, idx)
+                val path = rest.substring(idx + marker.length)
+                val parts = ownerRepo.split('/')
+                if (parts.size >= 2 && path.isNotBlank()) {
+                    return "https://raw.githubusercontent.com/${parts[0]}/${parts[1]}/$path"
+                }
+            }
+        }
+        return https
+    }
+
+    /**
      * @param onProgress progress 0f..1f; totalBytes может быть -1, если сервер не отдал Content-Length
      */
     suspend fun download(
@@ -64,7 +93,7 @@ object ApkUpdater {
         apkUrl: String,
         onProgress: (downloaded: Long, total: Long) -> Unit,
     ): File = withContext(Dispatchers.IO) {
-        val url = apkUrl.trim()
+        val url = normalizeApkUrl(apkUrl)
         require(url.isNotEmpty()) { "Нет ссылки на APK" }
 
         val target = apkFile(context)
@@ -74,7 +103,8 @@ object ApkUpdater {
 
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "Voitos-Android-Updater")
+            .header("User-Agent", "Voitos-Android/Updater")
+            .header("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*")
             .get()
             .build()
 
@@ -99,9 +129,18 @@ object ApkUpdater {
                     output.flush()
                 }
             }
-            if (downloaded <= 0L) {
+            if (downloaded <= 1024L) {
                 partial.delete()
-                throw IllegalStateException("Файл обновления пустой")
+                throw IllegalStateException("Файл обновления пустой или повреждён")
+            }
+            // APK = ZIP: первые байты «PK»
+            val header = ByteArray(2)
+            partial.inputStream().use { it.read(header) }
+            if (header[0] != 'P'.code.toByte() || header[1] != 'K'.code.toByte()) {
+                partial.delete()
+                throw IllegalStateException(
+                    "Скачался не APK (проверьте ссылку обновления на сервере)",
+                )
             }
             if (!partial.renameTo(target)) {
                 partial.copyTo(target, overwrite = true)
