@@ -46,7 +46,7 @@ MASTER_COMMISSION_BLOCK_MSG = (
 _SLOT_MINUTES = 60
 _DAY_START_HOUR = 9
 _DAY_END_HOUR = 18
-_BOOKING_HORIZON_DAYS = 14
+_BOOKING_HORIZON_DAYS = 2
 
 
 def role_is_dispatch_only(role) -> bool:
@@ -202,7 +202,7 @@ def list_masters_for_role(role, client_user: BotUser) -> list[dict]:
         blocked = contractor_blocked_for_commission(c)
         free_count = 0
         if not blocked:
-            free_count = len(free_slots_for_contractor(c, days=7))
+            free_count = len(free_slots_for_contractor(c, days=_BOOKING_HORIZON_DAYS))
         items.append(
             {
                 "contractor_id": c.id,

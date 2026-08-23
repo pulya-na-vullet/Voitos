@@ -1074,6 +1074,7 @@ fun NewWorkRequestScreen(
     var freeSlots by remember { mutableStateOf<List<ru.voitos.app.model.FreeSlotBrief>>(emptyList()) }
     var slotsLoading by remember { mutableStateOf(false) }
     var selectedSlot by remember { mutableStateOf<String?>(null) }
+    var slotsExpanded by remember { mutableStateOf(false) }
     var masterBlockMessage by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -1091,6 +1092,7 @@ fun NewWorkRequestScreen(
     LaunchedEffect(selectedId) {
         selectedMasterId = null
         selectedSlot = null
+        slotsExpanded = false
         freeSlots = emptyList()
         masterBlockMessage = null
         masters = emptyList()
@@ -1109,6 +1111,7 @@ fun NewWorkRequestScreen(
 
     LaunchedEffect(selectedMasterId) {
         selectedSlot = null
+        slotsExpanded = false
         freeSlots = emptyList()
         masterBlockMessage = null
         val mid = selectedMasterId ?: return@LaunchedEffect
@@ -1121,7 +1124,7 @@ fun NewWorkRequestScreen(
         }
         slotsLoading = true
         try {
-            val res = client.contractorFreeSlots(mid, days = 14)
+            val res = client.contractorFreeSlots(mid, days = 2)
             if (!res.canAccept) {
                 masterBlockMessage = res.blockedMessage.ifBlank {
                     "Мастер пока не может принять ваш заказ — сначала нужно оплатить комиссию по прошлому заказу."
@@ -1129,6 +1132,8 @@ fun NewWorkRequestScreen(
                 freeSlots = emptyList()
             } else {
                 freeSlots = res.items
+                // Пока слот не выбран — сразу открываем список на 2 дня.
+                slotsExpanded = freeSlots.isNotEmpty()
             }
         } catch (e: Exception) {
             error = friendlyNetworkError(e)
@@ -1211,12 +1216,21 @@ fun NewWorkRequestScreen(
 
             if (selectedMasterId != null && masterBlockMessage == null) {
                 Spacer(modifier = Modifier.height(12.dp))
-                Text("Время", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+                Text(
+                    "Время",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = VoitosColors.Text,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = freeSlots.isNotEmpty() && !slotsLoading) {
+                            slotsExpanded = !slotsExpanded
+                        },
+                )
                 Spacer(modifier = Modifier.height(6.dp))
                 when {
                     slotsLoading -> VoitosListSkeleton(rows = 2)
-                    freeSlots.isEmpty() -> Text("Нет свободных окон", color = VoitosColors.Muted)
-                    else -> {
+                    freeSlots.isEmpty() -> Text("Нет свободных окон на ближайшие 2 дня", color = VoitosColors.Muted)
+                    slotsExpanded -> {
                         freeSlots.groupBy { it.day }.forEach { (day, daySlots) ->
                             Text(
                                 day,
@@ -1227,12 +1241,39 @@ fun NewWorkRequestScreen(
                             daySlots.forEach { slot ->
                                 val on = selectedSlot == slot.label
                                 Button(
-                                    onClick = { selectedSlot = slot.label },
+                                    onClick = {
+                                        selectedSlot = slot.label
+                                        slotsExpanded = false
+                                    },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = if (on) voitosPrimaryButtonColors() else voitosSecondaryButtonColors(),
                                 ) { Text(slot.label) }
                                 Spacer(modifier = Modifier.height(4.dp))
                             }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(
+                            onClick = { slotsExpanded = false },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Свернуть список") }
+                    }
+                    else -> {
+                        if (!selectedSlot.isNullOrBlank()) {
+                            Text(
+                                "Вы выбрали:\n$selectedSlot",
+                                color = VoitosColors.Ok,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            TextButton(
+                                onClick = { slotsExpanded = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Изменить время") }
+                        } else {
+                            TextButton(
+                                onClick = { slotsExpanded = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Выбрать время") }
                         }
                     }
                 }

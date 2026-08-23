@@ -517,7 +517,7 @@ class VoitosApiClient(
     suspend fun roleMasters(roleId: Int): RoleMastersResponse =
         authedGet("/executor-roles/$roleId/masters")
 
-    suspend fun contractorFreeSlots(contractorId: Int, days: Int = 14): FreeSlotsResponse {
+    suspend fun contractorFreeSlots(contractorId: Int, days: Int = 2): FreeSlotsResponse {
         val response: HttpResponse = http.get("$baseUrl/contractors/$contractorId/free-slots") {
             applyAuth()
             parameter("days", days)

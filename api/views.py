@@ -309,11 +309,11 @@ def contractor_free_slots(request, contractor_id: int):
                 "items": [],
             }
         )
-    days_raw = (request.GET.get("days") or "14").strip()
+    days_raw = (request.GET.get("days") or "2").strip()
     try:
         days = max(1, min(int(days_raw), 28))
     except ValueError:
-        days = 14
+        days = 2
     items = free_slots_for_contractor(contractor, days=days)
     return json_response(
         {
