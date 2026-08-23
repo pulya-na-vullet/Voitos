@@ -84,6 +84,12 @@ urlpatterns = [
         views.executor_offer_respond,
         name="executor_offer_respond",
     ),
+    path("executor/jobs", views.executor_jobs, name="executor_jobs"),
+    path(
+        "work-requests/<int:pk>/propose-slots",
+        views.work_request_propose_slots,
+        name="work_request_propose_slots",
+    ),
     path("collections", views.collections_list, name="collections"),
     path("collections/<int:pk>", views.collection_detail, name="collection_detail"),
     path(

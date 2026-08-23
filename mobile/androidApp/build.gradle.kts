@@ -12,8 +12,8 @@ android {
         applicationId = "ru.voitos.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "0.2.21-kmp"
+        versionCode = 26
+        versionName = "0.2.22-kmp"
     }
     // Стабильный debug-keystore в репо: обновление APK с разных агентов/машин
     // не падает с INSTALL_FAILED_UPDATE_INCOMPATIBLE.

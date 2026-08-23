@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
@@ -17,8 +18,10 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import ru.voitos.app.VoitosApi
 import ru.voitos.app.model.AccessInfo
 import ru.voitos.app.model.ApiErrorBody
@@ -30,8 +33,10 @@ import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
 import ru.voitos.app.model.CollectionReceiptResult
 import ru.voitos.app.model.ExecutorMe
+import ru.voitos.app.model.ExecutorJobList
 import ru.voitos.app.model.ExecutorOfferList
 import ru.voitos.app.model.ExecutorOfferRespondResult
+import ru.voitos.app.model.ProposeSlotsResult
 import ru.voitos.app.model.ExecutorRegisterResult
 import ru.voitos.app.model.ExecutorRoleList
 import ru.voitos.app.model.FeedbackCreateResult
@@ -523,6 +528,10 @@ class VoitosApiClient(
     ): PhotoUploadResult =
         http.post("$baseUrl/work-requests/$workRequestId/photos") {
             applyAuth()
+            timeout {
+                requestTimeoutMillis = 120_000
+                socketTimeoutMillis = 120_000
+            }
             contentType(ContentType.Application.Json)
             setBody(
                 buildJsonObject {
@@ -655,6 +664,43 @@ class VoitosApiClient(
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject { put("accept", accept) })
         }.body()
+
+    suspend fun executorJobs(): ExecutorJobList {
+        val response: HttpResponse = http.get("$baseUrl/executor/jobs") { applyAuth() }
+        if (response.status.value == 404) {
+            return ExecutorJobList()
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                "Сервер вернул ${response.status.value} на /executor/jobs. Обновите бэкенд.",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun proposeWorkRequestSlots(
+        workRequestId: Int,
+        slots: List<String>,
+    ): ProposeSlotsResult {
+        val response: HttpResponse = http.post("$baseUrl/work-requests/$workRequestId/propose-slots") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    putJsonArray("slots") {
+                        slots.forEach { add(it) }
+                    }
+                },
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err: ProposeSlotsResult = runCatching { response.body<ProposeSlotsResult>() }
+                .getOrElse { ProposeSlotsResult(ok = false, error = "HTTP ${response.status.value}") }
+            val msg = err.detail.ifBlank { err.error }.ifBlank { "Не удалось отправить окна" }
+            throw IllegalStateException(msg)
+        }
+        return response.body()
+    }
 
     suspend fun onboarding(): OnboardingProgress = authedGet("/onboarding")
 

@@ -77,7 +77,7 @@ class HomeSchedulingTests(TestCase):
             msg = accept_offer(self.offer, send_fn=self.capture)
             self.req.refresh_from_db()
             self.assertEqual(self.req.status, WorkRequestStatus.SCHEDULING)
-            self.assertIn("окна", msg.lower())
+            self.assertIn("согласуйте", msg.lower())
             pending = PendingAction.objects.get(user=self.exec_user)
             self.assertEqual(pending.pending_kind, "work_request_schedule_master")
 
@@ -96,3 +96,51 @@ class HomeSchedulingTests(TestCase):
             self.assertEqual(self.req.status, WorkRequestStatus.IN_PROGRESS)
             self.assertTrue(self.req.agreed_slot)
             self.assertGreaterEqual(len(self.sent), 3)
+
+    def test_master_visit_address_no_duplicate_locality(self):
+        from services.work_request_schedule import master_visit_address
+
+        self.req.assigned_contractor = self.contractor
+        self.exec_user.address = "Куюки, ул. Салонная, 5"
+        self.exec_user.save(update_fields=["address"])
+        addr = master_visit_address(self.req)
+        self.assertEqual(addr.count("Куюки"), 1)
+        self.assertIn("ул. Салонная", addr)
+
+    def test_publish_slots_from_app_and_block_empty_confirm(self):
+        from unittest.mock import patch
+
+        from services.work_request_schedule import (
+            confirm_slot_for_client,
+            publish_slots_for_master,
+        )
+
+        with patch(
+            "services.work_request_schedule._send", return_value=self.capture
+        ), patch(
+            "services.work_request_dispatch._default_send_fn",
+            return_value=self.capture,
+        ):
+            accept_offer(self.offer, send_fn=self.capture)
+            self.req.refresh_from_db()
+            with self.assertRaises(ValueError):
+                confirm_slot_for_client(self.req, slot="")
+            out = publish_slots_for_master(
+                self.req,
+                self.exec_user,
+                ["завтра 10:00-12:00", "завтра 14:00-16:00"],
+            )
+            self.assertIn("отправлены", out.lower())
+            self.req.refresh_from_db()
+            self.assertEqual(len(self.req.proposed_slots), 2)
+            confirm_slot_for_client(self.req, slot="завтра 10:00-12:00")
+            self.req.refresh_from_db()
+            self.assertEqual(self.req.status, WorkRequestStatus.IN_PROGRESS)
+            self.assertEqual(self.req.agreed_slot, "завтра 10:00-12:00")
+            # Клиенту ушли контакты мастера
+            client_msgs = [t for u, t in self.sent if "Житель" in u or u == "Житель"]
+            joined = "\n".join(client_msgs)
+            self.assertTrue(
+                any("Телефон" in t or "контакты" in t.lower() for _, t in self.sent)
+                or "Мастер" in joined
+            )

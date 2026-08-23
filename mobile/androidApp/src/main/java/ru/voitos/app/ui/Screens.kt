@@ -289,6 +289,9 @@ fun WorkRequestsScreen(
                     wr.assignedExecutorName?.let {
                         Text("Мастер: $it", color = VoitosColors.Muted)
                     }
+                    wr.assignedPhone?.takeIf { it.isNotBlank() }?.let {
+                        Text("Тел. мастера: $it", color = VoitosColors.Text)
+                    }
                     if (wr.agreedSlot.isNotBlank()) {
                         Text("Время: ${wr.agreedSlot}", color = VoitosColors.Muted)
                     }
@@ -332,31 +335,10 @@ fun WorkRequestsScreen(
                             }
                         } else {
                             Text(
-                                "Мастер ещё не прислал окна — можно подтвердить, если уже договорились.",
+                                "Мастер ещё не прислал окна. Откройте заявку — там будут контакты мастера.",
                                 color = VoitosColors.Muted,
                                 style = MaterialTheme.typography.bodySmall,
                             )
-                            Button(
-                                onClick = {
-                                    scope.launch {
-                                        loadingId = wr.id
-                                        error = null
-                                        try {
-                                            val res = client.confirmWorkRequestSlot(wr.id, "")
-                                            message = res.message.ifBlank {
-                                                "Заявка переведена «В работе»"
-                                            }
-                                            reload()
-                                        } catch (e: Exception) {
-                                            error = friendlyNetworkError(e)
-                                        } finally {
-                                            loadingId = null
-                                        }
-                                    }
-                                },
-                                enabled = loadingId != wr.id,
-                                colors = voitosPrimaryButtonColors(),
-                            ) { Text("Время согласовано → в работе") }
                         }
                     }
 
@@ -414,7 +396,9 @@ fun WorkRequestDetailScreen(
     BackHandler(enabled = true) { onBack() }
     var detail by remember { mutableStateOf<WorkRequestDetail?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
+    var confirming by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     fun reload() {
@@ -441,6 +425,7 @@ fun WorkRequestDetailScreen(
         Text("Заявка", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Spacer(modifier = Modifier.height(8.dp))
         error?.let { NetworkErrorText(it) }
+        message?.let { Text(it, color = VoitosColors.Ok) }
         if (loading && detail == null) {
             VoitosDetailSkeleton()
         }
@@ -509,11 +494,12 @@ fun WorkRequestDetailScreen(
                 val masterName = wr.assignedExecutorName ?: wr.assignedName
                 DetailLine("Мастер", masterName.orEmpty())
                 DetailLine("Телефон мастера", wr.assignedPhone.orEmpty())
+                DetailLine("MAX мастера", wr.assignedMaxUsername?.let { "@$it" }.orEmpty())
+                if (wr.assignedContacts.isNotEmpty()) {
+                    DetailLine("Контакты", wr.assignedContacts.joinToString("\n"))
+                }
                 DetailLine("Адрес приёма", wr.masterAddress)
                 DetailLine("Согласованное время", wr.agreedSlot)
-                if (wr.proposedSlots.isNotEmpty()) {
-                    DetailLine("Предложенные окна", wr.proposedSlots.joinToString(", "))
-                }
                 wr.reportedAmount?.let {
                     DetailLine("Сумма по отчёту", "${it.roundToInt()} ₽")
                 }
@@ -525,6 +511,55 @@ fun WorkRequestDetailScreen(
                 }
                 if (wr.photoCount > 0) {
                     DetailLine("Фото", "${wr.photoCount}")
+                }
+            }
+
+            if (wr.status == "scheduling") {
+                Spacer(modifier = Modifier.height(12.dp))
+                PanelCard {
+                    Text(
+                        "Выбор времени",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = VoitosColors.Text,
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (wr.proposedSlots.isEmpty()) {
+                        Text(
+                            "Мастер ещё не предложил окна. Напишите ему по контактам выше или подождите уведомление.",
+                            color = VoitosColors.Muted,
+                        )
+                    } else {
+                        Text(
+                            "Выберите удобное окно:",
+                            color = VoitosColors.Muted,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        wr.proposedSlots.forEach { slot ->
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        confirming = true
+                                        error = null
+                                        try {
+                                            val res = client.confirmWorkRequestSlot(wr.id, slot)
+                                            message = res.message.ifBlank {
+                                                "Время подтверждено — заявка в работе"
+                                            }
+                                            reload()
+                                        } catch (e: Exception) {
+                                            error = friendlyNetworkError(e)
+                                        } finally {
+                                            confirming = false
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !confirming,
+                                colors = voitosPrimaryButtonColors(),
+                            ) { Text(slot) }
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+                    }
                 }
             }
 
@@ -1121,22 +1156,12 @@ fun WorkRequestPhotosScreen(
             loading = true
             error = null
             try {
-                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw IllegalStateException("Не удалось прочитать файл")
-                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                val mime = context.contentResolver.getType(uri).orEmpty()
-                val ext = when {
-                    mime.contains("png") -> "png"
-                    mime.contains("webp") -> "webp"
-                    mime.contains("heic") || mime.contains("heif") -> "heic"
-                    else -> "jpg"
-                }
-                val name = "gallery_${System.currentTimeMillis()}.$ext"
+                val (b64, name) = prepareWorkPhotoJpegBase64(context, uri)
                 val res = client.addWorkRequestPhoto(workRequestId, b64, name)
                 photoCount = res.photoCount
                 message = "Приложено фото: $photoCount"
             } catch (e: Exception) {
-                error = e.message
+                error = friendlyNetworkError(e)
             } finally {
                 loading = false
             }
