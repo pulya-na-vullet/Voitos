@@ -2497,20 +2497,18 @@ def admin_address_scan(request: HttpRequest) -> HttpResponse:
 def feedback_list(request: HttpRequest) -> HttpResponse:
     from database.models import FeedbackKind, FeedbackStatus, FeedbackTicket
 
-    status = (request.GET.get("status") or "").strip()
+    # Список всегда только «новые» (open); отвеченные/закрытые — из карточки.
+    status = FeedbackStatus.OPEN
     kind = (request.GET.get("kind") or "").strip()
     date_from = (request.GET.get("date_from") or "").strip()
     date_to = (request.GET.get("date_to") or "").strip()
 
     qs = FeedbackTicket.objects.select_related(
         "user", "manager", "group", "admin_replied_by"
-    ).all()
+    ).filter(status=FeedbackStatus.OPEN)
     if not is_panel_admin(request.user):
         scope = scoped_bot_user_ids(request.user)
         qs = qs.filter(user_id__in=scope)
-
-    if status:
-        qs = qs.filter(status=status)
     if kind:
         qs = qs.filter(kind=kind)
     if date_from:
@@ -2527,7 +2525,7 @@ def feedback_list(request: HttpRequest) -> HttpResponse:
         request,
         "panel/feedback_list.html",
         {
-            "items": list(qs[:300]),
+            "items": list(qs.order_by("-created_at", "-id")[:300]),
             "status": status,
             "kind": kind,
             "date_from": date_from,

@@ -183,29 +183,15 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
             )
             messages.success(request, f"Заявка {label} удалена.")
             return redirect("panel:work_requests")
-        if action == "set_status":
-            status = (request.POST.get("status") or "").strip()
-            if status in WorkRequestStatus.values:
-                if status == WorkRequestStatus.DONE and not is_panel_admin(request.user):
-                    messages.error(
-                        request,
-                        "Перевести заявку в «Выполнена» может только администратор.",
-                    )
-                    return redirect("panel:work_requests")
-                req.status = status
-                req.admin_note = (request.POST.get("note") or req.admin_note).strip()
-                req.save(update_fields=["status", "admin_note", "updated_at"])
-                if status in {WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED}:
-                    close_task_for_source(
-                        AdminTaskKind.WORK_REQUEST, "WorkRequest", req.id
-                    )
-                messages.success(request, f"Заявка #{req.id}: {req.get_status_display()}.")
+        # Ручная смена статуса с списка отключена.
         return redirect("panel:work_requests")
 
     # По умолчанию — активные: без выполненных и отменённых.
     # ?status=all — все; ?status=<code> — один статус.
     raw = request.GET.get("status")
-    qs = WorkRequest.objects.select_related("user", "role").prefetch_related("photos")
+    qs = WorkRequest.objects.select_related("user", "role").prefetch_related(
+        "photos", "user__service_groups"
+    )
     scope = scoped_bot_user_ids(request.user)
     if scope is not None:
         qs = qs.filter(user_id__in=scope)
@@ -236,15 +222,49 @@ def work_requests_list(request: HttpRequest) -> HttpResponse:
                 WorkRequestStatus.DRAFT,
             ]
         )
+
+    items = list(qs.order_by("-created_at", "-id")[:200])
+    # Менеджеру — блоки по своим группам; админу — плоский список.
+    grouped_rows: list[dict] = []
+    if is_panel_manager(request.user):
+        from panel.roles import manager_groups_qs
+
+        groups = list(manager_groups_qs(request.user).order_by("name", "id"))
+        used_ids: set[int] = set()
+        for g in groups:
+            member_ids = set(g.members.values_list("id", flat=True))
+            group_items = [
+                wr
+                for wr in items
+                if wr.user_id in member_ids and wr.id not in used_ids
+            ]
+            used_ids.update(wr.id for wr in group_items)
+            grouped_rows.append(
+                {
+                    "group": g,
+                    "title": g.name,
+                    "items": group_items,
+                }
+            )
+        orphan = [wr for wr in items if wr.id not in used_ids]
+        if orphan:
+            grouped_rows.append(
+                {"group": None, "title": "Без группы", "items": orphan}
+            )
+    else:
+        grouped_rows.append({"group": None, "title": "", "items": items})
+
     return render(
         request,
         "panel/work_requests.html",
         {
-            "items": qs[:200],
+            "items": items,
+            "grouped_rows": grouped_rows,
             "status": status,
             "status_filter": status_filter,
             "statuses": WorkRequestStatus.choices,
             "can_delete": is_panel_admin(request.user) or is_panel_manager(request.user),
+            "is_manager_view": is_panel_manager(request.user),
         },
     )
 
@@ -426,55 +446,13 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 meta={"work_request_id": req.id, "ok": ok},
             )
             return redirect("panel:work_request_detail", pk=pk)
-        status = (request.POST.get("status") or "").strip()
-        if status in WorkRequestStatus.values:
-            if status == WorkRequestStatus.DONE and not is_panel_admin(request.user):
-                messages.error(
-                    request,
-                    "Перевести заявку в «Выполнена» может только администратор.",
-                )
-                return redirect("panel:work_request_detail", pk=pk)
-            prev_status = req.status
-            req.status = status
-            req.admin_note = (request.POST.get("note") or "").strip()
+        if action in {"save", "save_locality"}:
+            # Статус и заметку вручную не меняем — только НП для подбора.
             req.client_locality = (
                 request.POST.get("client_locality") or req.client_locality
             ).strip()[:255]
-            req.save(
-                update_fields=[
-                    "status",
-                    "admin_note",
-                    "client_locality",
-                    "updated_at",
-                ]
-            )
-            if status in {WorkRequestStatus.DONE, WorkRequestStatus.CANCELLED}:
-                close_task_for_source(AdminTaskKind.WORK_REQUEST, "WorkRequest", req.id)
-            # Ручной перевод / повторное сохранение в «ждём клиента» → опрос в MAX
-            if status == WorkRequestStatus.AWAITING_CLIENT:
-                from services.work_request_client_survey import start_client_service_survey
-
-                ok, detail = start_client_service_survey(req)
-                if ok:
-                    messages.success(request, f"Заявка обновлена. {detail}")
-                else:
-                    messages.warning(
-                        request,
-                        f"Статус сохранён. {detail}",
-                    )
-                log_manager_action(
-                    request.user,
-                    action="work_request_awaiting_client",
-                    title=f"Заявка #{req.id}: ждём подтверждения клиента",
-                    detail=detail,
-                    meta={
-                        "work_request_id": req.id,
-                        "prev_status": prev_status,
-                        "ok": ok,
-                    },
-                )
-                return redirect("panel:work_request_detail", pk=pk)
-            messages.success(request, "Заявка обновлена.")
+            req.save(update_fields=["client_locality", "updated_at"])
+            messages.success(request, "Населённый пункт сохранён.")
             return redirect("panel:work_request_detail", pk=pk)
     from services.contractors import max_profile_link
     from services.work_request_dispatch import (
