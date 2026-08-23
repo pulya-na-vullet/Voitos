@@ -2058,6 +2058,29 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Раздел исполнителей доступен только администратору.")
         return redirect(panel_home_url_name(request.user))
 
+    from django.db.models import Avg, Count
+    from django.urls import reverse
+    from services.contractors import annotate_contractor_total_earned
+
+    eq_filter = (
+        request.GET.get("type") or request.POST.get("retain_type") or ""
+    ).strip()
+    locality_filter = (
+        request.GET.get("locality") or request.POST.get("retain_locality") or ""
+    ).strip()
+
+    def _contractors_redirect() -> HttpResponse:
+        from urllib.parse import urlencode
+
+        q = {}
+        if locality_filter:
+            q["locality"] = locality_filter
+        if eq_filter:
+            q["type"] = eq_filter
+        if q:
+            return redirect(f"{reverse('panel:contractors')}?{urlencode(q)}")
+        return redirect("panel:contractors")
+
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "delete":
@@ -2070,7 +2093,7 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             )
             profile.delete()
             messages.success(request, f"Исполнитель «{label}» удалён.")
-            return redirect("panel:contractors")
+            return _contractors_redirect()
         profile = get_object_or_404(ContractorProfile, pk=request.POST.get("contractor_id"))
         if action == "verify":
             profile.status = ContractorStatus.VERIFIED
@@ -2125,12 +2148,8 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
                 profile.payout_phone = ""
             profile.save(update_fields=["bank_name", "payout_phone", "updated_at"])
             messages.success(request, f"Реквизиты «{profile}» сохранены.")
-        return redirect("panel:contractors")
+        return _contractors_redirect()
 
-    from django.db.models import Avg, Count
-    from services.contractors import annotate_contractor_total_earned
-
-    eq_filter = (request.GET.get("type") or "").strip()
     qs = annotate_contractor_total_earned(
         ContractorProfile.objects.select_related("user", "role")
     ).annotate(
@@ -2139,6 +2158,25 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
     ).order_by("status", "equipment_type", "-submitted_at")
     if eq_filter:
         qs = qs.filter(equipment_type=eq_filter)
+
+    # Нас. пункт: сначала анкета исполнителя, иначе профиль жителя.
+    def _loc_of(c) -> str:
+        return (c.locality or getattr(c.user, "locality", None) or "").strip() or "Без населённого пункта"
+
+    locality_counts: dict[str, int] = {}
+    for c in qs:
+        loc = _loc_of(c)
+        locality_counts[loc] = locality_counts.get(loc, 0) + 1
+    localities = sorted(
+        locality_counts.keys(),
+        key=lambda x: (x == "Без населённого пункта", x.casefold()),
+    )
+
+    if locality_filter:
+        contractors = [c for c in qs if _loc_of(c) == locality_filter]
+    else:
+        contractors = []
+
     role_choices = list(
         ExecutorRole.objects.filter(is_active=True)
         .order_by("id")
@@ -2148,9 +2186,13 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
         request,
         "panel/contractors.html",
         {
-            "contractors": qs,
+            "contractors": contractors,
             "equipment_choices": role_choices,
             "type_filter": eq_filter,
+            "locality_filter": locality_filter,
+            "localities": [
+                {"name": name, "count": locality_counts[name]} for name in localities
+            ],
             "status_verified": ContractorStatus.VERIFIED,
             "status_pending": ContractorStatus.PENDING_REVIEW,
         },
