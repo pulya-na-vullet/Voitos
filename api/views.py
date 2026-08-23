@@ -823,6 +823,7 @@ def work_request_detail(request, pk: int):
     can_mark = can_mark_work_done(wr)
     client_done = bool(wr.client_marked_done_at)
     exec_done = bool(wr.executor_marked_done_at)
+    same_person = is_client and is_executor
     needs_client_pay = is_client and wr.confirmed_amount is None and (
         wr.status in ("awaiting_client", "awaiting_commission", "done")
         and wr.reported_amount is not None
@@ -833,6 +834,13 @@ def work_request_detail(request, pk: int):
         and wr.reported_amount is None
         and wr.status in ("in_progress", "scheduling")
     )
+    # Один аккаунт: после dual mark сразу показываем отчёт оплаты.
+    if same_person and needs_exec_pay:
+        viewer = "executor"
+    elif is_executor and not is_client:
+        viewer = "executor"
+    else:
+        viewer = "client"
     can_cancel = wr.status in {
         "draft",
         "pending",
@@ -844,7 +852,7 @@ def work_request_detail(request, pk: int):
     }
     payload.update(
         {
-            "viewer": "executor" if is_executor and not is_client else "client",
+            "viewer": viewer,
             "assigned_name": str(contractor) if contractor else None,
             "assigned_phone": contacts.get("assigned_phone"),
             "assigned_max_username": contacts.get("assigned_max_username"),
@@ -872,12 +880,14 @@ def work_request_detail(request, pk: int):
             "updated_at": wr.updated_at.isoformat() if wr.updated_at else "",
             "can_mark_done": can_mark
             and (
-                (is_client and not client_done) or (is_executor and not exec_done)
+                (is_client and not client_done)
+                or (is_executor and not exec_done)
             ),
             "can_cancel": can_cancel and (is_client or is_executor),
             "client_marked_done": client_done,
             "executor_marked_done": exec_done,
             "needs_executor_payment_report": needs_exec_pay,
+            "same_person": same_person,
             "client_cancel_comment": (wr.client_cancel_comment or "").strip(),
             "executor_cancel_comment": (wr.executor_cancel_comment or "").strip(),
             "amount_mismatch_message": (wr.amount_mismatch_message or "").strip(),
@@ -1714,7 +1724,13 @@ def work_request_mark_done(request, pk: int):
     try:
         result = mark_work_done(request.bot_user, wr)
     except ValueError as exc:
-        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+        code = str(exc)
+        detail = {
+            "forbidden": "Нет доступа к этой заявке.",
+            "not_in_progress": "Заявка ещё не в работе (нужно согласовать время).",
+            "already_marked": "Вы уже отметили заявку выполненной.",
+        }.get(code, code)
+        return json_response({"error": code, "detail": detail}, status=400)
     wr.refresh_from_db()
     result["status"] = wr.status
     result["id"] = wr.id

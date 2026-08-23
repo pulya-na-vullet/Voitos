@@ -251,7 +251,11 @@ def can_mark_work_done(req: WorkRequest) -> bool:
 
 
 def mark_work_done(user: BotUser, req: WorkRequest) -> dict:
-    """Клиент или исполнитель жмёт «Работа выполнена». Оба → опрос оплаты у мастера."""
+    """Клиент или исполнитель жмёт «Работа выполнена». Оба → опрос оплаты у мастера.
+
+    Если клиент и мастер — один человек (тест / ошибка назначения), одна кнопка
+    отмечает обе стороны сразу.
+    """
     is_client = req.user_id == user.id
     is_executor = bool(
         req.assigned_contractor_id and req.assigned_contractor.user_id == user.id
@@ -267,29 +271,33 @@ def mark_work_done(user: BotUser, req: WorkRequest) -> dict:
         req.status = WorkRequestStatus.IN_PROGRESS
         update_fields.append("status")
 
-    if is_client:
-        if req.client_marked_done_at:
-            raise ValueError("already_marked")
+    marked_any = False
+    # Один аккаунт = и клиент, и мастер: отмечаем обе стороны одним нажатием.
+    if is_client and not req.client_marked_done_at:
         req.client_marked_done_at = now
         update_fields.append("client_marked_done_at")
-    else:
-        if req.executor_marked_done_at:
-            raise ValueError("already_marked")
+        marked_any = True
+    if is_executor and not req.executor_marked_done_at:
         req.executor_marked_done_at = now
         update_fields.append("executor_marked_done_at")
+        marked_any = True
+    if not marked_any:
+        raise ValueError("already_marked")
 
     req.save(update_fields=update_fields)
     both = both_parties_marked_done(req)
+    same_person = is_client and is_executor
     payload = {
         "ok": True,
         "both_done": both,
         "client_marked_done": bool(req.client_marked_done_at),
         "executor_marked_done": bool(req.executor_marked_done_at),
         "needs_executor_payment_report": False,
+        "same_person": same_person,
         "message": "",
     }
     if not both:
-        waiting = "клиента" if is_executor else "мастера"
+        waiting = "клиента" if (is_executor and not is_client) else "мастера"
         payload["message"] = (
             f"Отметили заявку #{req.id} как выполненную с вашей стороны. "
             f"Ждём отметку {waiting}."

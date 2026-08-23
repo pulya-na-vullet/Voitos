@@ -221,6 +221,23 @@ class WorkRequestCompletionFlowTests(TestCase):
         self.assertEqual(self.req.reported_amount, Decimal("2500.00"))
         self.assertTrue(bool(self.req.job_receipt))
 
+    def test_same_person_mark_done_marks_both_sides(self):
+        """Клиент = мастер: одно нажатие отмечает обе стороны."""
+        self.contractor.user = self.client_user
+        self.contractor.save(update_fields=["user"])
+        self.req.user = self.client_user
+        self.req.assigned_contractor = self.contractor
+        self.req.status = WorkRequestStatus.IN_PROGRESS
+        self.req.agreed_slot = "сегодня 12:00–14:00"
+        self.req.save()
+        result = mark_work_done(self.client_user, self.req)
+        self.req.refresh_from_db()
+        self.assertTrue(result["both_done"])
+        self.assertTrue(result["same_person"])
+        self.assertTrue(self.req.client_marked_done_at)
+        self.assertTrue(self.req.executor_marked_done_at)
+        self.assertTrue(result["needs_executor_payment_report"])
+
     def test_mark_done_api_and_cancel_comments(self):
         self._accept_in_progress()
         http = Client()
