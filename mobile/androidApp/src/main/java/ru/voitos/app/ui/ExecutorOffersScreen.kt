@@ -70,6 +70,7 @@ fun ExecutorOffersScreen(
     var offers by remember { mutableStateOf<List<ExecutorOfferBrief>>(emptyList()) }
     var jobs by remember { mutableStateOf<List<ExecutorJobBrief>>(emptyList()) }
     var schedule by remember { mutableStateOf<List<ExecutorScheduleEvent>>(emptyList()) }
+    var workNotices by remember { mutableStateOf<List<ru.voitos.app.model.WorkNotice>>(emptyList()) }
     var weekStart by remember { mutableStateOf(mondayOf(LocalDate.now())) }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -93,7 +94,9 @@ fun ExecutorOffersScreen(
             error = null
             if (!keepMessage) message = null
             try {
-                profiles = client.executorMe().profiles
+                val me = client.executorMe()
+                profiles = me.profiles
+                workNotices = me.workNotices
                 offers = client.executorOffers().items
                 jobs = runCatching { client.executorJobs().items }.getOrDefault(emptyList())
                 schedule = runCatching {
@@ -122,6 +125,19 @@ fun ExecutorOffersScreen(
         Spacer(modifier = Modifier.height(8.dp))
         error?.let { NetworkErrorText(it) }
         message?.let { Text(it, color = VoitosColors.Ok) }
+        workNotices.forEach { notice ->
+            Text(
+                notice.message,
+                color = VoitosColors.Danger,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+                    .clickable(enabled = notice.workRequestId > 0) {
+                        onOpenWorkRequest(notice.workRequestId)
+                    },
+            )
+        }
         if (loading) {
             VoitosListSkeleton(rows = 3)
         } else {
@@ -419,20 +435,27 @@ private fun WeekScheduleFrame(
             TextButton(onClick = onNextWeek) { Text("›") }
         }
         Spacer(modifier = Modifier.height(4.dp))
-        for (i in 0..6) {
-            val day = weekStart.plusDays(i.toLong())
-            val key = day.toString()
-            val dayEvents = byDay[key].orEmpty()
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(
-                    "${DAY_NAMES_RU[i]} · ${day.format(MONTH_FMT)}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = VoitosColors.Muted,
-                )
-                if (dayEvents.isEmpty()) {
-                    Text("нет записей", color = VoitosColors.Muted.copy(alpha = 0.7f),
-                        style = MaterialTheme.typography.bodySmall)
-                } else {
+        if (events.isEmpty()) {
+            Text(
+                "Вся неделя свободная",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        } else {
+            var busyDays = 0
+            for (i in 0..6) {
+                val day = weekStart.plusDays(i.toLong())
+                val key = day.toString()
+                val dayEvents = byDay[key].orEmpty()
+                if (dayEvents.isEmpty()) continue
+                busyDays += 1
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        "${DAY_NAMES_RU[i]} · ${day.format(MONTH_FMT)}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = VoitosColors.Muted,
+                    )
                     dayEvents.forEach { ev ->
                         val timePart = formatEventTime(ev)
                         Column(
@@ -457,12 +480,23 @@ private fun WeekScheduleFrame(
                                 .filter { it.isNotBlank() }
                                 .joinToString(" · ")
                             if (subtitle.isNotBlank()) {
-                                Text(subtitle, color = VoitosColors.Muted,
-                                    style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    subtitle,
+                                    color = VoitosColors.Muted,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
                             }
                         }
                     }
                 }
+            }
+            if (busyDays in 1..6) {
+                Text(
+                    "Остальные дни свободны",
+                    color = VoitosColors.Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         }
     }

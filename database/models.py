@@ -172,6 +172,7 @@ class AdminTaskKind(models.TextChoices):
     CONTRACTOR_COUNTER = "contractor_counter", "Другое время исполнителя"
     WORK_REQUEST = "work_request", "Заявка на исполнителя"
     WORK_COMMISSION = "work_commission", "Комиссия исполнителя 10%"
+    WORK_AMOUNT_MISMATCH = "work_amount_mismatch", "Расхождение суммы по заявке"
     WISH_BALLOT = "wish_ballot", "Сбор по итогам голосования"
     FEEDBACK = "feedback", "Обратная связь / баг"
     ROLE_PROPOSAL = "role_proposal", "Заявка на новую роль"
@@ -1688,6 +1689,45 @@ class WorkRequest(models.Model):
         help_text="Предварительная запись: мастер должен подтвердить и взять в работу.",
     )
     schedule_agreed_at = models.DateTimeField(null=True, blank=True)
+    client_marked_done_at = models.DateTimeField(
+        "Клиент нажал «Работа выполнена»",
+        null=True,
+        blank=True,
+    )
+    executor_marked_done_at = models.DateTimeField(
+        "Исполнитель нажал «Работа выполнена»",
+        null=True,
+        blank=True,
+    )
+    client_cancel_comment = models.TextField(
+        "Комментарий клиента при отмене",
+        blank=True,
+        default="",
+    )
+    executor_cancel_comment = models.TextField(
+        "Комментарий исполнителя при отмене",
+        blank=True,
+        default="",
+    )
+    client_pay_method = models.CharField(
+        "Способ оплаты (со слов клиента)",
+        max_length=16,
+        choices=WorkRequestPayMethod.choices,
+        blank=True,
+        default="",
+    )
+    amount_mismatch_due = models.DecimalField(
+        "Доплата комиссии при расхождении, ₽",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    amount_mismatch_message = models.TextField(
+        "Сообщение исполнителю о расхождении (экран Работа)",
+        blank=True,
+        default="",
+    )
     rating_asked_at = models.DateTimeField(
         "Запрошена оценка работы",
         null=True,

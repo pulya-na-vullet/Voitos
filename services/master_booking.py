@@ -19,7 +19,11 @@ from database.models import (
     WorkRequestCommissionStatus,
     WorkRequestStatus,
 )
-from services.work_request_dispatch import localities_match
+from services.work_request_dispatch import (
+    assert_not_self_assignment,
+    is_self_assignment,
+    localities_match,
+)
 from services.work_request_schedule import format_slot_label, parse_slot_datetime_range
 
 logger = logging.getLogger(__name__)
@@ -224,6 +228,8 @@ def list_masters_for_role(role, client_user: BotUser) -> list[dict]:
     client_loc = (getattr(client_user, "locality", None) or "").strip()
     items: list[dict] = []
     for c in verified_contractors_for_role(role):
+        if is_self_assignment(client_user.id, c):
+            continue
         cloc = (c.locality or getattr(c.user, "locality", None) or "").strip()
         if client_loc and cloc and not localities_match(client_loc, cloc):
             continue
@@ -286,6 +292,7 @@ def create_client_booking(
     )
     if not contractor:
         raise ValueError("Мастер не найден.")
+    assert_not_self_assignment(client.id, contractor)
     role_ok = (contractor.role_id and contractor.role_id == role.id) or (
         (contractor.equipment_type or "") == (role.code or "")
     )

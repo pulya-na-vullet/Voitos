@@ -228,6 +228,15 @@ data class WorkRequestDetail(
     @SerialName("reported_amount") val reportedAmount: Double? = null,
     @SerialName("confirmed_amount") val confirmedAmount: Double? = null,
     @SerialName("pay_method") val payMethod: String = "",
+    @SerialName("can_mark_done") val canMarkDone: Boolean = false,
+    @SerialName("can_cancel") val canCancel: Boolean = false,
+    @SerialName("client_marked_done") val clientMarkedDone: Boolean = false,
+    @SerialName("executor_marked_done") val executorMarkedDone: Boolean = false,
+    @SerialName("needs_executor_payment_report") val needsExecutorPaymentReport: Boolean = false,
+    @SerialName("client_cancel_comment") val clientCancelComment: String = "",
+    @SerialName("executor_cancel_comment") val executorCancelComment: String = "",
+    @SerialName("amount_mismatch_message") val amountMismatchMessage: String = "",
+    @SerialName("amount_mismatch_due") val amountMismatchDue: Double? = null,
 )
 
 @Serializable
@@ -407,6 +416,29 @@ data class WorkRequestCancelResult(
     val ok: Boolean = true,
     val id: Int = 0,
     val status: String = "",
+    @SerialName("client_cancel_comment") val clientCancelComment: String = "",
+    @SerialName("executor_cancel_comment") val executorCancelComment: String = "",
+)
+
+@Serializable
+data class WorkRequestMarkDoneResult(
+    val ok: Boolean = true,
+    val id: Int = 0,
+    val status: String = "",
+    val message: String = "",
+    @SerialName("both_done") val bothDone: Boolean = false,
+    @SerialName("client_marked_done") val clientMarkedDone: Boolean = false,
+    @SerialName("executor_marked_done") val executorMarkedDone: Boolean = false,
+    @SerialName("needs_executor_payment_report") val needsExecutorPaymentReport: Boolean = false,
+)
+
+@Serializable
+data class WorkRequestReportPaymentResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("reported_amount") val reportedAmount: Double? = null,
+    @SerialName("commission_amount") val commissionAmount: Double? = null,
 )
 
 @Serializable
@@ -482,10 +514,18 @@ data class ExecutorProfileBrief(
 )
 
 @Serializable
+data class WorkNotice(
+    @SerialName("work_request_id") val workRequestId: Int = 0,
+    val message: String = "",
+    @SerialName("amount_due") val amountDue: Double = 0.0,
+)
+
+@Serializable
 data class ExecutorMe(
     @SerialName("is_executor") val isExecutor: Boolean = false,
     val profiles: List<ExecutorProfileBrief> = emptyList(),
     @SerialName("open_offers_count") val openOffersCount: Int = 0,
+    @SerialName("work_notices") val workNotices: List<WorkNotice> = emptyList(),
 )
 
 @Serializable

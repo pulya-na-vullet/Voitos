@@ -67,6 +67,8 @@ import ru.voitos.app.model.WorkRequestConfirmSlotResult
 import ru.voitos.app.model.WorkRequestCreated
 import ru.voitos.app.model.WorkRequestDetail
 import ru.voitos.app.model.WorkRequestList
+import ru.voitos.app.model.WorkRequestMarkDoneResult
+import ru.voitos.app.model.WorkRequestReportPaymentResult
 import ru.voitos.app.model.WorkRequestSubmitResult
 
 /**
@@ -609,12 +611,17 @@ class VoitosApiClient(
             setBody(buildJsonObject {})
         }.body()
 
-    suspend fun cancelWorkRequest(workRequestId: Int): WorkRequestCancelResult {
+    suspend fun cancelWorkRequest(
+        workRequestId: Int,
+        comment: String = "",
+    ): WorkRequestCancelResult {
         return try {
             http.post("$baseUrl/work-requests/$workRequestId/cancel") {
                 applyAuth()
                 contentType(ContentType.Application.Json)
-                setBody(buildJsonObject {})
+                setBody(buildJsonObject {
+                    if (comment.isNotBlank()) put("comment", comment)
+                })
             }.body()
         } catch (e: Exception) {
             val msg = (e.message ?: "") + " " + (e.cause?.message ?: "")
@@ -628,6 +635,29 @@ class VoitosApiClient(
             throw e
         }
     }
+
+    suspend fun markWorkRequestDone(workRequestId: Int): WorkRequestMarkDoneResult =
+        http.post("$baseUrl/work-requests/$workRequestId/mark-done") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {})
+        }.body()
+
+    suspend fun reportWorkRequestPayment(
+        workRequestId: Int,
+        payMethod: String,
+        amount: Double,
+    ): WorkRequestReportPaymentResult =
+        http.post("$baseUrl/work-requests/$workRequestId/report-payment") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("pay_method", payMethod)
+                    put("amount", amount)
+                },
+            )
+        }.body()
 
     suspend fun confirmWorkRequestSlot(
         workRequestId: Int,
@@ -825,6 +855,7 @@ class VoitosApiClient(
         workRequestId: Int,
         confirmed: Boolean,
         amount: Double? = null,
+        payMethod: String? = null,
     ): ConfirmAmountResult =
         http.post("$baseUrl/work-requests/$workRequestId/confirm-amount") {
             applyAuth()
@@ -833,6 +864,7 @@ class VoitosApiClient(
                 buildJsonObject {
                     put("confirmed", confirmed)
                     if (amount != null) put("amount", amount)
+                    if (!payMethod.isNullOrBlank()) put("pay_method", payMethod)
                 },
             )
         }.body()

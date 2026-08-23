@@ -59,10 +59,33 @@
       {{ item.get_pay_method_display|default:"—" }}
       {% if item.reported_amount %} · отчёт {{ item.reported_amount }} ₽{% endif %}
       {% if item.confirmed_amount %} · клиент {{ item.confirmed_amount }} ₽{% endif %}
+      {% if item.client_pay_method %} · способ клиента: {{ item.get_client_pay_method_display }}{% endif %}
     </p>
     {% if item.job_receipt %}
       <p><a href="{{ item.job_receipt.url }}" target="_blank">Чек оплаты работы</a></p>
     {% endif %}
+  {% endif %}
+  {% if item.client_cancel_comment or item.executor_cancel_comment %}
+    <div style="margin:12px 0; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--bg-soft);">
+      <p style="margin:0 0 8px;"><strong>Комментарии при отмене</strong></p>
+      <p><strong>Клиент:</strong> {{ item.client_cancel_comment|default:"—" }}</p>
+      <p style="margin:0;"><strong>Исполнитель:</strong> {{ item.executor_cancel_comment|default:"—" }}</p>
+    </div>
+  {% endif %}
+  {% if item.amount_mismatch_due %}
+    <div style="margin:12px 0; padding:12px; border:1px solid #c45; border-radius:12px;">
+      <p style="margin:0 0 8px;"><strong>Расхождение суммы</strong> — доплата комиссии {{ item.amount_mismatch_due }} ₽</p>
+      {% if item.amount_mismatch_message %}
+        <p class="muted">Сообщение на экране «Работа»:</p>
+        <pre style="white-space:pre-wrap;">{{ item.amount_mismatch_message }}</pre>
+      {% endif %}
+      <form method="post" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        {% csrf_token %}
+        <input type="text" name="note" placeholder="Доп. текст исполнителю (необяз.)" style="flex:1; min-width:160px;">
+        <button class="btn small" type="submit" name="action" value="notify_amount_mismatch">Отправить доплату на экран Работа</button>
+        <button class="btn secondary small" type="submit" name="action" value="clear_amount_mismatch">Снять расхождение</button>
+      </form>
+    </div>
   {% endif %}
   {% if item.proposed_slots or item.agreed_slot or item.master_address %}
     <p><strong>Приём на дому:</strong>

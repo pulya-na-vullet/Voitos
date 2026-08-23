@@ -71,11 +71,29 @@ def verified_contractors_for_role(role) -> list[ContractorProfile]:
     return list(qs)
 
 
+SELF_ASSIGNMENT_MSG = (
+    "Нельзя назначить себя исполнителем своей заявки. Выберите другого мастера."
+)
+
+
+def is_self_assignment(client_user_id: int | None, contractor: ContractorProfile | None) -> bool:
+    if not client_user_id or contractor is None:
+        return False
+    return int(contractor.user_id) == int(client_user_id)
+
+
+def assert_not_self_assignment(client_user_id: int | None, contractor: ContractorProfile) -> None:
+    if is_self_assignment(client_user_id, contractor):
+        raise ValueError(SELF_ASSIGNMENT_MSG)
+
+
 def heuristic_candidates(req: WorkRequest) -> list[tuple[ContractorProfile, float, str]]:
-    """Кандидаты той же роли в том же / похожем НП."""
+    """Кандидаты той же роли в том же / похожем НП (не сам заявитель)."""
     loc = request_locality(req)
     out: list[tuple[ContractorProfile, float, str]] = []
     for c in verified_contractors_for_role(req.role):
+        if is_self_assignment(req.user_id, c):
+            continue
         cloc = (c.locality or getattr(c.user, "locality", "") or "").strip()
         if loc and localities_match(loc, cloc):
             out.append((c, 1.0, f"НП совпадает: {cloc}"))
@@ -237,6 +255,7 @@ def send_offer(
 ) -> WorkRequestOffer:
     from services.work_request_completion import contractor_blocked_for_new_offers
 
+    assert_not_self_assignment(req.user_id, contractor)
     if contractor_blocked_for_new_offers(contractor):
         raise ValueError(
             "Исполнитель временно не получает заявки "
@@ -552,6 +571,11 @@ def accept_offer(offer: WorkRequestOffer, *, send_fn=None) -> str:
 
         contractor = offer.contractor
         c_user = contractor.user
+        if is_self_assignment(req.user_id, contractor):
+            offer.status = WorkRequestOfferStatus.CANCELLED
+            offer.responded_at = now
+            offer.save(update_fields=["status", "responded_at"])
+            return SELF_ASSIGNMENT_MSG
         req.assigned_contractor = contractor
         # Найденный исполнитель → всегда согласование времени, затем «в работе».
         req.status = WorkRequestStatus.SCHEDULING
@@ -685,6 +709,7 @@ def admin_reassign_executor(
         )
         if contractor is None:
             raise ValueError("Исполнитель не найден или не проверен.")
+        assert_not_self_assignment(req.user_id, contractor)
 
     clear_assignment_for_reassign(req)
     req.refresh_from_db()

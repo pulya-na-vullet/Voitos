@@ -142,6 +142,7 @@ def cancel_client_work_request(
     req: WorkRequest,
     *,
     note: str = "Отменено клиентом.",
+    comment: str = "",
 ) -> WorkRequest:
     """Отменить заявку клиента. Raises ValueError если нельзя."""
     if req.user_id != user.id:
@@ -149,22 +150,28 @@ def cancel_client_work_request(
     if req.status not in CLIENT_CANCELLABLE_STATUSES:
         raise ValueError("not_cancellable")
 
+    comment = (comment or "").strip()
+    note = (note or "").strip() or "Отменено клиентом."
     req.status = WorkRequestStatus.CANCELLED
+    if comment:
+        req.client_cancel_comment = comment
     admin_note = (req.admin_note or "").strip()
-    if note and note not in admin_note:
-        admin_note = f"{admin_note}\n{note}".strip() if admin_note else note
+    block = f"Клиент: {comment or note}"
+    if block not in admin_note:
+        admin_note = f"{admin_note}\n{block}".strip() if admin_note else block
     req.admin_note = admin_note
     from database.models import WorkRequestCommissionStatus
 
     req.commission_status = WorkRequestCommissionStatus.NONE
-    req.save(
-        update_fields=[
-            "status",
-            "admin_note",
-            "commission_status",
-            "updated_at",
-        ]
-    )
+    update_fields = [
+        "status",
+        "admin_note",
+        "commission_status",
+        "updated_at",
+    ]
+    if comment:
+        update_fields.append("client_cancel_comment")
+    req.save(update_fields=update_fields)
     open_offers = list(
         WorkRequestOffer.objects.filter(
             work_request=req,
@@ -193,6 +200,62 @@ def cancel_client_work_request(
         cancel_scheduled_for_request(req)
     except Exception:
         logger.exception("cancel scheduled for WR %s", req.id)
+    return req
+
+
+def cancel_executor_work_request(
+    user: BotUser,
+    req: WorkRequest,
+    *,
+    comment: str = "",
+) -> WorkRequest:
+    """Исполнитель отменяет заявку с комментарием."""
+    if not req.assigned_contractor_id or req.assigned_contractor.user_id != user.id:
+        raise ValueError("not_executor")
+    if req.status not in {
+        WorkRequestStatus.SCHEDULING,
+        WorkRequestStatus.IN_PROGRESS,
+        WorkRequestStatus.AWAITING_CLIENT,
+        WorkRequestStatus.AWAITING_COMMISSION,
+    }:
+        raise ValueError("not_cancellable")
+    comment = (comment or "").strip()
+    if not comment:
+        raise ValueError("comment_required")
+    req.status = WorkRequestStatus.CANCELLED
+    req.executor_cancel_comment = comment
+    admin_note = (req.admin_note or "").strip()
+    block = f"Исполнитель: {comment}"
+    if block not in admin_note:
+        admin_note = f"{admin_note}\n{block}".strip() if admin_note else block
+    req.admin_note = admin_note
+    from database.models import WorkRequestCommissionStatus
+
+    req.commission_status = WorkRequestCommissionStatus.NONE
+    req.save(
+        update_fields=[
+            "status",
+            "executor_cancel_comment",
+            "admin_note",
+            "commission_status",
+            "updated_at",
+        ]
+    )
+    try:
+        from services.work_request_completion import cancel_scheduled_for_request
+
+        cancel_scheduled_for_request(req)
+    except Exception:
+        logger.exception("cancel scheduled for WR %s", req.id)
+    try:
+        from services.work_request_dispatch import _default_send_fn
+
+        _default_send_fn()(
+            req.user,
+            f"Мастер отменил заявку #{req.id}.\nКомментарий: {comment}",
+        )
+    except Exception:
+        logger.exception("notify client cancel by executor WR %s", req.id)
     return req
 
 

@@ -406,8 +406,18 @@ def me_executor(request):
             "is_executor": bool(items),
             "profiles": items,
             "open_offers_count": _open_offers_qs(request.bot_user).count(),
+            "work_notices": _work_notices(request.bot_user),
         }
     )
+
+
+def _work_notices(user) -> list[dict]:
+    try:
+        from services.work_request_completion import work_screen_notices_for_user
+
+        return work_screen_notices_for_user(user)
+    except Exception:
+        return []
 
 
 def _open_offers_qs(user):
@@ -796,6 +806,10 @@ def work_request_detail(request, pk: int):
     )
     if not (is_client or is_executor):
         return json_response({"error": "not_found"}, status=404)
+    from services.work_request_completion import (
+        both_parties_marked_done,
+        can_mark_work_done,
+    )
     from services.work_request_rating import work_request_needs_rating
 
     contractor = wr.assigned_contractor
@@ -806,9 +820,39 @@ def work_request_detail(request, pk: int):
     contacts = _executor_contacts_payload(contractor)
     payload = _work_request_brief(wr)
     slots = _slot_labels(wr)
+    can_mark = can_mark_work_done(wr)
+    client_done = bool(wr.client_marked_done_at)
+    exec_done = bool(wr.executor_marked_done_at)
+    same_person = is_client and is_executor
+    needs_client_pay = is_client and wr.confirmed_amount is None and (
+        wr.status in ("awaiting_client", "awaiting_commission", "done")
+        and wr.reported_amount is not None
+    )
+    needs_exec_pay = (
+        is_executor
+        and both_parties_marked_done(wr)
+        and wr.reported_amount is None
+        and wr.status in ("in_progress", "scheduling")
+    )
+    # Один аккаунт: после dual mark сразу показываем отчёт оплаты.
+    if same_person and needs_exec_pay:
+        viewer = "executor"
+    elif is_executor and not is_client:
+        viewer = "executor"
+    else:
+        viewer = "client"
+    can_cancel = wr.status in {
+        "draft",
+        "pending",
+        "offering",
+        "scheduling",
+        "in_progress",
+        "awaiting_client",
+        "awaiting_commission",
+    }
     payload.update(
         {
-            "viewer": "executor" if is_executor and not is_client else "client",
+            "viewer": viewer,
             "assigned_name": str(contractor) if contractor else None,
             "assigned_phone": contacts.get("assigned_phone"),
             "assigned_max_username": contacts.get("assigned_max_username"),
@@ -816,9 +860,8 @@ def work_request_detail(request, pk: int):
             "assigned_contacts": contacts.get("assigned_contacts") or [],
             "client_name": str(wr.user),
             "client_phone": (wr.user.phone or "").strip() or None,
-            # Действия клиента — только владельцу заявки.
             "can_confirm_slot": is_client and wr.status == "scheduling" and bool(slots),
-            "needs_confirm_amount": is_client and wr.status == "awaiting_client",
+            "needs_confirm_amount": needs_client_pay,
             "needs_rating": work_request_needs_rating(wr) if is_client else False,
             "needs_photos": requires_photos and wr.status == "draft" and is_client,
             "photo_count": len(photo_urls),
@@ -835,6 +878,22 @@ def work_request_detail(request, pk: int):
             else None,
             "pay_method": wr.pay_method or "",
             "updated_at": wr.updated_at.isoformat() if wr.updated_at else "",
+            "can_mark_done": can_mark
+            and (
+                (is_client and not client_done)
+                or (is_executor and not exec_done)
+            ),
+            "can_cancel": can_cancel and (is_client or is_executor),
+            "client_marked_done": client_done,
+            "executor_marked_done": exec_done,
+            "needs_executor_payment_report": needs_exec_pay,
+            "same_person": same_person,
+            "client_cancel_comment": (wr.client_cancel_comment or "").strip(),
+            "executor_cancel_comment": (wr.executor_cancel_comment or "").strip(),
+            "amount_mismatch_message": (wr.amount_mismatch_message or "").strip(),
+            "amount_mismatch_due": float(wr.amount_mismatch_due)
+            if wr.amount_mismatch_due is not None
+            else None,
         }
     )
     return json_response(payload)
@@ -1591,31 +1650,171 @@ def work_request_submit(request, pk: int):
 @api_login_required
 @require_http_methods(["POST"])
 def work_request_cancel(request, pk: int):
-    """Клиент отменяет свою заявку (поиск мастера / ранняя стадия)."""
-    from services.work_request_cancel import cancel_client_work_request
+    """Клиент или исполнитель отменяет заявку (с комментарием)."""
+    from services.work_request_cancel import (
+        cancel_client_work_request,
+        cancel_executor_work_request,
+    )
 
-    wr = WorkRequest.objects.filter(pk=pk, user=request.bot_user).first()
+    wr = (
+        WorkRequest.objects.select_related("assigned_contractor", "assigned_contractor__user")
+        .filter(pk=pk)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    data = parse_json(request)
+    comment = (data.get("comment") or data.get("note") or "").strip()
+    is_client = wr.user_id == request.bot_user.id
+    is_executor = bool(
+        wr.assigned_contractor_id
+        and wr.assigned_contractor.user_id == request.bot_user.id
+    )
+    try:
+        if is_client:
+            if wr.status in {
+                "scheduling",
+                "in_progress",
+                "awaiting_client",
+                "awaiting_commission",
+            } and not comment:
+                return json_response(
+                    {"error": "comment_required", "detail": "Укажите комментарий к отмене."},
+                    status=400,
+                )
+            cancel_client_work_request(
+                request.bot_user,
+                wr,
+                note="Отменено клиентом в приложении.",
+                comment=comment,
+            )
+        elif is_executor:
+            cancel_executor_work_request(request.bot_user, wr, comment=comment)
+        else:
+            return json_response({"error": "not_found"}, status=404)
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    wr.refresh_from_db()
+    return json_response(
+        {
+            "ok": True,
+            "id": wr.id,
+            "status": wr.status,
+            "client_cancel_comment": wr.client_cancel_comment or "",
+            "executor_cancel_comment": wr.executor_cancel_comment or "",
+        }
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_mark_done(request, pk: int):
+    """Клиент или мастер жмёт «Работа выполнена»."""
+    from services.work_request_completion import mark_work_done
+
+    wr = (
+        WorkRequest.objects.select_related(
+            "role", "assigned_contractor", "assigned_contractor__user", "user"
+        )
+        .filter(pk=pk)
+        .first()
+    )
     if not wr:
         return json_response({"error": "not_found"}, status=404)
     try:
-        cancel_client_work_request(
-            request.bot_user,
-            wr,
-            note="Отменено клиентом в приложении.",
-        )
+        result = mark_work_done(request.bot_user, wr)
     except ValueError as exc:
-        return json_response({"error": str(exc)}, status=400)
+        code = str(exc)
+        detail = {
+            "forbidden": "Нет доступа к этой заявке.",
+            "not_in_progress": "Заявка ещё не в работе (нужно согласовать время).",
+            "already_marked": "Вы уже отметили заявку выполненной.",
+        }.get(code, code)
+        return json_response({"error": code, "detail": detail}, status=400)
     wr.refresh_from_db()
-    return json_response({"ok": True, "id": wr.id, "status": wr.status})
+    result["status"] = wr.status
+    result["id"] = wr.id
+    return json_response(result)
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_report_payment(request, pk: int):
+    """Мастер указывает способ и сумму оплаты после того, как оба нажали «выполнено»."""
+    from database.models import PendingAction, WorkRequestPayMethod
+    from services.work_request_completion import (
+        COMPLETE_PENDING,
+        _finalize_executor_report,
+        both_parties_marked_done,
+        parse_money,
+    )
+
+    wr = (
+        WorkRequest.objects.select_related(
+            "assigned_contractor", "assigned_contractor__user", "role", "user"
+        )
+        .filter(pk=pk)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    if not wr.assigned_contractor or wr.assigned_contractor.user_id != request.bot_user.id:
+        return json_response({"error": "forbidden"}, status=403)
+    if not both_parties_marked_done(wr):
+        return json_response({"error": "both_must_mark_done"}, status=400)
+    if wr.reported_amount is not None:
+        return json_response({"error": "already_reported"}, status=400)
+
+    data = parse_json(request)
+    method_raw = (data.get("pay_method") or "").strip().lower()
+    if method_raw in {"transfer", "перевод", "1"}:
+        method = WorkRequestPayMethod.TRANSFER
+    elif method_raw in {"cash", "наличные", "наличка", "2"}:
+        method = WorkRequestPayMethod.CASH
+    else:
+        return json_response({"error": "pay_method_required"}, status=400)
+    amount = parse_money(str(data.get("amount") or ""))
+    if amount is None:
+        return json_response({"error": "amount_required"}, status=400)
+
+    pending, _ = PendingAction.objects.get_or_create(user=request.bot_user)
+    pending.pending_kind = COMPLETE_PENDING
+    payload = {
+        "step": "amount",
+        "work_request_id": wr.id,
+        "pay_method": method,
+        "amount": str(amount),
+    }
+    pending.pending_payload = payload
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    reply = _finalize_executor_report(
+        request.bot_user,
+        pending,
+        payload,
+        wr,
+        receipt_bytes=None,
+    )
+    wr.refresh_from_db()
+    return json_response(
+        {
+            "ok": True,
+            "message": reply,
+            "status": wr.status,
+            "reported_amount": float(wr.reported_amount) if wr.reported_amount else None,
+            "commission_amount": float(wr.commission_amount)
+            if wr.commission_amount
+            else None,
+        }
+    )
 
 
 @api_login_required
 @require_http_methods(["POST"])
 def work_request_confirm_amount(request, pk: int):
-    """Клиент подтверждает сумму (R24) — та же логика, что ответ в боте."""
+    """Клиент указывает способ/сумму оплаты (после опроса или из приложения)."""
     from decimal import Decimal
 
-    from database.models import PendingAction, WorkRequestStatus
+    from database.models import PendingAction, WorkRequestPayMethod, WorkRequestStatus
     from services.work_request_completion import (
         CLIENT_CONFIRM_PENDING,
         _apply_client_confirmation,
@@ -1626,26 +1825,45 @@ def work_request_confirm_amount(request, pk: int):
     wr = WorkRequest.objects.filter(pk=pk, user=user).first()
     if not wr:
         return json_response({"error": "not_found"}, status=404)
-    if wr.status != WorkRequestStatus.AWAITING_CLIENT:
+    if wr.confirmed_amount is not None:
+        return json_response({"error": "already_confirmed"}, status=400)
+    if wr.reported_amount is None:
+        return json_response({"error": "executor_not_reported"}, status=400)
+    if wr.status not in {
+        WorkRequestStatus.AWAITING_CLIENT,
+        WorkRequestStatus.AWAITING_COMMISSION,
+        WorkRequestStatus.DONE,
+    }:
         return json_response({"error": "not_awaiting_confirm"}, status=400)
 
     data = parse_json(request)
     confirmed = bool(data.get("confirmed"))
     amount = data.get("amount")
+    method_raw = (data.get("pay_method") or "").strip().lower()
+    pay_method = ""
+    if method_raw in {"transfer", "перевод", "1"}:
+        pay_method = WorkRequestPayMethod.TRANSFER
+    elif method_raw in {"cash", "наличные", "наличка", "2"}:
+        pay_method = WorkRequestPayMethod.CASH
     if confirmed:
         money = wr.reported_amount
         if money is None:
             return json_response({"error": "no_reported_amount"}, status=400)
+        pay_method = pay_method or wr.pay_method or WorkRequestPayMethod.CASH
     else:
         money = parse_money(str(amount)) if amount is not None else None
         if money is None:
             return json_response({"error": "amount_required"}, status=400)
+        if not pay_method:
+            return json_response({"error": "pay_method_required"}, status=400)
 
     pending, _ = PendingAction.objects.get_or_create(user=user)
     pending.pending_kind = CLIENT_CONFIRM_PENDING
-    pending.pending_payload = {"work_request_id": wr.id}
+    pending.pending_payload = {"work_request_id": wr.id, "step": "amount"}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
-    reply = _apply_client_confirmation(wr, Decimal(money), pending)
+    reply = _apply_client_confirmation(
+        wr, Decimal(money), pending, pay_method=pay_method
+    )
     wr.refresh_from_db()
     from services.work_request_rating import work_request_needs_rating
 
