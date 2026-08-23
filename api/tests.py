@@ -318,20 +318,22 @@ class AppEmitHookTests(TestCase):
             user=self.client_user,
             role=self.role,
             description="Готово",
-            status=WorkRequestStatus.AWAITING_CLIENT,
+            status=WorkRequestStatus.AWAITING_COMMISSION,
             pay_method=WorkRequestPayMethod.CASH,
             reported_amount=Decimal("2000"),
+            commission_amount=Decimal("200"),
             assigned_contractor=self.profile,
         )
         tok = MobileAuthToken.objects.create(bot_user=self.client_user)
         resp = self.client.post(
             f"/api/v1/work-requests/{wr.id}/confirm-amount",
-            data=json.dumps({"confirmed": True}),
+            data=json.dumps({"confirmed": True, "pay_method": "cash"}),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {tok.token}",
         )
         self.assertEqual(resp.status_code, 200)
         wr.refresh_from_db()
+        self.assertEqual(wr.confirmed_amount, Decimal("2000"))
         self.assertEqual(wr.status, "awaiting_commission")
         body = resp.json()
         self.assertTrue(body.get("needs_rating"))

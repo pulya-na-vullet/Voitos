@@ -379,6 +379,34 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             reject_commission(req, note=(request.POST.get("note") or "").strip())
             messages.info(request, f"Комиссия по заявке #{req.id} отклонена.")
             return redirect("panel:work_request_detail", pk=pk)
+        if action == "notify_amount_mismatch":
+            from services.work_request_completion import notify_executor_amount_mismatch
+
+            try:
+                body = notify_executor_amount_mismatch(
+                    req, note=(request.POST.get("note") or "").strip()
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect("panel:work_request_detail", pk=pk)
+            log_manager_action(
+                request.user,
+                action="amount_mismatch_notify",
+                title=f"Расхождение суммы: уведомление по заявке #{req.id}",
+                detail=body[:500],
+                meta={"work_request_id": req.id},
+            )
+            messages.success(
+                request,
+                "Исполнителю отправлено сообщение о доплате (экран «Работа»).",
+            )
+            return redirect("panel:work_request_detail", pk=pk)
+        if action == "clear_amount_mismatch":
+            from services.work_request_completion import clear_amount_mismatch
+
+            clear_amount_mismatch(req)
+            messages.success(request, f"Расхождение по заявке #{req.id} снято.")
+            return redirect("panel:work_request_detail", pk=pk)
         if action == "send_client_survey":
             from services.work_request_client_survey import start_client_service_survey
 

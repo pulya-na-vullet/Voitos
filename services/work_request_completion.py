@@ -213,8 +213,13 @@ def route_contractor_receipt_photo(
 
 
 def contractor_blocked_for_new_offers(contractor: ContractorProfile) -> bool:
-    """Новые заявки закрыты, пока не закрыта комиссия / активная работа (по всем ролям УЗ)."""
+    """Новые заявки закрыты, пока не закрыта комиссия / активная работа / доплата."""
     user_id = contractor.user_id
+    if WorkRequest.objects.filter(
+        assigned_contractor__user_id=user_id,
+        amount_mismatch_due__gt=0,
+    ).exclude(amount_mismatch_message="").exists():
+        return True
     return WorkRequest.objects.filter(
         assigned_contractor__user_id=user_id,
         commission_status__in=[
@@ -231,6 +236,159 @@ def contractor_blocked_for_new_offers(contractor: ContractorProfile) -> bool:
             WorkRequestStatus.AWAITING_COMMISSION,
         ],
     ).exists()
+
+
+def both_parties_marked_done(req: WorkRequest) -> bool:
+    return bool(req.client_marked_done_at and req.executor_marked_done_at)
+
+
+def can_mark_work_done(req: WorkRequest) -> bool:
+    if req.status == WorkRequestStatus.IN_PROGRESS:
+        return True
+    if req.status == WorkRequestStatus.SCHEDULING and (req.agreed_slot or "").strip():
+        return True
+    return False
+
+
+def mark_work_done(user: BotUser, req: WorkRequest) -> dict:
+    """Клиент или исполнитель жмёт «Работа выполнена». Оба → опрос оплаты у мастера."""
+    is_client = req.user_id == user.id
+    is_executor = bool(
+        req.assigned_contractor_id and req.assigned_contractor.user_id == user.id
+    )
+    if not (is_client or is_executor):
+        raise ValueError("forbidden")
+    if not can_mark_work_done(req):
+        raise ValueError("not_in_progress")
+
+    now = timezone.now()
+    update_fields = ["updated_at"]
+    if req.status == WorkRequestStatus.SCHEDULING:
+        req.status = WorkRequestStatus.IN_PROGRESS
+        update_fields.append("status")
+
+    if is_client:
+        if req.client_marked_done_at:
+            raise ValueError("already_marked")
+        req.client_marked_done_at = now
+        update_fields.append("client_marked_done_at")
+    else:
+        if req.executor_marked_done_at:
+            raise ValueError("already_marked")
+        req.executor_marked_done_at = now
+        update_fields.append("executor_marked_done_at")
+
+    req.save(update_fields=update_fields)
+    both = both_parties_marked_done(req)
+    payload = {
+        "ok": True,
+        "both_done": both,
+        "client_marked_done": bool(req.client_marked_done_at),
+        "executor_marked_done": bool(req.executor_marked_done_at),
+        "needs_executor_payment_report": False,
+        "message": "",
+    }
+    if not both:
+        waiting = "клиента" if is_executor else "мастера"
+        payload["message"] = (
+            f"Отметили заявку #{req.id} как выполненную с вашей стороны. "
+            f"Ждём отметку {waiting}."
+        )
+        return payload
+
+    contractor = req.assigned_contractor
+    if contractor:
+        try:
+            pending, _ = PendingAction.objects.get_or_create(user=contractor.user)
+            ask = start_completion(contractor.user, pending, require_both_done=False)
+            from services.work_request_dispatch import _default_send_fn
+
+            _default_send_fn()(contractor.user, ask)
+        except Exception:
+            logger.exception("prompt executor payment after both done WR %s", req.id)
+    if is_executor:
+        payload["needs_executor_payment_report"] = True
+        payload["message"] = (
+            f"Оба отметили заявку #{req.id} выполненной.\n"
+            "Как клиент рассчитался?\n"
+            "1 / перевод  или  2 / наличные — укажите в приложении или в MAX."
+        )
+    else:
+        payload["message"] = (
+            f"Оба отметили заявку #{req.id} выполненной. "
+            "Мастеру отправлен запрос, как с ним рассчитались."
+        )
+    return payload
+
+
+def mismatch_topup_amount(req: WorkRequest) -> Decimal | None:
+    reported = req.reported_amount
+    confirmed = req.confirmed_amount
+    if reported is None or confirmed is None:
+        return None
+    if Decimal(confirmed) <= Decimal(reported):
+        return None
+    due = commission_for_amount(Decimal(confirmed)) - commission_for_amount(
+        Decimal(reported)
+    )
+    if due <= 0:
+        return None
+    return due.quantize(Decimal("0.01"))
+
+
+def notify_executor_amount_mismatch(req: WorkRequest, *, note: str = "") -> str:
+    due = mismatch_topup_amount(req)
+    if due is None:
+        raise ValueError("no_mismatch")
+    body = (
+        f"Сумма расходится, просьба доплатить разницу {due:.0f} ₽ "
+        "чтобы вернуть доступ к новым заказам."
+    )
+    if note.strip():
+        body = f"{body}\n{note.strip()}"
+    body = f"{body}\n\n{platform_payee_lines()}"
+    req.amount_mismatch_due = due
+    req.amount_mismatch_message = body
+    req.save(
+        update_fields=["amount_mismatch_due", "amount_mismatch_message", "updated_at"]
+    )
+    if req.assigned_contractor:
+        try:
+            from services.work_request_dispatch import _default_send_fn
+
+            _default_send_fn()(
+                req.assigned_contractor.user,
+                f"Работа: {body}",
+            )
+        except Exception:
+            logger.exception("notify mismatch WR %s", req.id)
+    return body
+
+
+def clear_amount_mismatch(req: WorkRequest) -> None:
+    req.amount_mismatch_due = None
+    req.amount_mismatch_message = ""
+    req.save(
+        update_fields=["amount_mismatch_due", "amount_mismatch_message", "updated_at"]
+    )
+    close_task_for_source(AdminTaskKind.WORK_AMOUNT_MISMATCH, "WorkRequest", req.id)
+
+
+def work_screen_notices_for_user(user: BotUser) -> list[dict]:
+    rows = (
+        WorkRequest.objects.filter(assigned_contractor__user=user)
+        .exclude(amount_mismatch_message="")
+        .filter(amount_mismatch_due__gt=0)
+        .order_by("-updated_at")[:5]
+    )
+    return [
+        {
+            "work_request_id": r.id,
+            "message": r.amount_mismatch_message,
+            "amount_due": float(r.amount_mismatch_due or 0),
+        }
+        for r in rows
+    ]
 
 
 def schedule_message(
@@ -262,7 +420,9 @@ def cancel_scheduled_for_request(req: WorkRequest, kind: str = SCHEDULED_KIND_CL
     return n
 
 
-def start_completion(user: BotUser, pending: PendingAction) -> str:
+def start_completion(
+    user: BotUser, pending: PendingAction, *, require_both_done: bool = True
+) -> str:
     req = active_job_for_user(user)
     if not req:
         if not ContractorProfile.objects.filter(user=user).exists():
@@ -270,6 +430,16 @@ def start_completion(user: BotUser, pending: PendingAction) -> str:
         return (
             "Нет заявки в статусе «в работе». "
             "Сначала примите предложение и выполните заказ."
+        )
+    now = timezone.now()
+    if not req.executor_marked_done_at:
+        req.executor_marked_done_at = now
+        req.save(update_fields=["executor_marked_done_at", "updated_at"])
+    if require_both_done and not req.client_marked_done_at:
+        return (
+            f"Заявка #{req.id}: отметили выполнениеку с вашей стороны.\n"
+            "Когда клиент нажмёт «Работа выполнена» в приложении — "
+            "спросим, как с вами рассчитались."
         )
     pending.pending_kind = COMPLETE_PENDING
     pending.pending_payload = {"step": "method", "work_request_id": req.id}
@@ -401,11 +571,18 @@ def _finalize_executor_report(
         return "Ошибка данных отчёта. Напишите «заявка выполнена» снова."
 
     now = timezone.now()
+    commission = commission_for_amount(amount)
+    earned = executor_net_earned(amount, commission)
     req.pay_method = method
     req.reported_amount = amount
     req.executor_reported_at = now
     req.client_confirm_due_at = now + timedelta(minutes=CLIENT_CONFIRM_DELAY_MINUTES)
-    req.status = WorkRequestStatus.AWAITING_CLIENT
+    req.commission_amount = commission
+    req.executor_earned_amount = earned
+    req.commission_status = WorkRequestCommissionStatus.AWAITING
+    req.status = WorkRequestStatus.AWAITING_COMMISSION
+    if not req.executor_marked_done_at:
+        req.executor_marked_done_at = now
     if receipt_bytes:
         req.job_receipt.save(
             (filename or "receipt.jpg")[:120],
@@ -422,7 +599,20 @@ def _finalize_executor_report(
         send_at=req.client_confirm_due_at,
         meta={"work_request_id": req.id},
     )
-    pending.clear_pending()
+
+    # Сразу просим комиссию 10% по сумме мастера.
+    ask = (
+        f"Отчёт по заявке #{req.id} принят: {amount} ₽ "
+        f"({req.get_pay_method_display()}).\n"
+        f"Комиссия 10%: {commission} ₽. Вам остаётся: {earned} ₽.\n\n"
+        f"Переведите комиссию:\n{platform_payee_lines()}\n\n"
+        "Пришлите фото или PDF чека.\n"
+        "Пока чек не принят — новые заявки не приходят.\n"
+        f"Через {CLIENT_CONFIRM_DELAY_MINUTES} мин спросим клиента про оплату."
+    )
+    pending.pending_kind = COMMISSION_PENDING
+    pending.pending_payload = {"work_request_id": req.id}
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     ActivityLog.objects.create(
         user=user,
         kind=ActivityKind.CONTRACTOR_REPLY,
@@ -430,37 +620,28 @@ def _finalize_executor_report(
         detail=f"{method} {amount} ₽",
         meta={"work_request_id": req.id},
     )
-    return (
-        f"Отчёт по заявке #{req.id} принят: {amount} ₽ "
-        f"({req.get_pay_method_display()}).\n"
-        f"Через {CLIENT_CONFIRM_DELAY_MINUTES} мин спросим клиента.\n"
-        "После подтверждения — комиссия 10%."
-    )
+    return ask
 
 
 def _client_confirm_message(req: WorkRequest) -> str:
-    amount = req.reported_amount or Decimal("0")
-    if req.pay_method == WorkRequestPayMethod.TRANSFER:
-        return (
-            f"Заявка #{req.id} ({req.role.name}): мастер указал перевод {amount} ₽.\n\n"
-            "1 / да — верно\n"
-            "2 / нет — напишите свою сумму числом"
-        )
     return (
-        f"Заявка #{req.id} ({req.role.name}): мастер указал наличные {amount} ₽.\n\n"
-        "1 / да — верно\n"
-        "2 / нет — напишите свою сумму числом"
+        f"Заявка #{req.id} ({req.role.name}): "
+        "пожалуйста, актуализируйте информацию по заказу.\n\n"
+        "Как вы рассчитались с мастером?\n"
+        "1 / перевод\n"
+        "2 / наличные\n\n"
+        "Затем укажите сумму, которую оплатили, числом (например: 2500)."
     )
 
 
 def on_client_confirm_message_sent(msg: ScheduledBotMessage) -> None:
-    """После отправки отложенного сообщения — ждём ответ клиента."""
+    """После отправки отложенного сообщения — ждём ответ клиента (способ + сумма)."""
     req_id = (msg.meta or {}).get("work_request_id")
     if not req_id:
         return
     pending, _ = PendingAction.objects.get_or_create(user=msg.user)
     pending.pending_kind = CLIENT_CONFIRM_PENDING
-    pending.pending_payload = {"work_request_id": req_id}
+    pending.pending_payload = {"work_request_id": req_id, "step": "method"}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
     try:
         from api.emit import emit_app_event
@@ -468,7 +649,7 @@ def on_client_confirm_message_sent(msg: ScheduledBotMessage) -> None:
         emit_app_event(
             msg.user,
             ntype="work_request.confirm_amount",
-            title="Подтвердите сумму",
+            title="Актуализируйте оплату заказа",
             body=(msg.text or "")[:500],
             entity_type="work_request",
             entity_id=int(req_id),
@@ -480,85 +661,124 @@ def on_client_confirm_message_sent(msg: ScheduledBotMessage) -> None:
 def handle_client_confirm_step(user: BotUser, text: str, pending: PendingAction) -> str:
     payload = dict(pending.pending_payload or {})
     req = (
-        WorkRequest.objects.select_related("assigned_contractor", "assigned_contractor__user", "role")
+        WorkRequest.objects.select_related(
+            "assigned_contractor", "assigned_contractor__user", "role"
+        )
         .filter(pk=payload.get("work_request_id"), user=user)
         .first()
     )
     if not req:
         pending.clear_pending()
         return "Заявка не найдена."
-    if req.status != WorkRequestStatus.AWAITING_CLIENT:
+    if req.confirmed_amount is not None:
+        pending.clear_pending()
+        return "Подтверждение по этой заявке уже не требуется."
+    if req.status not in {
+        WorkRequestStatus.AWAITING_CLIENT,
+        WorkRequestStatus.AWAITING_COMMISSION,
+        WorkRequestStatus.DONE,
+    }:
         pending.clear_pending()
         return "Подтверждение по этой заявке уже не требуется."
 
+    step = payload.get("step") or "method"
     raw = (text or "").strip().lower().replace("ё", "е")
-    amount = parse_money(text)
-    if raw in _YES:
-        amount = req.reported_amount
-    elif raw in _NO:
-        pending.pending_payload = {
-            "work_request_id": req.id,
-            "step": "amount_only",
-        }
-        pending.save(update_fields=["pending_payload", "updated_at"])
-        if req.pay_method == WorkRequestPayMethod.CASH:
-            return "Напишите сумму, которую вы выплатили исполнителю наличными (₽)."
-        return "Напишите фактическую сумму перевода (₽)."
-    elif payload.get("step") == "amount_only" and amount is None:
-        return "Нужна сумма числом, например: 2500"
-    elif amount is None:
-        return (
-            "Ответьте «да», если сумма верна, или укажите сумму числом.\n"
-            + _client_confirm_message(req)
-        )
 
-    return _apply_client_confirmation(req, amount, pending)
+    if step == "method":
+        if raw in _TRANSFER or any(x in raw for x in ("перевод", "безнал", "карта")):
+            payload["pay_method"] = WorkRequestPayMethod.TRANSFER
+            payload["step"] = "amount"
+            pending.pending_payload = payload
+            pending.save(update_fields=["pending_payload", "updated_at"])
+            return "Укажите сумму перевода в рублях (например: 2500)."
+        if raw in _CASH or "налич" in raw:
+            payload["pay_method"] = WorkRequestPayMethod.CASH
+            payload["step"] = "amount"
+            pending.pending_payload = payload
+            pending.save(update_fields=["pending_payload", "updated_at"])
+            return "Укажите сумму наличными в рублях (например: 2500)."
+        # Совместимость: «да» = сумма мастера; число = сразу сумма
+        amount = parse_money(text)
+        if raw in _YES and req.reported_amount is not None:
+            payload["pay_method"] = req.pay_method or WorkRequestPayMethod.CASH
+            return _apply_client_confirmation(
+                req, Decimal(req.reported_amount), pending, pay_method=payload["pay_method"]
+            )
+        if amount is not None:
+            payload["pay_method"] = req.pay_method or WorkRequestPayMethod.CASH
+            return _apply_client_confirmation(
+                req, amount, pending, pay_method=payload["pay_method"]
+            )
+        return "Ответьте: 1 / перевод  или  2 / наличные.\n" + _client_confirm_message(req)
+
+    if step == "amount":
+        amount = parse_money(text)
+        if amount is None:
+            return "Не понял сумму. Напишите число, например: 2500"
+        method = payload.get("pay_method") or req.pay_method or WorkRequestPayMethod.CASH
+        return _apply_client_confirmation(req, amount, pending, pay_method=method)
+
+    return _client_confirm_message(req)
 
 
 def _apply_client_confirmation(
-    req: WorkRequest, amount: Decimal, pending: PendingAction
+    req: WorkRequest,
+    amount: Decimal,
+    pending: PendingAction,
+    *,
+    pay_method: str = "",
 ) -> str:
     now = timezone.now()
-    commission = commission_for_amount(amount)
-    earned = executor_net_earned(amount, commission)
+    method = pay_method or req.pay_method or ""
     req.confirmed_amount = amount
     req.client_confirmed_at = now
-    req.commission_amount = commission
-    req.executor_earned_amount = earned
-    req.commission_status = WorkRequestCommissionStatus.AWAITING
-    req.status = WorkRequestStatus.AWAITING_COMMISSION
-    req.save(
-        update_fields=[
-            "confirmed_amount",
-            "client_confirmed_at",
-            "commission_amount",
-            "executor_earned_amount",
-            "commission_status",
-            "status",
-            "updated_at",
-        ]
-    )
+    if method in WorkRequestPayMethod.values:
+        req.client_pay_method = method
+    # Комиссия уже могла быть выставлена по сумме мастера — пересчёт при расхождении.
+    reported = req.reported_amount
+    update_fields = [
+        "confirmed_amount",
+        "client_confirmed_at",
+        "client_pay_method",
+        "updated_at",
+    ]
+    mismatch_due = None
+    if reported is not None and Decimal(amount) > Decimal(reported):
+        mismatch_due = (
+            commission_for_amount(Decimal(amount))
+            - commission_for_amount(Decimal(reported))
+        ).quantize(Decimal("0.01"))
+        if mismatch_due > 0:
+            req.amount_mismatch_due = mismatch_due
+            update_fields.append("amount_mismatch_due")
+            method_label = dict(WorkRequestPayMethod.choices).get(method, method or "—")
+            try:
+                upsert_task(
+                    kind=AdminTaskKind.WORK_AMOUNT_MISMATCH,
+                    title=f"Расхождение суммы: заявка #{req.id}",
+                    description=(
+                        f"Роль: {req.role.name}\n"
+                        f"Описание: {(req.description or '')[:400]}\n"
+                        f"Мастер указал: {reported} ₽"
+                        f" ({req.get_pay_method_display() or '—'})\n"
+                        f"Клиент указал: {amount} ₽ ({method_label})\n"
+                        f"Доплата комиссии: {mismatch_due} ₽"
+                    ),
+                    user=(
+                        req.assigned_contractor.user
+                        if req.assigned_contractor
+                        else req.user
+                    ),
+                    action_url=f"/panel/work-requests/{req.id}/",
+                    source_model="WorkRequest",
+                    source_id=req.id,
+                    priority=15,
+                )
+            except Exception:
+                logger.exception("admin task mismatch WR %s", req.id)
+
+    req.save(update_fields=update_fields)
     pending.clear_pending()
-
-    contractor = req.assigned_contractor
-    if contractor:
-        ask = (
-            f"Клиент подтвердил {amount} ₽ по заявке #{req.id}.\n"
-            f"Комиссия 10%: {commission} ₽. Вам остаётся: {earned} ₽.\n\n"
-            f"Переведите комиссию:\n{platform_payee_lines()}\n\n"
-            "Пришлите фото или PDF чека.\n"
-            "Пока чек не принят — новые заявки не приходят."
-        )
-        try:
-            from services.work_request_dispatch import _default_send_fn
-
-            _default_send_fn()(contractor.user, ask)
-        except Exception:
-            logger.exception("Failed to ask commission for WR %s", req.id)
-        c_pending, _ = PendingAction.objects.get_or_create(user=contractor.user)
-        c_pending.pending_kind = COMMISSION_PENDING
-        c_pending.pending_payload = {"work_request_id": req.id}
-        c_pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
 
     try:
         from services.work_request_rating import ask_client_for_rating, rating_ask_message
@@ -567,13 +787,17 @@ def _apply_client_confirmation(
         rating_line = "\n\n" + rating_ask_message(req)
     except Exception:
         logger.exception("Failed to ask rating after confirm WR %s", req.id)
-        rating_line = (
-            "\n\nОцените работу исполнителя от 1 до 5 (5 — отлично)."
-        )
+        rating_line = "\n\nОцените работу исполнителя от 1 до 5 (5 — отлично)."
 
+    extra = ""
+    if mismatch_due and mismatch_due > 0:
+        extra = (
+            f"\nСумма выше отчёта мастера — администратор проверит расхождение "
+            f"(возможная доплата комиссии {mismatch_due} ₽)."
+        )
     return (
-        f"Спасибо! Зафиксировали сумму {amount} ₽ по заявке #{req.id}.\n"
-        "Исполнителю отправлен запрос на комиссию сервиса."
+        f"Спасибо! Зафиксировали сумму {amount} ₽ по заявке #{req.id}."
+        + extra
         + rating_line
     )
 

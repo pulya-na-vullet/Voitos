@@ -575,7 +575,7 @@ fun WorkRequestDetailScreen(
                     onClick = { onConfirmAmount(wr.id) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = voitosPrimaryButtonColors(),
-                ) { Text("Подтвердить сумму") }
+                ) { Text("Указать оплату по заказу") }
             }
             if (wr.needsRating) {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -585,7 +585,157 @@ fun WorkRequestDetailScreen(
                     colors = voitosPrimaryButtonColors(),
                 ) { Text("Оценить работу мастера") }
             }
+
+            if (wr.canMarkDone) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        scope.launch {
+                            confirming = true
+                            error = null
+                            try {
+                                val res = client.markWorkRequestDone(wr.id)
+                                message = res.message.ifBlank { "Отметили выполнениеку выполненной" }
+                                reload()
+                            } catch (e: Exception) {
+                                error = friendlyNetworkError(e)
+                            } finally {
+                                confirming = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !confirming,
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Работа выполнена") }
+            } else if (wr.status == "in_progress" || (wr.status == "scheduling" && wr.agreedSlot.isNotBlank())) {
+                Spacer(modifier = Modifier.height(8.dp))
+                val waitText = when {
+                    wr.viewer == "executor" && wr.executorMarkedDone && !wr.clientMarkedDone ->
+                        "Ждём отметку клиента «Работа выполнена»"
+                    wr.viewer != "executor" && wr.clientMarkedDone && !wr.executorMarkedDone ->
+                        "Ждём отметку мастера «Работа выполнена»"
+                    else -> ""
+                }
+                if (waitText.isNotBlank()) {
+                    Text(waitText, color = VoitosColors.Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
+            if (wr.needsExecutorPaymentReport) {
+                Spacer(modifier = Modifier.height(12.dp))
+                ExecutorPaymentReportCard(
+                    enabled = !confirming,
+                    onSubmit = { method, amount ->
+                        scope.launch {
+                            confirming = true
+                            error = null
+                            try {
+                                val res = client.reportWorkRequestPayment(wr.id, method, amount)
+                                message = res.message.ifBlank { "Отчёт по оплате принят" }
+                                reload()
+                            } catch (e: Exception) {
+                                error = friendlyNetworkError(e)
+                            } finally {
+                                confirming = false
+                            }
+                        }
+                    },
+                )
+            }
+
+            if (wr.canCancel) {
+                Spacer(modifier = Modifier.height(8.dp))
+                var cancelComment by remember { mutableStateOf("") }
+                var showCancel by remember { mutableStateOf(false) }
+                if (!showCancel) {
+                    TextButton(
+                        onClick = { showCancel = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Отменить заявку", color = VoitosColors.Danger) }
+                } else {
+                    PanelCard {
+                        Text("Комментарий к отмене", color = VoitosColors.Text)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        androidx.compose.material3.OutlinedTextField(
+                            value = cancelComment,
+                            onValueChange = { cancelComment = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Почему отменяете?") },
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    confirming = true
+                                    error = null
+                                    try {
+                                        client.cancelWorkRequest(wr.id, cancelComment.trim())
+                                        message = "Заявка отменена"
+                                        reload()
+                                    } catch (e: Exception) {
+                                        error = friendlyNetworkError(e)
+                                    } finally {
+                                        confirming = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !confirming && cancelComment.trim().isNotEmpty(),
+                            colors = voitosPrimaryButtonColors(),
+                        ) { Text("Подтвердить отмену") }
+                        TextButton(onClick = { showCancel = false }) {
+                            Text("Назад", color = VoitosColors.Muted)
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun ExecutorPaymentReportCard(
+    enabled: Boolean,
+    onSubmit: (payMethod: String, amount: Double) -> Unit,
+) {
+    var method by remember { mutableStateOf("cash") }
+    var amountText by remember { mutableStateOf("") }
+    PanelCard {
+        Text("Как рассчитались?", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { method = "cash" }, enabled = enabled) {
+                Text(
+                    "Наличка",
+                    color = if (method == "cash") VoitosColors.Accent2 else VoitosColors.Muted,
+                )
+            }
+            TextButton(onClick = { method = "transfer" }, enabled = enabled) {
+                Text(
+                    "Перевод",
+                    color = if (method == "transfer") VoitosColors.Accent2 else VoitosColors.Muted,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        androidx.compose.material3.OutlinedTextField(
+            value = amountText,
+            onValueChange = { amountText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Сумма, ₽") },
+            enabled = enabled,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                val amount = amountText.replace(',', '.').toDoubleOrNull()
+                if (amount != null && amount > 0) onSubmit(method, amount)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled && amountText.isNotBlank(),
+            colors = voitosPrimaryButtonColors(),
+        ) { Text("Отправить отчёт по оплате") }
     }
 }
 
@@ -634,6 +784,7 @@ fun ConfirmAmountScreen(
 ) {
     BackHandler(enabled = true) { onBack() }
     var amount by remember { mutableStateOf("") }
+    var payMethod by remember { mutableStateOf("cash") }
     var message by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -641,8 +792,18 @@ fun ConfirmAmountScreen(
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         VoitosBackButton(onClick = onBack)
-        Text("Подтвердите сумму", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        Text("Оплата по заказу", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Text("Заявка #$workRequestId", color = VoitosColors.Muted)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Как рассчитались с мастером?", color = VoitosColors.Text)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { payMethod = "cash" }, enabled = !loading) {
+                Text("Наличка", color = if (payMethod == "cash") VoitosColors.Accent2 else VoitosColors.Muted)
+            }
+            TextButton(onClick = { payMethod = "transfer" }, enabled = !loading) {
+                Text("Перевод", color = if (payMethod == "transfer") VoitosColors.Accent2 else VoitosColors.Muted)
+            }
+        }
         Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = {
@@ -650,7 +811,11 @@ fun ConfirmAmountScreen(
                     loading = true
                     error = null
                     try {
-                        val res = client.confirmAmount(workRequestId, confirmed = true)
+                        val res = client.confirmAmount(
+                            workRequestId,
+                            confirmed = true,
+                            payMethod = payMethod,
+                        )
                         message = res.message.ifBlank { "Сумма подтверждена" }
                         onDone(res.needsRating)
                     } catch (e: Exception) {
@@ -663,7 +828,7 @@ fun ConfirmAmountScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading,
             colors = voitosPrimaryButtonColors(),
-        ) { Text("Да, сумма верна") }
+        ) { Text("Сумма как у мастера") }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = amount,
@@ -687,6 +852,7 @@ fun ConfirmAmountScreen(
                             workRequestId,
                             confirmed = false,
                             amount = v,
+                            payMethod = payMethod,
                         )
                         message = res.message.ifBlank { "Сохранено: $v ₽" }
                         onDone(res.needsRating)
@@ -772,7 +938,7 @@ fun RateMasterScreen(
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
+                        androidx.compose.material3.OutlinedTextField(
                 value = comment,
                 onValueChange = { comment = it.take(2000) },
                 label = { Text("Комментарий (необязательно)", color = VoitosColors.Muted) },
@@ -1281,7 +1447,7 @@ fun NewWorkRequestScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        OutlinedTextField(
+                        androidx.compose.material3.OutlinedTextField(
             value = description,
             onValueChange = { description = it },
             label = { Text("Что случилось", color = VoitosColors.Muted) },

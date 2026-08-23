@@ -82,6 +82,16 @@ urlpatterns = [
         name="work_request_cancel",
     ),
     path(
+        "work-requests/<int:pk>/mark-done",
+        views.work_request_mark_done,
+        name="work_request_mark_done",
+    ),
+    path(
+        "work-requests/<int:pk>/report-payment",
+        views.work_request_report_payment,
+        name="work_request_report_payment",
+    ),
+    path(
         "work-requests/<int:pk>/cancel/",
         views.work_request_cancel,
         name="work_request_cancel_slash",
