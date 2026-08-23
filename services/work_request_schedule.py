@@ -263,6 +263,76 @@ def _publish_slots_to_client(req: WorkRequest, slots: list[str], pending: Pendin
     )
 
 
+def parse_slot_datetime_range(
+    label: str,
+    *,
+    ref_now=None,
+) -> tuple | None:
+    """
+    Разбор окна вида «23.08.2026 10:00–12:00» / «23.08 10:00-12:00».
+    Возвращает (start_dt, end_dt) в текущей TZ или None.
+    """
+    from datetime import datetime, timedelta
+
+    from django.utils import timezone as dj_tz
+
+    raw = (label or "").strip()
+    if not raw:
+        return None
+    m = re.search(
+        r"(?P<d>\d{1,2})\.(?P<m>\d{1,2})(?:\.(?P<y>\d{4}))?"
+        r"\s+(?P<h1>\d{1,2}):(?P<min1>\d{2})\s*[–\-—]\s*"
+        r"(?P<h2>\d{1,2}):(?P<min2>\d{2})",
+        raw,
+    )
+    if not m:
+        return None
+    now = ref_now or dj_tz.localtime(dj_tz.now())
+    year = int(m.group("y") or now.year)
+    day = int(m.group("d"))
+    month = int(m.group("m"))
+    try:
+        start = now.replace(
+            year=year,
+            month=month,
+            day=day,
+            hour=int(m.group("h1")),
+            minute=int(m.group("min1")),
+            second=0,
+            microsecond=0,
+        )
+        end = now.replace(
+            year=year,
+            month=month,
+            day=day,
+            hour=int(m.group("h2")),
+            minute=int(m.group("min2")),
+            second=0,
+            microsecond=0,
+        )
+    except ValueError:
+        return None
+    if end <= start:
+        end = end + timedelta(hours=1)
+    # Если год не указан и дата сильно в прошлом — пробуем следующий год.
+    if m.group("y") is None and start < now - timedelta(days=60):
+        try:
+            start = start.replace(year=year + 1)
+            end = end.replace(year=year + 1)
+        except ValueError:
+            pass
+    return start, end
+
+
+def format_slot_label(start, end) -> str:
+    """Каноническая подпись окна для бота/приложения."""
+    return (
+        f"{start.day:02d}.{start.month:02d}.{start.year} "
+        f"{start.hour:02d}:{start.minute:02d}–"
+        f"{end.hour:02d}:{end.minute:02d}"
+    )
+
+
 def publish_slots_for_master(req: WorkRequest, master: BotUser, slots: list[str]) -> str:
     """Мастер в приложении публикует окна клиенту (без бота)."""
     if req.status != WorkRequestStatus.SCHEDULING:

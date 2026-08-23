@@ -9,6 +9,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -36,6 +37,7 @@ import ru.voitos.app.model.ExecutorMe
 import ru.voitos.app.model.ExecutorJobList
 import ru.voitos.app.model.ExecutorOfferList
 import ru.voitos.app.model.ExecutorOfferRespondResult
+import ru.voitos.app.model.ExecutorScheduleResponse
 import ru.voitos.app.model.ProposeSlotsResult
 import ru.voitos.app.model.ExecutorRegisterResult
 import ru.voitos.app.model.ExecutorRoleList
@@ -673,6 +675,24 @@ class VoitosApiClient(
         if (!response.status.isSuccess()) {
             throw IllegalStateException(
                 "Сервер вернул ${response.status.value} на /executor/jobs. Обновите бэкенд.",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun executorSchedule(weekStart: String? = null): ExecutorScheduleResponse {
+        val response: HttpResponse = http.get("$baseUrl/executor/schedule") {
+            applyAuth()
+            if (!weekStart.isNullOrBlank()) {
+                parameter("week_start", weekStart)
+            }
+        }
+        if (response.status.value == 404) {
+            return ExecutorScheduleResponse()
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                "Сервер вернул ${response.status.value} на /executor/schedule. Обновите бэкенд.",
             )
         }
         return response.body()

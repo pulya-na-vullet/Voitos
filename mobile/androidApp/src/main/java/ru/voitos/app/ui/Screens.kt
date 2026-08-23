@@ -491,12 +491,18 @@ fun WorkRequestDetailScreen(
                 Spacer(modifier = Modifier.height(6.dp))
                 DetailLine("Населённый пункт", wr.clientLocality)
                 DetailLine("Адрес", wr.clientAddress)
-                val masterName = wr.assignedExecutorName ?: wr.assignedName
-                DetailLine("Мастер", masterName.orEmpty())
-                DetailLine("Телефон мастера", wr.assignedPhone.orEmpty())
-                DetailLine("MAX мастера", wr.assignedMaxUsername?.let { "@$it" }.orEmpty())
-                if (wr.assignedContacts.isNotEmpty()) {
-                    DetailLine("Контакты", wr.assignedContacts.joinToString("\n"))
+                val isExecutorView = wr.viewer.equals("executor", ignoreCase = true)
+                if (isExecutorView) {
+                    DetailLine("Клиент", wr.clientName.orEmpty())
+                    DetailLine("Телефон клиента", wr.clientPhone.orEmpty())
+                } else {
+                    val masterName = wr.assignedExecutorName ?: wr.assignedName
+                    DetailLine("Мастер", masterName.orEmpty())
+                    DetailLine("Телефон мастера", wr.assignedPhone.orEmpty())
+                    DetailLine("MAX мастера", wr.assignedMaxUsername?.let { "@$it" }.orEmpty())
+                    if (wr.assignedContacts.isNotEmpty()) {
+                        DetailLine("Контакты", wr.assignedContacts.joinToString("\n"))
+                    }
                 }
                 DetailLine("Адрес приёма", wr.masterAddress)
                 DetailLine("Согласованное время", wr.agreedSlot)
@@ -514,7 +520,7 @@ fun WorkRequestDetailScreen(
                 }
             }
 
-            if (wr.status == "scheduling") {
+            if (wr.canConfirmSlot || (wr.status == "scheduling" && wr.viewer != "executor")) {
                 Spacer(modifier = Modifier.height(12.dp))
                 PanelCard {
                     Text(
@@ -554,7 +560,7 @@ fun WorkRequestDetailScreen(
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                enabled = !confirming,
+                                enabled = !confirming && wr.canConfirmSlot,
                                 colors = voitosPrimaryButtonColors(),
                             ) { Text(slot) }
                             Spacer(modifier = Modifier.height(6.dp))
@@ -563,7 +569,7 @@ fun WorkRequestDetailScreen(
                 }
             }
 
-            if (wr.needsConfirmAmount || wr.status == "awaiting_client") {
+            if (wr.needsConfirmAmount) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = { onConfirmAmount(wr.id) },
