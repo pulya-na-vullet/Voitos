@@ -514,7 +514,10 @@ class VoitosApiClient(
             )
         }.body()
 
-    suspend fun executorRoles(): ExecutorRoleList = authedGet("/executor-roles")
+    suspend fun executorRoles(forCall: Boolean = false): ExecutorRoleList {
+        val path = if (forCall) "/executor-roles?for=call" else "/executor-roles"
+        return authedGet(path)
+    }
 
     suspend fun roleMasters(roleId: Int): RoleMastersResponse =
         authedGet("/executor-roles/$roleId/masters")

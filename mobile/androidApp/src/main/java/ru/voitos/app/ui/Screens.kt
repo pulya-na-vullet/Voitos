@@ -1319,7 +1319,7 @@ fun NewWorkRequestScreen(
 
     LaunchedEffect(Unit) {
         try {
-            roles = client.executorRoles().items
+            roles = client.executorRoles(forCall = true).items
         } catch (e: Exception) {
             error = friendlyNetworkError(e)
         }
@@ -1390,6 +1390,14 @@ fun NewWorkRequestScreen(
         Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Text("Выберите роль", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(12.dp))
+
+        if (roles.isEmpty() && error == null) {
+            Text(
+                "В вашем населённом пункте пока нет доступных мастеров",
+                color = VoitosColors.Muted,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         RoleTileGrid(
             roles = roles,
