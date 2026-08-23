@@ -364,6 +364,7 @@ data class ExecutorRole(
     @SerialName("accepts_at_home") val acceptsAtHome: Boolean = false,
     @SerialName("is_equipment") val isEquipment: Boolean = false,
     @SerialName("requires_qualification_docs") val requiresQualificationDocs: Boolean = false,
+    @SerialName("client_books_master") val clientBooksMaster: Boolean = true,
 )
 
 @Serializable
@@ -380,6 +381,8 @@ data class WorkRequestCreated(
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("needs_photos") val needsPhotos: Boolean = false,
     @SerialName("photo_count") val photoCount: Int = 0,
+    @SerialName("agreed_slot") val agreedSlot: String = "",
+    @SerialName("client_prebooked") val clientPrebooked: Boolean = false,
 )
 
 @Serializable
@@ -536,7 +539,12 @@ data class ExecutorJobBrief(
     @SerialName("accepts_at_home") val acceptsAtHome: Boolean = false,
     @SerialName("master_address") val masterAddress: String = "",
     @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
+    @SerialName("agreed_slot") val agreedSlot: String = "",
+    @SerialName("client_prebooked") val clientPrebooked: Boolean = false,
+    @SerialName("needs_confirm_booking") val needsConfirmBooking: Boolean = false,
     @SerialName("needs_propose_slots") val needsProposeSlots: Boolean = false,
+    @SerialName("commission_blocked") val commissionBlocked: Boolean = false,
+    @SerialName("commission_blocked_message") val commissionBlockedMessage: String = "",
 )
 
 @Serializable
@@ -572,6 +580,55 @@ data class ExecutorScheduleResponse(
     @SerialName("week_start") val weekStart: String = "",
     @SerialName("week_end") val weekEnd: String = "",
     val items: List<ExecutorScheduleEvent> = emptyList(),
+)
+
+@Serializable
+data class RoleMasterBrief(
+    @SerialName("contractor_id") val contractorId: Int = 0,
+    val name: String = "",
+    val locality: String = "",
+    val phone: String = "",
+    @SerialName("can_accept") val canAccept: Boolean = false,
+    @SerialName("blocked_reason") val blockedReason: String = "",
+    @SerialName("blocked_message") val blockedMessage: String = "",
+    @SerialName("free_slots_preview") val freeSlotsPreview: Int = 0,
+)
+
+@Serializable
+data class RoleMastersResponse(
+    @SerialName("role_id") val roleId: Int = 0,
+    @SerialName("role_name") val roleName: String = "",
+    val items: List<RoleMasterBrief> = emptyList(),
+    val detail: String = "",
+    val error: String = "",
+)
+
+@Serializable
+data class FreeSlotBrief(
+    val day: String = "",
+    @SerialName("start_at") val startAt: String = "",
+    @SerialName("end_at") val endAt: String = "",
+    val label: String = "",
+)
+
+@Serializable
+data class FreeSlotsResponse(
+    @SerialName("contractor_id") val contractorId: Int = 0,
+    val name: String = "",
+    @SerialName("can_accept") val canAccept: Boolean = true,
+    @SerialName("blocked_reason") val blockedReason: String = "",
+    @SerialName("blocked_message") val blockedMessage: String = "",
+    val items: List<FreeSlotBrief> = emptyList(),
+)
+
+@Serializable
+data class ConfirmBookingResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("agreed_slot") val agreedSlot: String = "",
+    val detail: String = "",
+    val error: String = "",
 )
 
 @Serializable

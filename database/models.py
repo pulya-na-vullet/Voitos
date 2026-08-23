@@ -245,18 +245,18 @@ class AppSettings(models.Model):
     )
     mobile_min_version_code = models.PositiveIntegerField(
         "Мин. versionCode приложения",
-        default=29,
+        default=30,
         help_text="Клиенты со меньшим versionCode увидят требование обновить приложение.",
     )
     mobile_latest_version_code = models.PositiveIntegerField(
         "Актуальный versionCode",
-        default=29,
+        default=30,
     )
     mobile_latest_version_name = models.CharField(
         "Актуальная versionName",
         max_length=64,
         blank=True,
-        default="0.2.25-kmp",
+        default="0.2.26-kmp",
     )
     mobile_apk_url = models.CharField(
         "Ссылка на APK для обновления",
@@ -1446,6 +1446,15 @@ class ExecutorRole(models.Model):
         default=True,
         help_text="Если выключено — житель вызывает мастера без фото (маникюр и т.п.).",
     )
+    client_books_master = models.BooleanField(
+        "Клиент записывается к мастеру сам",
+        default=True,
+        help_text=(
+            "После выбора роли житель выбирает мастера и свободное время. "
+            "Выключите для тракториста, компьютерного мастера и водителя грузовика "
+            "(там остаётся автоподбор)."
+        ),
+    )
     for_snow = models.BooleanField("Для уборки снега", default=False)
     for_road = models.BooleanField("Для дорожных работ", default=False)
     for_snow_haul = models.BooleanField(
@@ -1672,6 +1681,11 @@ class WorkRequest(models.Model):
         max_length=255,
         blank=True,
         default="",
+    )
+    client_prebooked = models.BooleanField(
+        "Клиент сам выбрал мастера и время",
+        default=False,
+        help_text="Предварительная запись: мастер должен подтвердить и взять в работу.",
     )
     schedule_agreed_at = models.DateTimeField(null=True, blank=True)
     rating_asked_at = models.DateTimeField(

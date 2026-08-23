@@ -60,6 +60,10 @@ def executor_roles(request: HttpRequest) -> HttpResponse:
                     sort_order=0,
                 )
                 apply_role_form_fields(role, request.POST)
+                from services.master_booking import role_is_dispatch_only
+
+                if role_is_dispatch_only(role):
+                    role.client_books_master = False
                 role.save()
                 messages.success(request, f"Роль «{name}» создана.")
             return redirect("panel:executor_roles")

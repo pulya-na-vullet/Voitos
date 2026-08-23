@@ -173,68 +173,108 @@ fun ExecutorOffersScreen(
                             }
                             Text(job.description, color = VoitosColors.Text)
                             Spacer(modifier = Modifier.height(8.dp))
-                            if (job.proposedSlots.isNotEmpty()) {
-                                Text(
-                                    "Окна отправлены клиенту:\n" +
-                                        job.proposedSlots.mapIndexed { i, s -> "${i + 1}. $s" }
-                                            .joinToString("\n"),
-                                    color = VoitosColors.Ok,
-                                )
-                            } else {
-                                Text(
-                                    "Добавьте окна: дата в календаре, время — прокруткой.",
-                                    color = VoitosColors.Muted,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                if (drafts.isNotEmpty()) {
+                            when {
+                                job.needsConfirmBooking -> {
+                                    Text(
+                                        "Клиент записался на: ${job.agreedSlot}",
+                                        color = VoitosColors.Accent2,
+                                    )
                                     Spacer(modifier = Modifier.height(6.dp))
-                                    drafts.forEachIndexed { idx, slot ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Text(
-                                                "${idx + 1}. $slot",
-                                                color = VoitosColors.Text,
-                                                modifier = Modifier.weight(1f),
-                                            )
-                                            TextButton(
-                                                onClick = {
-                                                    slotDrafts = slotDrafts + (
-                                                        job.id to drafts.filterIndexed { i, _ -> i != idx }
-                                                        )
-                                                },
-                                            ) { Text("Убрать", color = VoitosColors.Danger) }
-                                        }
+                                    if (job.commissionBlocked) {
+                                        Text(
+                                            job.commissionBlockedMessage.ifBlank {
+                                                "Сначала оплатите комиссию по прошлому заказу."
+                                            },
+                                            color = VoitosColors.Danger,
+                                        )
+                                    } else {
+                                        Button(
+                                            onClick = {
+                                                scope.launch {
+                                                    busyId = job.id
+                                                    error = null
+                                                    try {
+                                                        val res = client.confirmWorkRequestBooking(job.id)
+                                                        message = res.message.ifBlank {
+                                                            "Запись подтверждена — заявка в работе"
+                                                        }
+                                                        reload(keepMessage = true)
+                                                    } catch (e: Exception) {
+                                                        error = friendlyNetworkError(e)
+                                                    } finally {
+                                                        busyId = null
+                                                    }
+                                                }
+                                            },
+                                            enabled = busyId != job.id,
+                                            colors = voitosPrimaryButtonColors(),
+                                        ) { Text("Подтвердить и взять в работу") }
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(
-                                        onClick = { proposeForJobId = job.id },
-                                        colors = voitosSecondaryButtonColors(),
-                                    ) { Text("Добавить окно") }
-                                    Button(
-                                        onClick = {
-                                            scope.launch {
-                                                busyId = job.id
-                                                error = null
-                                                try {
-                                                    val res = client.proposeWorkRequestSlots(job.id, drafts)
-                                                    message = res.message.ifBlank { "Окна отправлены клиенту" }
-                                                    slotDrafts = slotDrafts - job.id
-                                                    reload(keepMessage = true)
-                                                } catch (e: Exception) {
-                                                    error = friendlyNetworkError(e)
-                                                } finally {
-                                                    busyId = null
-                                                }
+                                job.proposedSlots.isNotEmpty() -> {
+                                    Text(
+                                        "Окна отправлены клиенту:\n" +
+                                            job.proposedSlots.mapIndexed { i, s -> "${i + 1}. $s" }
+                                                .joinToString("\n"),
+                                        color = VoitosColors.Ok,
+                                    )
+                                }
+                                else -> {
+                                    Text(
+                                        "Добавьте окна: дата в календаре, время — прокруткой.",
+                                        color = VoitosColors.Muted,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    if (drafts.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        drafts.forEachIndexed { idx, slot ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    "${idx + 1}. $slot",
+                                                    color = VoitosColors.Text,
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                                TextButton(
+                                                    onClick = {
+                                                        slotDrafts = slotDrafts + (
+                                                            job.id to drafts.filterIndexed { i, _ -> i != idx }
+                                                            )
+                                                    },
+                                                ) { Text("Убрать", color = VoitosColors.Danger) }
                                             }
-                                        },
-                                        enabled = busyId != job.id && drafts.isNotEmpty(),
-                                        colors = voitosPrimaryButtonColors(),
-                                    ) { Text("Отправить клиенту") }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { proposeForJobId = job.id },
+                                            colors = voitosSecondaryButtonColors(),
+                                        ) { Text("Добавить окно") }
+                                        Button(
+                                            onClick = {
+                                                scope.launch {
+                                                    busyId = job.id
+                                                    error = null
+                                                    try {
+                                                        val res = client.proposeWorkRequestSlots(job.id, drafts)
+                                                        message = res.message.ifBlank { "Окна отправлены клиенту" }
+                                                        slotDrafts = slotDrafts - job.id
+                                                        reload(keepMessage = true)
+                                                    } catch (e: Exception) {
+                                                        error = friendlyNetworkError(e)
+                                                    } finally {
+                                                        busyId = null
+                                                    }
+                                                }
+                                            },
+                                            enabled = busyId != job.id && drafts.isNotEmpty(),
+                                            colors = voitosPrimaryButtonColors(),
+                                        ) { Text("Отправить клиенту") }
+                                    }
                                 }
                             }
                         }

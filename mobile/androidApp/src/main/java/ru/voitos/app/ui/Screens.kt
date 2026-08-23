@@ -1068,13 +1068,72 @@ fun NewWorkRequestScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var masters by remember { mutableStateOf<List<ru.voitos.app.model.RoleMasterBrief>>(emptyList()) }
+    var mastersLoading by remember { mutableStateOf(false) }
+    var selectedMasterId by remember { mutableStateOf<Int?>(null) }
+    var freeSlots by remember { mutableStateOf<List<ru.voitos.app.model.FreeSlotBrief>>(emptyList()) }
+    var slotsLoading by remember { mutableStateOf(false) }
+    var selectedSlot by remember { mutableStateOf<String?>(null) }
+    var masterBlockMessage by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    val selectedRole = roles.firstOrNull { it.id == selectedId }
+    val booksMaster = selectedRole?.clientBooksMaster == true
 
     LaunchedEffect(Unit) {
         try {
             roles = client.executorRoles().items
         } catch (e: Exception) {
             error = friendlyNetworkError(e)
+        }
+    }
+
+    LaunchedEffect(selectedId) {
+        selectedMasterId = null
+        selectedSlot = null
+        freeSlots = emptyList()
+        masterBlockMessage = null
+        masters = emptyList()
+        val role = roles.firstOrNull { it.id == selectedId }
+        if (role == null || !role.clientBooksMaster) return@LaunchedEffect
+        mastersLoading = true
+        error = null
+        try {
+            masters = client.roleMasters(role.id).items
+        } catch (e: Exception) {
+            error = friendlyNetworkError(e)
+        } finally {
+            mastersLoading = false
+        }
+    }
+
+    LaunchedEffect(selectedMasterId) {
+        selectedSlot = null
+        freeSlots = emptyList()
+        masterBlockMessage = null
+        val mid = selectedMasterId ?: return@LaunchedEffect
+        val brief = masters.firstOrNull { it.contractorId == mid }
+        if (brief != null && !brief.canAccept) {
+            masterBlockMessage = brief.blockedMessage.ifBlank {
+                "Мастер пока не может принять ваш заказ."
+            }
+            return@LaunchedEffect
+        }
+        slotsLoading = true
+        try {
+            val res = client.contractorFreeSlots(mid, days = 14)
+            if (!res.canAccept) {
+                masterBlockMessage = res.blockedMessage.ifBlank {
+                    "Мастер пока не может принять ваш заказ — сначала нужно оплатить комиссию по прошлому заказу."
+                }
+                freeSlots = emptyList()
+            } else {
+                freeSlots = res.items
+            }
+        } catch (e: Exception) {
+            error = friendlyNetworkError(e)
+        } finally {
+            slotsLoading = false
         }
     }
 
@@ -1097,6 +1156,89 @@ fun NewWorkRequestScreen(
             onSelect = { selectedId = it },
         )
 
+        if (booksMaster) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Мастер", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+            Text("Выберите доступного мастера и свободное время", color = VoitosColors.Muted)
+            Spacer(modifier = Modifier.height(8.dp))
+            when {
+                mastersLoading -> VoitosListSkeleton(rows = 2)
+                masters.isEmpty() -> Text(
+                    "В вашем населённом пункте пока нет мастеров этой роли",
+                    color = VoitosColors.Muted,
+                )
+                else -> {
+                    masters.forEach { m ->
+                        val selected = selectedMasterId == m.contractorId
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .background(
+                                    if (selected) VoitosColors.Accent2.copy(alpha = 0.18f)
+                                    else VoitosColors.Panel.copy(alpha = 0.86f),
+                                    androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                                )
+                                .clickable { selectedMasterId = m.contractorId }
+                                .padding(12.dp),
+                        ) {
+                            Text(m.name, color = VoitosColors.Text, style = MaterialTheme.typography.titleSmall)
+                            if (m.locality.isNotBlank()) {
+                                Text(m.locality, color = VoitosColors.Muted)
+                            }
+                            if (!m.canAccept) {
+                                Text(
+                                    m.blockedMessage.ifBlank { "Сейчас недоступен" },
+                                    color = VoitosColors.Danger,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            } else {
+                                Text(
+                                    "Свободных окон: ${m.freeSlotsPreview}",
+                                    color = VoitosColors.Ok,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            masterBlockMessage?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(it, color = VoitosColors.Danger)
+            }
+
+            if (selectedMasterId != null && masterBlockMessage == null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Время", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+                Spacer(modifier = Modifier.height(6.dp))
+                when {
+                    slotsLoading -> VoitosListSkeleton(rows = 2)
+                    freeSlots.isEmpty() -> Text("Нет свободных окон", color = VoitosColors.Muted)
+                    else -> {
+                        freeSlots.groupBy { it.day }.forEach { (day, daySlots) ->
+                            Text(
+                                day,
+                                color = VoitosColors.Muted,
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                            )
+                            daySlots.forEach { slot ->
+                                val on = selectedSlot == slot.label
+                                Button(
+                                    onClick = { selectedSlot = slot.label },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = if (on) voitosPrimaryButtonColors() else voitosSecondaryButtonColors(),
+                                ) { Text(slot.label) }
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
             value = description,
@@ -1107,6 +1249,9 @@ fun NewWorkRequestScreen(
             colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
         )
         Spacer(modifier = Modifier.height(8.dp))
+        val canSubmit = !loading && description.length >= 5 && selectedId != null && (
+            !booksMaster || (selectedMasterId != null && !selectedSlot.isNullOrBlank() && masterBlockMessage == null)
+            )
         Button(
             onClick = {
                 val rid = selectedId
@@ -1114,15 +1259,24 @@ fun NewWorkRequestScreen(
                     error = "Выберите роль"
                     return@Button
                 }
+                if (booksMaster && (selectedMasterId == null || selectedSlot.isNullOrBlank())) {
+                    error = "Выберите мастера и время"
+                    return@Button
+                }
                 scope.launch {
                     loading = true
                     error = null
                     try {
-                        val created = client.createWorkRequest(rid, description)
-                        message = if (created.needsPhotos) {
-                            "Заявка #${created.id}: добавьте фото"
-                        } else {
-                            "Заявка #${created.id} отправлена мастерам"
+                        val created = client.createWorkRequest(
+                            roleId = rid,
+                            description = description,
+                            contractorId = if (booksMaster) selectedMasterId else null,
+                            slot = if (booksMaster) selectedSlot else null,
+                        )
+                        message = when {
+                            created.needsPhotos -> "Заявка #${created.id}: добавьте фото"
+                            created.clientPrebooked -> "Заявка #${created.id}: ждём подтверждения мастера"
+                            else -> "Заявка #${created.id} отправлена мастерам"
                         }
                         onCreated(created.id, created.needsPhotos)
                     } catch (e: Exception) {
@@ -1133,9 +1287,11 @@ fun NewWorkRequestScreen(
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !loading && description.length >= 5 && selectedId != null,
+            enabled = canSubmit,
             colors = voitosPrimaryButtonColors(),
-        ) { Text("Создать заявку") }
+        ) {
+            Text(if (booksMaster) "Записаться" else "Создать заявку")
+        }
         message?.let { Text(it, color = VoitosColors.Ok) }
         error?.let { Text(it, color = VoitosColors.Danger) }
     }

@@ -34,8 +34,23 @@ urlpatterns = [
     path("groups/<int:group_id>/messages", views.group_messages, name="group_messages"),
     path("groups/<int:group_id>/read", views.group_mark_read, name="group_mark_read"),
     path("executor-roles", views.executor_roles, name="executor_roles"),
+    path(
+        "executor-roles/<int:role_id>/masters",
+        views.role_masters,
+        name="role_masters",
+    ),
+    path(
+        "contractors/<int:contractor_id>/free-slots",
+        views.contractor_free_slots,
+        name="contractor_free_slots",
+    ),
     path("work-requests", views.work_requests_list, name="work_requests"),
     path("work-requests/<int:pk>", views.work_request_detail, name="work_request_detail"),
+    path(
+        "work-requests/<int:pk>/confirm-booking",
+        views.work_request_confirm_booking,
+        name="work_request_confirm_booking",
+    ),
     path(
         "work-requests/<int:pk>/confirm-amount",
         views.work_request_confirm_amount,
