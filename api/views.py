@@ -242,6 +242,7 @@ def executor_roles(request):
                     "requires_work_photos": bool(
                         getattr(r, "requires_work_photos", True)
                     ),
+                    "accepts_at_home": bool(getattr(r, "accepts_at_home", False)),
                     "is_equipment": bool(getattr(r, "is_equipment", False)),
                     "requires_qualification_docs": bool(
                         getattr(r, "requires_qualification_docs", False)
@@ -363,6 +364,9 @@ def executor_offers(request):
                 "description": (wr.description or "")[:800],
                 "locality": (wr.client_locality or wr.user.locality or "")[:255],
                 "address": (wr.user.address or "")[:500],
+                "client_phone": (wr.user.phone or "")[:64],
+                "client_name": str(wr.user),
+                "accepts_at_home": bool(getattr(wr.role, "accepts_at_home", False)),
                 "status": offer.status,
                 "respond_deadline": (
                     offer.respond_deadline.isoformat() if offer.respond_deadline else None
@@ -402,13 +406,93 @@ def executor_offer_respond(request, pk: int):
 
 
 @api_login_required
+@require_GET
+def executor_jobs(request):
+    """Заявки исполнителя, где нужно предложить/ждать согласование времени."""
+    from database.models import WorkRequestStatus
+    from services.work_request_schedule import master_visit_address, role_accepts_at_home
+
+    qs = (
+        WorkRequest.objects.filter(
+            assigned_contractor__user=request.bot_user,
+            status=WorkRequestStatus.SCHEDULING,
+        )
+        .select_related("role", "user", "assigned_contractor")
+        .order_by("-updated_at")[:50]
+    )
+    items = []
+    for wr in qs:
+        home = role_accepts_at_home(wr)
+        items.append(
+            {
+                "id": wr.id,
+                "status": wr.status,
+                "status_label": wr.get_status_display(),
+                "role_name": wr.role.name if wr.role_id else "",
+                "description": (wr.description or "")[:800],
+                "client_name": str(wr.user),
+                "client_phone": (wr.user.phone or "")[:64],
+                "client_locality": (wr.client_locality or wr.user.locality or "")[:255],
+                "client_address": (wr.user.address or "")[:500],
+                "accepts_at_home": home,
+                "master_address": master_visit_address(wr) if home else "",
+                "proposed_slots": _slot_labels(wr),
+                "needs_propose_slots": not bool(_slot_labels(wr)),
+            }
+        )
+    return json_response({"items": items})
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_propose_slots(request, pk: int):
+    """Мастер предлагает окна клиенту из приложения."""
+    from services.work_request_schedule import publish_slots_for_master
+
+    wr = (
+        WorkRequest.objects.select_related(
+            "role", "user", "assigned_contractor", "assigned_contractor__user"
+        )
+        .filter(pk=pk, assigned_contractor__user=request.bot_user)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    data = parse_json(request)
+    raw_slots = data.get("slots")
+    if isinstance(raw_slots, str):
+        slots = [raw_slots]
+    elif isinstance(raw_slots, list):
+        slots = [str(s) for s in raw_slots]
+    else:
+        slots = []
+    # Также принять text с переносами строк.
+    text = str(data.get("text") or "").strip()
+    if text:
+        slots.append(text)
+    try:
+        msg = publish_slots_for_master(wr, request.bot_user, slots)
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    wr.refresh_from_db()
+    return json_response(
+        {
+            "ok": True,
+            "message": msg,
+            "status": wr.status,
+            "proposed_slots": _slot_labels(wr),
+        }
+    )
+
+
+@api_login_required
 @require_http_methods(["GET", "POST"])
 def work_requests_list(request):
     if request.method == "POST":
         return work_requests_create(request)
     qs = (
         WorkRequest.objects.filter(user=request.bot_user)
-        .select_related("role", "assigned_contractor")
+        .select_related("role", "assigned_contractor", "assigned_contractor__user")
         .order_by("-created_at")[:50]
     )
     return json_response(
@@ -419,6 +503,36 @@ def work_requests_list(request):
             ]
         }
     )
+
+
+def _executor_phone(contractor) -> str:
+    if not contractor:
+        return ""
+    phone = (getattr(contractor, "phone", None) or "").strip()
+    if phone:
+        return phone
+    user = getattr(contractor, "user", None)
+    return (getattr(user, "phone", None) or "").strip()
+
+
+def _executor_contacts_payload(contractor) -> dict:
+    if not contractor:
+        return {
+            "assigned_phone": "",
+            "assigned_max_username": "",
+            "assigned_max_link": "",
+            "assigned_contacts": [],
+        }
+    from services.contractors import max_profile_link, work_request_executor_contact_lines
+
+    user = getattr(contractor, "user", None)
+    uname = (getattr(user, "username", None) or "").strip().lstrip("@")
+    return {
+        "assigned_phone": _executor_phone(contractor) or None,
+        "assigned_max_username": uname or None,
+        "assigned_max_link": max_profile_link(user) if user else None,
+        "assigned_contacts": work_request_executor_contact_lines(contractor),
+    }
 
 
 def _slot_labels(wr) -> list[str]:
@@ -437,19 +551,24 @@ def _work_request_brief(wr) -> dict:
     from services.work_request_rating import work_request_needs_rating
 
     slots = _slot_labels(wr)
+    contacts = _executor_contacts_payload(wr.assigned_contractor)
     return {
         "id": wr.id,
         "status": wr.status,
         "status_label": wr.get_status_display(),
         "role_name": wr.role.name if wr.role_id else "",
+        "role_accepts_at_home": bool(
+            getattr(wr.role, "accepts_at_home", False) if wr.role_id else False
+        ),
         "description": wr.description or "",
         "created_at": wr.created_at.isoformat(),
         "assigned_executor_name": (
             str(wr.assigned_contractor) if wr.assigned_contractor_id else None
         ),
+        "assigned_phone": contacts.get("assigned_phone"),
         "proposed_slots": slots,
         "agreed_slot": wr.agreed_slot or "",
-        "can_confirm_slot": wr.status == "scheduling",
+        "can_confirm_slot": wr.status == "scheduling" and bool(slots),
         "needs_confirm_amount": wr.status == "awaiting_client",
         "needs_rating": work_request_needs_rating(wr),
     }
@@ -468,7 +587,9 @@ def _work_request_photo_urls(request, wr) -> list[str]:
 @require_GET
 def work_request_detail(request, pk: int):
     wr = (
-        WorkRequest.objects.select_related("role", "assigned_contractor", "user")
+        WorkRequest.objects.select_related(
+            "role", "assigned_contractor", "assigned_contractor__user", "user"
+        )
         .prefetch_related("photos")
         .filter(pk=pk, user=request.bot_user)
         .first()
@@ -482,11 +603,15 @@ def work_request_detail(request, pk: int):
         getattr(wr.role, "requires_work_photos", True) if wr.role_id else True
     )
     photo_urls = _work_request_photo_urls(request, wr)
+    contacts = _executor_contacts_payload(contractor)
     payload = _work_request_brief(wr)
     payload.update(
         {
             "assigned_name": str(contractor) if contractor else None,
-            "assigned_phone": getattr(contractor, "phone", None) if contractor else None,
+            "assigned_phone": contacts.get("assigned_phone"),
+            "assigned_max_username": contacts.get("assigned_max_username"),
+            "assigned_max_link": contacts.get("assigned_max_link"),
+            "assigned_contacts": contacts.get("assigned_contacts") or [],
             "needs_rating": work_request_needs_rating(wr),
             "needs_photos": requires_photos and wr.status == "draft",
             "photo_count": len(photo_urls),

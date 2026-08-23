@@ -69,9 +69,16 @@ class RoleProposalTests(TestCase):
 
     def test_approve_creates_active_role(self):
         proposal = propose_role(self.user, "Мастер по окнам")
-        role = approve_proposal(proposal, admin_user=self.admin)
+        role = approve_proposal(
+            proposal,
+            admin_user=self.admin,
+            accepts_at_home=True,
+            requires_work_photos=False,
+        )
         self.assertTrue(role.is_active)
         self.assertEqual(role.name, "Мастер по окнам")
+        self.assertTrue(role.accepts_at_home)
+        self.assertFalse(role.requires_work_photos)
         proposal.refresh_from_db()
         self.assertEqual(proposal.status, ExecutorRoleProposalStatus.APPROVED)
         self.assertEqual(proposal.created_role_id, role.id)

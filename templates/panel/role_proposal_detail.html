@@ -49,6 +49,14 @@
       <input type="text" name="role_name" value="{{ proposal.proposed_name }}" maxlength="128"
         style="width:100%; margin-top:6px; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
     </label>
+    <label class="muted" style="display:flex; gap:8px; align-items:flex-start;">
+      <input type="checkbox" name="accepts_at_home" style="margin-top:4px;">
+      <span><strong>Принимает на дому</strong> — клиент едет к мастеру, согласуем окна приёма у мастера</span>
+    </label>
+    <label class="muted" style="display:flex; gap:8px; align-items:flex-start;">
+      <input type="checkbox" name="requires_work_photos" checked style="margin-top:4px;">
+      <span><strong>Нужны фото при заявке</strong> — иначе житель вызывает без фото</span>
+    </label>
     <label>
       <strong>Комментарий</strong> <span class="muted">(необязательно)</span>
       <textarea name="admin_note" rows="3" placeholder="Комментарий жителю…"

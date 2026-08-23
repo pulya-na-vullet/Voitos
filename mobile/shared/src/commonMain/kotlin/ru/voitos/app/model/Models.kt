@@ -177,9 +177,11 @@ data class WorkRequestBrief(
     val status: String,
     @SerialName("status_label") val statusLabel: String = "",
     @SerialName("role_name") val roleName: String = "",
+    @SerialName("role_accepts_at_home") val roleAcceptsAtHome: Boolean = false,
     val description: String = "",
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("assigned_executor_name") val assignedExecutorName: String? = null,
+    @SerialName("assigned_phone") val assignedPhone: String? = null,
     @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
     @SerialName("agreed_slot") val agreedSlot: String = "",
     @SerialName("can_confirm_slot") val canConfirmSlot: Boolean = false,
@@ -204,6 +206,10 @@ data class WorkRequestDetail(
     @SerialName("assigned_executor_name") val assignedExecutorName: String? = null,
     @SerialName("assigned_name") val assignedName: String? = null,
     @SerialName("assigned_phone") val assignedPhone: String? = null,
+    @SerialName("assigned_max_username") val assignedMaxUsername: String? = null,
+    @SerialName("assigned_max_link") val assignedMaxLink: String? = null,
+    @SerialName("assigned_contacts") val assignedContacts: List<String> = emptyList(),
+    @SerialName("role_accepts_at_home") val roleAcceptsAtHome: Boolean = false,
     @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
     @SerialName("agreed_slot") val agreedSlot: String = "",
     @SerialName("can_confirm_slot") val canConfirmSlot: Boolean = false,
@@ -351,6 +357,7 @@ data class ExecutorRole(
     val code: String = "",
     val name: String = "",
     @SerialName("requires_work_photos") val requiresWorkPhotos: Boolean = true,
+    @SerialName("accepts_at_home") val acceptsAtHome: Boolean = false,
     @SerialName("is_equipment") val isEquipment: Boolean = false,
     @SerialName("requires_qualification_docs") val requiresQualificationDocs: Boolean = false,
 )
@@ -491,6 +498,9 @@ data class ExecutorOfferBrief(
     val description: String = "",
     val locality: String = "",
     val address: String = "",
+    @SerialName("client_phone") val clientPhone: String = "",
+    @SerialName("client_name") val clientName: String = "",
+    @SerialName("accepts_at_home") val acceptsAtHome: Boolean = false,
     val status: String = "",
     @SerialName("respond_deadline") val respondDeadline: String? = null,
 )
@@ -506,6 +516,38 @@ data class ExecutorOfferRespondResult(
     val message: String = "",
     val status: String = "",
     @SerialName("offer_id") val offerId: Int = 0,
+)
+
+@Serializable
+data class ExecutorJobBrief(
+    val id: Int = 0,
+    val status: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    @SerialName("role_name") val roleName: String = "",
+    val description: String = "",
+    @SerialName("client_name") val clientName: String = "",
+    @SerialName("client_phone") val clientPhone: String = "",
+    @SerialName("client_locality") val clientLocality: String = "",
+    @SerialName("client_address") val clientAddress: String = "",
+    @SerialName("accepts_at_home") val acceptsAtHome: Boolean = false,
+    @SerialName("master_address") val masterAddress: String = "",
+    @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
+    @SerialName("needs_propose_slots") val needsProposeSlots: Boolean = false,
+)
+
+@Serializable
+data class ExecutorJobList(
+    val items: List<ExecutorJobBrief> = emptyList(),
+)
+
+@Serializable
+data class ProposeSlotsResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("proposed_slots") val proposedSlots: List<String> = emptyList(),
+    val detail: String = "",
+    val error: String = "",
 )
 
 @Serializable

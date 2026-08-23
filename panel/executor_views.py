@@ -124,7 +124,11 @@ def role_proposal_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     proposal.proposed_name = new_name[:128]
                     proposal.save(update_fields=["proposed_name", "updated_at"])
                 role = approve_proposal(
-                    proposal, admin_user=request.user, admin_note=note
+                    proposal,
+                    admin_user=request.user,
+                    admin_note=note,
+                    accepts_at_home=bool(request.POST.get("accepts_at_home")),
+                    requires_work_photos=bool(request.POST.get("requires_work_photos")),
                 )
                 messages.success(
                     request,

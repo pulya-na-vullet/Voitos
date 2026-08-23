@@ -34,14 +34,18 @@ def master_visit_address(req: WorkRequest) -> str:
     if not contractor:
         return ""
     user = contractor.user
-    parts = []
-    if (contractor.locality or "").strip():
-        parts.append(contractor.locality.strip())
-    elif (user.locality or "").strip():
-        parts.append(user.locality.strip())
-    if (user.address or "").strip():
-        parts.append(user.address.strip())
-    return ", ".join(parts)
+    locality = (contractor.locality or user.locality or "").strip()
+    street = (user.address or "").strip()
+    if not street:
+        return locality
+    if not locality:
+        return street
+    # Не дублировать НП, если адрес уже начинается с него («Куюки, Куюки, ул.…»).
+    street_l = street.casefold()
+    loc_l = locality.casefold()
+    if street_l == loc_l or street_l.startswith(loc_l + ",") or street_l.startswith(loc_l + " "):
+        return street
+    return f"{locality}, {street}"
 
 
 def start_master_scheduling(req: WorkRequest, *, send_fn=None) -> None:
@@ -109,6 +113,19 @@ def start_master_scheduling(req: WorkRequest, *, send_fn=None) -> None:
         send_fn(c_user, msg)
     except Exception:
         logger.exception("start_master_scheduling WR %s", req.id)
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            c_user,
+            ntype="work_request.schedule_master",
+            title=f"Согласуйте время — заявка #{req.id}",
+            body="Предложите клиенту окна визита в приложении или в чате бота.",
+            entity_type="work_request",
+            entity_id=req.id,
+        )
+    except Exception:
+        logger.exception("app inbox schedule_master WR %s", req.id)
 
 
 def _send():
@@ -222,6 +239,19 @@ def _publish_slots_to_client(req: WorkRequest, slots: list[str], pending: Pendin
         send_fn(req.user, client_msg)
     except Exception:
         logger.exception("notify client slots WR %s", req.id)
+    try:
+        from api.emit import emit_app_event
+
+        emit_app_event(
+            req.user,
+            ntype="work_request.slots_ready",
+            title=f"Выберите время — заявка #{req.id}",
+            body="Мастер предложил окна. Откройте заявку и выберите удобное.",
+            entity_type="work_request",
+            entity_id=req.id,
+        )
+    except Exception:
+        logger.exception("app inbox slots_ready WR %s", req.id)
 
     c_pending, _ = PendingAction.objects.get_or_create(user=req.user)
     c_pending.pending_kind = CLIENT_SCHEDULE_PENDING
@@ -231,6 +261,45 @@ def _publish_slots_to_client(req: WorkRequest, slots: list[str], pending: Pendin
     return (
         "Окна отправлены клиенту. Ждём его выбор."
     )
+
+
+def publish_slots_for_master(req: WorkRequest, master: BotUser, slots: list[str]) -> str:
+    """Мастер в приложении публикует окна клиенту (без бота)."""
+    if req.status != WorkRequestStatus.SCHEDULING:
+        raise ValueError("Сейчас нельзя предложить окна по этой заявке.")
+    if not req.assigned_contractor_id or req.assigned_contractor.user_id != master.id:
+        raise ValueError("Вы не назначены на эту заявку.")
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in slots or []:
+        for part in _parse_slot_lines(str(raw)):
+            key = part.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(part)
+    if not cleaned:
+        raise ValueError("Укажите хотя бы одно окно времени.")
+    cleaned = cleaned[:20]
+
+    pending = PendingAction.objects.filter(user=master).first()
+    if (
+        pending
+        and pending.pending_kind == MASTER_SCHEDULE_PENDING
+        and (pending.pending_payload or {}).get("work_request_id") == req.id
+    ):
+        return _publish_slots_to_client(req, cleaned, pending)
+
+    # Pending мог отсутствовать (мастер только в приложении) — создаём временный.
+    pending, _ = PendingAction.objects.get_or_create(user=master)
+    pending.pending_kind = MASTER_SCHEDULE_PENDING
+    pending.pending_payload = {
+        "work_request_id": req.id,
+        "step": "slots",
+        "slots": cleaned,
+    }
+    pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    return _publish_slots_to_client(req, cleaned, pending)
 
 
 def handle_client_schedule_step(user: BotUser, text: str, pending: PendingAction) -> str:
@@ -310,7 +379,8 @@ def _confirm_agreed_slot(
         f"Адрес: {addr}\n"
         f"Мастер: {master or '—'}\n"
         f"{contacts}\n"
-        f"Клиент: {client}"
+        f"Клиент: {client}\n"
+        f"Телефон клиента: {(client.phone or '—')}"
     )
     try:
         send_fn(client, common + "\n\nСтатус заявки: в работе.")
@@ -368,7 +438,10 @@ def confirm_slot_for_client(req: WorkRequest, *, slot: str = "") -> str:
     if not chosen:
         if slots:
             raise ValueError("Выберите одно из предложенных окон.")
-        chosen = "Время согласовано с мастером"
+        raise ValueError(
+            "Мастер ещё не предложил окна. Дождитесь вариантов или "
+            "попросите мастера отправить их в приложении."
+        )
 
     pending = PendingAction.objects.filter(user=req.user).first()
     if not (

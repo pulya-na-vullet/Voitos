@@ -95,6 +95,8 @@ def approve_proposal(
     *,
     admin_user=None,
     admin_note: str = "",
+    accepts_at_home: bool = False,
+    requires_work_photos: bool = True,
 ) -> ExecutorRole:
     if proposal.status != ExecutorRoleProposalStatus.OPEN:
         raise ValueError("Заявка уже рассмотрена.")
@@ -114,8 +116,48 @@ def approve_proposal(
             name=name,
             is_active=True,
             sort_order=0,
-            requires_work_photos=True,
+            requires_work_photos=bool(requires_work_photos),
+            accepts_at_home=bool(accepts_at_home),
         )
+        flags = []
+        if accepts_at_home:
+            flags.append(
+                {
+                    "code": "accepts_at_home",
+                    "label": "мастер принимает на дому",
+                    "on": True,
+                }
+            )
+        role.flags = flags
+        role.save(update_fields=["flags", "updated_at"])
+    else:
+        # Подтянуть флаги, если роль уже была в каталоге.
+        changed = []
+        if role.accepts_at_home != bool(accepts_at_home):
+            role.accepts_at_home = bool(accepts_at_home)
+            changed.append("accepts_at_home")
+        if role.requires_work_photos != bool(requires_work_photos):
+            role.requires_work_photos = bool(requires_work_photos)
+            changed.append("requires_work_photos")
+        if changed:
+            stored = role.flags if isinstance(role.flags, list) else []
+            flags = [
+                f
+                for f in stored
+                if isinstance(f, dict) and f.get("code") != "accepts_at_home"
+            ]
+            if accepts_at_home:
+                flags.append(
+                    {
+                        "code": "accepts_at_home",
+                        "label": "мастер принимает на дому",
+                        "on": True,
+                    }
+                )
+            role.flags = flags
+            changed.append("flags")
+            role.save(update_fields=changed)
+
 
     proposal.status = ExecutorRoleProposalStatus.APPROVED
     proposal.created_role = role

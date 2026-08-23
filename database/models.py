@@ -245,18 +245,18 @@ class AppSettings(models.Model):
     )
     mobile_min_version_code = models.PositiveIntegerField(
         "Мин. versionCode приложения",
-        default=25,
+        default=26,
         help_text="Клиенты со меньшим versionCode увидят требование обновить приложение.",
     )
     mobile_latest_version_code = models.PositiveIntegerField(
         "Актуальный versionCode",
-        default=25,
+        default=26,
     )
     mobile_latest_version_name = models.CharField(
         "Актуальная versionName",
         max_length=64,
         blank=True,
-        default="0.2.21-kmp",
+        default="0.2.22-kmp",
     )
     mobile_apk_url = models.CharField(
         "Ссылка на APK для обновления",
