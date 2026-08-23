@@ -12,8 +12,8 @@ android {
         applicationId = "ru.voitos.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.2.22-kmp"
+        versionCode = 27
+        versionName = "0.2.23-kmp"
     }
     // Стабильный debug-keystore в репо: обновление APK с разных агентов/машин
     // не падает с INSTALL_FAILED_UPDATE_INCOMPATIBLE.
@@ -65,5 +65,6 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Ktor types may leak through shared; keep engine available to app module.
     implementation("io.ktor:ktor-client-okhttp:3.0.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
