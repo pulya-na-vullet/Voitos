@@ -40,14 +40,14 @@ MAX_BOT_OPEN_URL = env(
     default="https://max.ru/se13602985_1_bot",
 )
 # Минимальный versionCode Android-клиента (перекрывается AppSettings в панели).
-MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=34)
-MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=34)
-MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.30-kmp")
+MOBILE_MIN_VERSION_CODE = env.int("MOBILE_MIN_VERSION_CODE", default=35)
+MOBILE_LATEST_VERSION_CODE = env.int("MOBILE_LATEST_VERSION_CODE", default=35)
+MOBILE_LATEST_VERSION_NAME = env("MOBILE_LATEST_VERSION_NAME", default="0.2.31-kmp")
 MOBILE_APK_URL = env(
     "MOBILE_APK_URL",
     default=(
         "https://raw.githubusercontent.com/pulya-na-vullet/Voitos/"
-        "cursor/hide-empty-locality-roles-e31c/dist/apk/voitos-debug.apk"
+        "cursor/hard-update-nav-insets-e31c/dist/apk/voitos-debug.apk"
     ),
 )
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")

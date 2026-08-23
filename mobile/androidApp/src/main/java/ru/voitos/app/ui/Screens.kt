@@ -1388,7 +1388,7 @@ fun NewWorkRequestScreen(
             VoitosBackButton(onClick = onBack)
         }
         Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        Text("Выберите роль", color = VoitosColors.Muted)
+        Text("Выбрать роли доступные в вашем регионе", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(12.dp))
 
         if (roles.isEmpty() && error == null) {

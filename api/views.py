@@ -24,20 +24,16 @@ from database.models import (
 @api_public
 @require_GET
 def health(request):
-    from services.app_version import mobile_version_payload
+    from api.http import client_version_code
+    from services.app_version import client_needs_update, mobile_version_payload
 
     body = {"ok": True, "service": "voitos-api-v1"}
     body.update(mobile_version_payload())
-    # Клиент может передать ?version_code=N — тогда сразу флаг update_required
-    raw = request.GET.get("version_code")
-    if raw is not None and str(raw).strip() != "":
-        try:
-            client_code = int(raw)
-        except ValueError:
-            client_code = None
-        else:
-            body["client_version_code"] = client_code
-            body["update_required"] = client_code < body["min_app_version_code"]
+    # ?version_code= и/или X-Voitos-App-Version
+    ver = client_version_code(request)
+    if ver is not None:
+        body["client_version_code"] = ver
+        body["update_required"] = client_needs_update(ver)
     return json_response(body)
 
 

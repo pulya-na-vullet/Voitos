@@ -86,6 +86,7 @@ class VoitosApiClient(
             field = value
             if (!value.isNullOrBlank()) {
                 unauthorizedNotified = false
+                updateRequiredNotified = false
             }
         }
 
@@ -98,7 +99,14 @@ class VoitosApiClient(
      */
     var onUnauthorized: (() -> Unit)? = null
 
+    /**
+     * Бэкенд вернул 426 update_required — UI обязан показать ForceUpdate
+     * (иначе OEM может отрисовать пустой кабинет с «—» из тела ошибки).
+     */
+    var onUpdateRequired: ((apkUrl: String) -> Unit)? = null
+
     private var unauthorizedNotified: Boolean = false
+    private var updateRequiredNotified: Boolean = false
 
     private val http: HttpClient = HttpClient {
         install(HttpTimeout) {
@@ -116,16 +124,31 @@ class VoitosApiClient(
         }
         HttpResponseValidator {
             validateResponse { response ->
-                if (response.status.value != 401) return@validateResponse
-                val headers = response.request.headers
-                val hadAuth = !headers["Authorization"].isNullOrBlank() ||
-                    !headers["X-Voitos-Token"].isNullOrBlank()
-                if (!hadAuth) return@validateResponse
-                handleUnauthorized()
-                throw ApiException(
-                    "unauthorized",
-                    "Сессия больше недействительна. Войдите снова.",
-                )
+                when (response.status.value) {
+                    401 -> {
+                        val headers = response.request.headers
+                        val hadAuth = !headers["Authorization"].isNullOrBlank() ||
+                            !headers["X-Voitos-Token"].isNullOrBlank()
+                        if (!hadAuth) return@validateResponse
+                        handleUnauthorized()
+                        throw ApiException(
+                            "unauthorized",
+                            "Сессия больше недействительна. Войдите снова.",
+                        )
+                    }
+                    426 -> {
+                        val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+                        val apk = err?.apkUrl.orEmpty()
+                        handleUpdateRequired(apk)
+                        throw ApiException(
+                            "update_required",
+                            err?.detail?.ifBlank { null }
+                                ?: err?.updateMessage?.ifBlank { null }
+                                ?: "Просим обновить приложение",
+                            apkUrl = apk,
+                        )
+                    }
+                }
             }
         }
     }
@@ -135,6 +158,12 @@ class VoitosApiClient(
         if (unauthorizedNotified) return
         unauthorizedNotified = true
         onUnauthorized?.invoke()
+    }
+
+    private fun handleUpdateRequired(apkUrl: String) {
+        if (updateRequiredNotified) return
+        updateRequiredNotified = true
+        onUpdateRequired?.invoke(apkUrl)
     }
 
     suspend fun health(): Boolean {

@@ -43,6 +43,18 @@ class AppVersionHealthTests(TestCase):
         cur = self.client.get("/api/v1/health?version_code=31")
         self.assertFalse(cur.json()["update_required"])
 
+        # Заголовок X-Voitos-App-Version тоже учитывается.
+        via_hdr = self.client.get(
+            "/api/v1/health",
+            HTTP_X_VOITOS_APP_VERSION="30",
+        )
+        self.assertTrue(via_hdr.json()["update_required"])
+        ok_hdr = self.client.get(
+            "/api/v1/health",
+            HTTP_X_VOITOS_APP_VERSION="31",
+        )
+        self.assertFalse(ok_hdr.json()["update_required"])
+
     def test_pin_login_rejects_old_version(self):
         from django.contrib.auth.hashers import make_password
 
