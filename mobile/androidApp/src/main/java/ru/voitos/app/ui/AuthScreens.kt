@@ -3,6 +3,8 @@ package ru.voitos.app.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -28,6 +31,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -50,6 +55,7 @@ import ru.voitos.app.model.ApiException
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.WishGroupOption
 import ru.voitos.app.model.WishItem
+import ru.voitos.app.update.ApkUpdater
 import ru.voitos.app.ui.theme.VoitosColors
 import ru.voitos.app.ui.theme.voitosOutlinedFieldColors
 import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
@@ -856,7 +862,75 @@ fun ForceUpdateScreen(
     apkUrl: String = "",
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     BackHandler(enabled = true) { /* hard update — только обновить */ }
+
+    var phase by remember { mutableStateOf(UpdatePhase.Idle) }
+    var progress by remember { mutableFloatStateOf(0f) }
+    var downloadedBytes by remember { mutableLongStateOf(0L) }
+    var totalBytes by remember { mutableLongStateOf(-1L) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun beginDownload() {
+        if (apkUrl.isBlank()) {
+            error = "Ссылка на обновление не задана. Обратитесь к администратору."
+            phase = UpdatePhase.Failed
+            return
+        }
+        error = null
+        progress = 0f
+        downloadedBytes = 0L
+        totalBytes = -1L
+        phase = UpdatePhase.Downloading
+        scope.launch {
+            try {
+                val file = ApkUpdater.download(context, apkUrl) { done, total ->
+                    downloadedBytes = done
+                    totalBytes = total
+                    progress = if (total > 0L) {
+                        (done.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        // без Content-Length — «живой» индикатор по объёму
+                        ((done % (8L * 1024L * 1024L)).toFloat() / (8f * 1024f * 1024f))
+                            .coerceIn(0.05f, 0.95f)
+                    }
+                }
+                phase = UpdatePhase.Installing
+                progress = 1f
+                ApkUpdater.startInstall(context, file)
+            } catch (e: Exception) {
+                error = e.message?.takeIf { it.isNotBlank() }
+                    ?: "Не удалось скачать или установить обновление"
+                phase = UpdatePhase.Failed
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        if (ApkUpdater.canInstallPackages(context)) {
+            beginDownload()
+        } else {
+            error = "Разрешите установку из этого источника и нажмите «Обновить» ещё раз."
+            phase = UpdatePhase.Failed
+        }
+    }
+
+    fun onUpdateClick() {
+        if (!ApkUpdater.canInstallPackages(context)) {
+            phase = UpdatePhase.NeedPermission
+            runCatching {
+                permissionLauncher.launch(ApkUpdater.installPermissionSettingsIntent(context))
+            }.onFailure {
+                error = "Откройте настройки и разрешите установку приложений для Voitos."
+                phase = UpdatePhase.Failed
+            }
+            return
+        }
+        beginDownload()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -886,19 +960,121 @@ fun ForceUpdateScreen(
             color = VoitosColors.Muted,
             textAlign = TextAlign.Center,
         )
-        if (apkUrl.isNotBlank()) {
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = {
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+
+        when (phase) {
+            UpdatePhase.Idle, UpdatePhase.NeedPermission, UpdatePhase.Failed -> {
+                if (apkUrl.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { onUpdateClick() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = voitosPrimaryButtonColors(),
+                    ) {
+                        Text(
+                            when (phase) {
+                                UpdatePhase.Failed -> "Повторить"
+                                UpdatePhase.NeedPermission -> "Разрешить и обновить"
+                                else -> "Обновить"
+                            },
+                        )
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = voitosPrimaryButtonColors(),
-            ) { Text("Обновить") }
+                } else {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "Ссылка на APK не настроена на сервере.",
+                        color = VoitosColors.Muted,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                error?.let {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(it, color = VoitosColors.Danger, textAlign = TextAlign.Center)
+                }
+                if (apkUrl.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+                            }
+                        },
+                    ) {
+                        Text("Открыть ссылку в браузере", color = VoitosColors.Muted)
+                    }
+                }
+            }
+
+            UpdatePhase.Downloading -> {
+                Spacer(modifier = Modifier.height(28.dp))
+                Text(
+                    "Скачивание обновления…",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = VoitosColors.Text,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = VoitosColors.Accent2,
+                    trackColor = VoitosColors.Line,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                val pct = if (totalBytes > 0L) {
+                    "${(progress * 100).toInt()}%"
+                } else {
+                    ApkUpdater.formatBytes(downloadedBytes)
+                }
+                Text(
+                    if (totalBytes > 0L) {
+                        "$pct · ${ApkUpdater.formatBytes(downloadedBytes)} / ${ApkUpdater.formatBytes(totalBytes)}"
+                    } else {
+                        "Загружено: $pct"
+                    },
+                    color = VoitosColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
+            UpdatePhase.Installing -> {
+                Spacer(modifier = Modifier.height(28.dp))
+                CircularProgressIndicator(color = VoitosColors.Accent2)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Установка…",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = VoitosColors.Text,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Подтвердите установку в системном окне Android.",
+                    color = VoitosColors.Muted,
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        runCatching {
+                            ApkUpdater.startInstall(context, ApkUpdater.apkFile(context))
+                        }.onFailure {
+                            error = it.message ?: "Не удалось открыть установщик"
+                            phase = UpdatePhase.Failed
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Открыть установщик снова") }
+            }
         }
     }
+}
+
+private enum class UpdatePhase {
+    Idle,
+    NeedPermission,
+    Downloading,
+    Installing,
+    Failed,
 }
 
 @Composable
