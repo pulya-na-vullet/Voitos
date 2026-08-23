@@ -350,7 +350,32 @@ def publish_slots_for_master(req: WorkRequest, master: BotUser, slots: list[str]
             cleaned.append(part)
     if not cleaned:
         raise ValueError("Укажите хотя бы одно окно времени.")
-    cleaned = cleaned[:20]
+    # Убираем окна, которые пересекаются с другими заявками мастера (любая роль).
+    from services.master_booking import slot_overlaps_user_busy
+
+    available: list[str] = []
+    skipped = 0
+    now_local = timezone.localtime(timezone.now())
+    for label in cleaned:
+        parsed = parse_slot_datetime_range(label, ref_now=now_local)
+        if parsed and slot_overlaps_user_busy(
+            master.id,
+            parsed[0],
+            parsed[1],
+            exclude_wr_id=req.id,
+        ):
+            skipped += 1
+            continue
+        available.append(label)
+    if not available:
+        raise ValueError(
+            "Все указанные окна пересекаются с другими вашими заявками. "
+            "Выберите свободное время."
+        )
+    cleaned = available[:20]
+    if skipped:
+        # Сообщение добавим в ответ клиенту ниже через _publish — пока просто фильтруем.
+        pass
 
     pending = PendingAction.objects.filter(user=master).first()
     if (
@@ -424,6 +449,23 @@ def _confirm_agreed_slot(
 ) -> str:
     send_fn = _send()
     now = timezone.now()
+    # Нельзя подтвердить окно, если мастер уже занят по другой роли.
+    if req.assigned_contractor_id:
+        from services.master_booking import slot_overlaps_user_busy
+
+        parsed = parse_slot_datetime_range(slot, ref_now=timezone.localtime(now))
+        if parsed:
+            start, end = parsed
+            if slot_overlaps_user_busy(
+                req.assigned_contractor.user_id,
+                start,
+                end,
+                exclude_wr_id=req.id,
+            ):
+                raise ValueError(
+                    "Это время у мастера уже занято по другой заявке. "
+                    "Выберите другое окно."
+                )
     req.agreed_slot = slot[:255]
     req.schedule_agreed_at = now
     req.status = WorkRequestStatus.IN_PROGRESS

@@ -105,6 +105,72 @@ class MasterBookingApiTests(TestCase):
         self.assertEqual(items[0]["contractor_id"], self.contractor.id)
         self.assertTrue(items[0]["can_accept"])
 
+    def test_cross_role_slot_excluded(self):
+        """Один исполнитель: занятый слот по роли A недоступен по роли B."""
+        from services.master_booking import free_slots_for_contractor
+
+        role_b = ExecutorRole.objects.create(
+            code="r_elec",
+            name="Электрик",
+            is_active=True,
+            requires_work_photos=False,
+            client_books_master=True,
+        )
+        contractor_b = ContractorProfile.objects.create(
+            user=self.master_user,
+            role=role_b,
+            equipment_type=role_b.code,
+            locality="Куюки",
+            status=ContractorStatus.VERIFIED,
+        )
+        slots_a = free_slots_for_contractor(self.contractor, days=2)
+        self.assertTrue(slots_a)
+        label = slots_a[0]["label"]
+
+        book = self.client.post(
+            "/api/v1/work-requests",
+            data=__import__("json").dumps(
+                {
+                    "role_id": self.role.id,
+                    "description": "Протечка под раковиной",
+                    "contractor_id": self.contractor.id,
+                    "slot": label,
+                }
+            ),
+            content_type="application/json",
+            **self.auth,
+        )
+        self.assertEqual(book.status_code, 201, book.content)
+
+        slots_b = free_slots_for_contractor(contractor_b, days=2)
+        labels_b = {s["label"] for s in slots_b}
+        self.assertNotIn(label, labels_b)
+
+        # API тоже не даёт забронировать тот же слот другой ролью.
+        other_client = BotUser.objects.create(
+            max_user_id="bk-cl-x",
+            phone="89625501099",
+            real_name="Сосед",
+            locality="Куюки",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+        tok = MobileAuthToken.objects.create(bot_user=other_client)
+        conflict = self.client.post(
+            "/api/v1/work-requests",
+            data=__import__("json").dumps(
+                {
+                    "role_id": role_b.id,
+                    "description": "Розетка искрит на кухне",
+                    "contractor_id": contractor_b.id,
+                    "slot": label,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(conflict.status_code, 400)
+        self.assertIn("занято", conflict.json().get("detail", "").lower())
+
     def test_free_slots_and_booking_confirm(self):
         slots = free_slots_for_contractor(self.contractor, days=7)
         self.assertGreater(len(slots), 0)

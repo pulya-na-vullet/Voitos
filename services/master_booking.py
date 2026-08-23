@@ -100,11 +100,24 @@ def busy_intervals_for_user(
     range_end,
     exclude_wr_id: int | None = None,
 ) -> list[tuple]:
-    """Занятые интервалы мастера (по agreed_slot) в [range_start, range_end)."""
+    """
+    Занятые интервалы исполнителя по ВСЕМ его ролям (один BotUser).
+
+    Если мастер записан к клиенту сантехником на 10:00–11:00,
+    это же окно недоступно для записи к нему как электрику.
+    Учитываем согласованные / предзаписанные agreed_slot, включая черновик
+    с client_prebooked (фото ещё не отправлены).
+    """
+    from django.db.models import Q
+
     qs = (
-        WorkRequest.objects.filter(
-            assigned_contractor__user_id=user_id,
-            status__in=_active_busy_statuses(),
+        WorkRequest.objects.filter(assigned_contractor__user_id=user_id)
+        .filter(
+            Q(status__in=_active_busy_statuses())
+            | Q(
+                status=WorkRequestStatus.DRAFT,
+                client_prebooked=True,
+            )
         )
         .exclude(agreed_slot="")
         .only("id", "agreed_slot")
@@ -123,6 +136,23 @@ def busy_intervals_for_user(
         out.append((start, end))
     out.sort(key=lambda x: x[0])
     return out
+
+
+def slot_overlaps_user_busy(
+    user_id: int,
+    start,
+    end,
+    *,
+    exclude_wr_id: int | None = None,
+) -> bool:
+    """True, если интервал пересекается с любой заявкой мастера (любая роль)."""
+    busy = busy_intervals_for_user(
+        user_id,
+        range_start=start - timedelta(minutes=1),
+        range_end=end + timedelta(minutes=1),
+        exclude_wr_id=exclude_wr_id,
+    )
+    return any(_overlaps(start, end, b0, b1) for b0, b1 in busy)
 
 
 def _overlaps(a0, a1, b0, b1) -> bool:
@@ -265,19 +295,39 @@ def create_client_booking(
     if contractor_blocked_for_commission(contractor):
         raise ValueError(COMMISSION_BLOCK_MSG)
 
-    # Слот всё ещё свободен?
-    busy = busy_intervals_for_user(
-        contractor.user_id,
-        range_start=start - timedelta(minutes=1),
-        range_end=end + timedelta(minutes=1),
-    )
-    if any(_overlaps(start, end, b0, b1) for b0, b1 in busy):
-        raise ValueError("Это окно уже занято. Выберите другое время.")
+    # Слот свободен по всем ролям этого исполнителя?
+    if slot_overlaps_user_busy(contractor.user_id, start, end):
+        raise ValueError(
+            "Это окно уже занято у мастера по другой заявке. Выберите другое время."
+        )
 
     requires_photos = bool(getattr(role, "requires_work_photos", True))
     status = WorkRequestStatus.DRAFT if requires_photos else WorkRequestStatus.SCHEDULING
 
     with transaction.atomic():
+        # Повторная проверка под блокировкой от гонок двух ролей.
+        locked = (
+            WorkRequest.objects.select_for_update()
+            .filter(assigned_contractor__user_id=contractor.user_id)
+            .exclude(agreed_slot="")
+            .only("id", "agreed_slot", "status", "client_prebooked")
+        )
+        now = timezone.localtime(timezone.now())
+        for other in locked[:300]:
+            if other.status not in _active_busy_statuses() and not (
+                other.status == WorkRequestStatus.DRAFT and other.client_prebooked
+            ):
+                continue
+            parsed_o = parse_slot_datetime_range(other.agreed_slot or "", ref_now=now)
+            if not parsed_o:
+                continue
+            o0, o1 = parsed_o
+            if _overlaps(start, end, o0, o1):
+                raise ValueError(
+                    "Это окно уже занято у мастера по другой заявке. "
+                    "Выберите другое время."
+                )
+
         wr = WorkRequest.objects.create(
             user=client,
             role=role,
