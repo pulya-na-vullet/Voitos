@@ -579,11 +579,20 @@ class AppEmitHookTests(TestCase):
         self.assertIn("Оплатите подписку", resp.json()["detail"])
 
     def test_create_work_request_api(self):
+        from services.master_booking import free_slots_for_contractor
+
         tok = MobileAuthToken.objects.create(bot_user=self.client_user)
+        slots = free_slots_for_contractor(self.profile, days=5)
+        self.assertTrue(slots)
         resp = self.client.post(
             "/api/v1/work-requests",
             data=json.dumps(
-                {"role_id": self.role.id, "description": "Розетка не работает"}
+                {
+                    "role_id": self.role.id,
+                    "description": "Розетка не работает",
+                    "contractor_id": self.profile.id,
+                    "slot": slots[0]["label"],
+                }
             ),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {tok.token}",
@@ -592,6 +601,7 @@ class AppEmitHookTests(TestCase):
         data = resp.json()
         self.assertTrue(data["needs_photos"])
         self.assertEqual(data["status"], "draft")
+        self.assertTrue(data["client_prebooked"])
 
     def test_work_request_photo_and_submit(self):
         import base64

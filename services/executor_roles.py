@@ -159,6 +159,9 @@ def apply_role_form_fields(role: ExecutorRole, post) -> None:
     role.requires_qualification_docs = bool(post.get("requires_qualification_docs"))
     role.is_equipment = bool(post.get("is_equipment"))
     role.requires_work_photos = bool(post.get("requires_work_photos"))
+    if hasattr(role, "client_books_master"):
+        # Галочка «запись к мастеру»: по умолчанию вкл., снимаем явно.
+        role.client_books_master = bool(post.get("client_books_master"))
 
 
 def parse_flags_from_post(post) -> list[dict[str, Any]]:

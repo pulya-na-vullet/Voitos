@@ -33,12 +33,15 @@ import ru.voitos.app.model.AvatarUploadResult
 import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
 import ru.voitos.app.model.CollectionReceiptResult
+import ru.voitos.app.model.ConfirmBookingResult
 import ru.voitos.app.model.ExecutorMe
 import ru.voitos.app.model.ExecutorJobList
 import ru.voitos.app.model.ExecutorOfferList
 import ru.voitos.app.model.ExecutorOfferRespondResult
 import ru.voitos.app.model.ExecutorScheduleResponse
+import ru.voitos.app.model.FreeSlotsResponse
 import ru.voitos.app.model.ProposeSlotsResult
+import ru.voitos.app.model.RoleMastersResponse
 import ru.voitos.app.model.ExecutorRegisterResult
 import ru.voitos.app.model.ExecutorRoleList
 import ru.voitos.app.model.FeedbackCreateResult
@@ -511,17 +514,73 @@ class VoitosApiClient(
 
     suspend fun executorRoles(): ExecutorRoleList = authedGet("/executor-roles")
 
-    suspend fun createWorkRequest(roleId: Int, description: String): WorkRequestCreated =
-        http.post("$baseUrl/work-requests") {
+    suspend fun roleMasters(roleId: Int): RoleMastersResponse =
+        authedGet("/executor-roles/$roleId/masters")
+
+    suspend fun contractorFreeSlots(contractorId: Int, days: Int = 2): FreeSlotsResponse {
+        val response: HttpResponse = http.get("$baseUrl/contractors/$contractorId/free-slots") {
+            applyAuth()
+            parameter("days", days)
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<FreeSlotsResponse>() }.getOrNull()
+            throw IllegalStateException(
+                err?.blockedMessage?.ifBlank { null }
+                    ?: "Не удалось загрузить окна мастера",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun createWorkRequest(
+        roleId: Int,
+        description: String,
+        contractorId: Int? = null,
+        slot: String? = null,
+    ): WorkRequestCreated {
+        val response: HttpResponse = http.post("$baseUrl/work-requests") {
             applyAuth()
             contentType(ContentType.Application.Json)
             setBody(
                 buildJsonObject {
                     put("role_id", roleId)
                     put("description", description)
+                    if (contractorId != null && contractorId > 0) {
+                        put("contractor_id", contractorId)
+                    }
+                    if (!slot.isNullOrBlank()) {
+                        put("slot", slot)
+                    }
                 },
             )
-        }.body()
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw IllegalStateException(
+                err?.detail?.ifBlank { null }
+                    ?: err?.error
+                    ?: "Не удалось создать заявку (HTTP ${response.status.value})",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun confirmWorkRequestBooking(workRequestId: Int): ConfirmBookingResult {
+        val response: HttpResponse = http.post("$baseUrl/work-requests/$workRequestId/confirm-booking") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { })
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ConfirmBookingResult>() }.getOrNull()
+            throw IllegalStateException(
+                err?.detail?.ifBlank { null }
+                    ?: err?.error
+                    ?: "Не удалось подтвердить запись",
+            )
+        }
+        return response.body()
+    }
 
     suspend fun addWorkRequestPhoto(
         workRequestId: Int,

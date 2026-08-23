@@ -62,6 +62,7 @@
             {% if r.is_equipment %}<span class="badge">техника</span>{% endif %}
             {% if r.accepts_at_home %}<span class="badge">на дому</span>{% endif %}
             {% if r.requires_work_photos %}<span class="badge">фото</span>{% else %}<span class="badge">без фото</span>{% endif %}
+            {% if r.client_books_master %}<span class="badge">запись</span>{% else %}<span class="badge">автоподбор</span>{% endif %}
             {% if r.is_active %}<span class="badge ok">активна</span>{% else %}<span class="badge">скрыта</span>{% endif %}
             <span class="role-fold-chevron mono">▼</span>
           </span>
@@ -80,6 +81,7 @@
             <label class="muted"><input type="checkbox" name="is_equipment" {% if r.is_equipment %}checked{% endif %}> техника (госномер / модель)</label>
             <label class="muted"><input type="checkbox" name="accepts_at_home" {% if r.accepts_at_home %}checked{% endif %}> мастер принимает на дому</label>
             <label class="muted"><input type="checkbox" name="requires_work_photos" {% if r.requires_work_photos %}checked{% endif %}> нужны фото при записи заявки</label>
+            <label class="muted"><input type="checkbox" name="client_books_master" {% if r.client_books_master %}checked{% endif %}> клиент сам выбирает мастера и время</label>
             <div class="form-row" style="margin-top:10px;">
               <label>Доп. признаки</label>
               <div class="flag-editor" data-editor="role-{{ r.id }}"></div>
@@ -113,7 +115,8 @@
       <label class="muted"><input type="checkbox" name="requires_qualification_docs"> нужны подтверждающие документы о квалификации</label><br>
       <label class="muted"><input type="checkbox" name="is_equipment"> техника (госномер / модель)</label><br>
       <label class="muted"><input type="checkbox" name="accepts_at_home"> мастер принимает на дому</label><br>
-      <label class="muted"><input type="checkbox" name="requires_work_photos" checked> нужны фото при записи заявки</label>
+      <label class="muted"><input type="checkbox" name="requires_work_photos" checked> нужны фото при записи заявки</label><br>
+      <label class="muted"><input type="checkbox" name="client_books_master" checked> клиент сам выбирает мастера и время</label>
       <div class="form-row" style="margin-top:10px;">
         <label>Доп. признаки</label>
         <div class="flag-editor" data-editor="new"></div>

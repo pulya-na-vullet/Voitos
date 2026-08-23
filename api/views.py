@@ -231,6 +231,8 @@ def me_receipts(request):
 @api_login_required
 @require_GET
 def executor_roles(request):
+    from services.master_booking import role_uses_client_booking
+
     roles = ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
     return json_response(
         {
@@ -247,9 +249,108 @@ def executor_roles(request):
                     "requires_qualification_docs": bool(
                         getattr(r, "requires_qualification_docs", False)
                     ),
+                    "client_books_master": role_uses_client_booking(r),
                 }
                 for r in roles
             ]
+        }
+    )
+
+
+@api_login_required
+@api_subscription_required
+@require_GET
+def role_masters(request, role_id: int):
+    """Доступные мастера роли для записи клиента."""
+    from services.master_booking import list_masters_for_role, role_uses_client_booking
+
+    role = ExecutorRole.objects.filter(pk=role_id, is_active=True).first()
+    if not role:
+        return json_response({"error": "role_not_found"}, status=404)
+    if not role_uses_client_booking(role):
+        return json_response(
+            {
+                "error": "booking_not_supported",
+                "detail": "Для этой роли запись к мастеру недоступна.",
+                "items": [],
+            },
+            status=400,
+        )
+    items = list_masters_for_role(role, request.bot_user)
+    return json_response({"role_id": role.id, "role_name": role.name, "items": items})
+
+
+@api_login_required
+@api_subscription_required
+@require_GET
+def contractor_free_slots(request, contractor_id: int):
+    """Свободные окна календаря мастера."""
+    from database.models import ContractorProfile, ContractorStatus
+    from services.master_booking import (
+        contractor_blocked_for_commission,
+        free_slots_for_contractor,
+        COMMISSION_BLOCK_MSG,
+    )
+
+    contractor = (
+        ContractorProfile.objects.select_related("user", "role")
+        .filter(pk=contractor_id, status=ContractorStatus.VERIFIED)
+        .first()
+    )
+    if not contractor:
+        return json_response({"error": "not_found"}, status=404)
+    if contractor_blocked_for_commission(contractor):
+        return json_response(
+            {
+                "contractor_id": contractor.id,
+                "can_accept": False,
+                "blocked_reason": "commission",
+                "blocked_message": COMMISSION_BLOCK_MSG,
+                "items": [],
+            }
+        )
+    days_raw = (request.GET.get("days") or "2").strip()
+    try:
+        days = max(1, min(int(days_raw), 28))
+    except ValueError:
+        days = 2
+    items = free_slots_for_contractor(contractor, days=days)
+    return json_response(
+        {
+            "contractor_id": contractor.id,
+            "name": str(contractor.user),
+            "can_accept": True,
+            "items": items,
+        }
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_confirm_booking(request, pk: int):
+    """Мастер подтверждает предварительную запись клиента → в работе."""
+    from services.master_booking import confirm_client_booking
+
+    wr = (
+        WorkRequest.objects.select_related(
+            "role", "user", "assigned_contractor", "assigned_contractor__user"
+        )
+        .filter(pk=pk, assigned_contractor__user=request.bot_user)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    try:
+        msg = confirm_client_booking(wr, request.bot_user)
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    wr.refresh_from_db()
+    return json_response(
+        {
+            "ok": True,
+            "message": msg,
+            "status": wr.status,
+            "agreed_slot": wr.agreed_slot or "",
         }
     )
 
@@ -410,6 +511,7 @@ def executor_offer_respond(request, pk: int):
 def executor_jobs(request):
     """Заявки исполнителя, где нужно предложить/ждать согласование времени."""
     from database.models import WorkRequestStatus
+    from services.master_booking import contractor_blocked_for_commission
     from services.work_request_schedule import master_visit_address, role_accepts_at_home
 
     qs = (
@@ -423,6 +525,12 @@ def executor_jobs(request):
     items = []
     for wr in qs:
         home = role_accepts_at_home(wr)
+        prebooked = bool(getattr(wr, "client_prebooked", False)) and bool(
+            (wr.agreed_slot or "").strip()
+        )
+        commission_blocked = False
+        if wr.assigned_contractor_id:
+            commission_blocked = contractor_blocked_for_commission(wr.assigned_contractor)
         items.append(
             {
                 "id": wr.id,
@@ -437,7 +545,17 @@ def executor_jobs(request):
                 "accepts_at_home": home,
                 "master_address": master_visit_address(wr) if home else "",
                 "proposed_slots": _slot_labels(wr),
-                "needs_propose_slots": not bool(_slot_labels(wr)),
+                "agreed_slot": wr.agreed_slot or "",
+                "client_prebooked": prebooked,
+                "needs_confirm_booking": prebooked,
+                "needs_propose_slots": (not prebooked) and (not bool(_slot_labels(wr))),
+                "commission_blocked": commission_blocked,
+                "commission_blocked_message": (
+                    "Сначала оплатите комиссию по прошлому заказу — "
+                    "после этого сможете подтвердить запись."
+                    if commission_blocked
+                    else ""
+                ),
             }
         )
     return json_response({"items": items})
@@ -1259,6 +1377,7 @@ def collection_receipt(request, pk: int):
 @require_http_methods(["POST"])
 def work_requests_create(request):
     from database.models import WorkRequestStatus
+    from services.master_booking import create_client_booking, role_uses_client_booking
 
     data = parse_json(request)
     role_id = data.get("role_id")
@@ -1268,6 +1387,48 @@ def work_requests_create(request):
     role = ExecutorRole.objects.filter(pk=role_id, is_active=True).first()
     if not role:
         return json_response({"error": "role_not_found"}, status=404)
+
+    contractor_id = data.get("contractor_id") or data.get("master_id")
+    slot = (data.get("slot") or data.get("agreed_slot") or "").strip()
+
+    if role_uses_client_booking(role):
+        if not contractor_id or not slot:
+            return json_response(
+                {
+                    "error": "master_and_slot_required",
+                    "detail": "Выберите мастера и свободное время.",
+                },
+                status=400,
+            )
+        try:
+            wr = create_client_booking(
+                client=request.bot_user,
+                role=role,
+                description=description,
+                contractor_id=int(contractor_id),
+                slot_label=slot,
+            )
+        except ValueError as exc:
+            return json_response(
+                {"error": str(exc), "detail": str(exc)},
+                status=400,
+            )
+        requires_photos = bool(getattr(role, "requires_work_photos", True))
+        return json_response(
+            {
+                "id": wr.id,
+                "status": wr.status,
+                "role_name": role.name,
+                "description": wr.description,
+                "created_at": wr.created_at.isoformat(),
+                "needs_photos": requires_photos and wr.status == WorkRequestStatus.DRAFT,
+                "photo_count": 0,
+                "agreed_slot": wr.agreed_slot or "",
+                "client_prebooked": True,
+            },
+            status=201,
+        )
+
     requires_photos = bool(getattr(role, "requires_work_photos", True))
     status = WorkRequestStatus.DRAFT if requires_photos else WorkRequestStatus.PENDING
     wr = WorkRequest.objects.create(
@@ -1293,6 +1454,7 @@ def work_requests_create(request):
             "created_at": wr.created_at.isoformat(),
             "needs_photos": requires_photos,
             "photo_count": 0,
+            "client_prebooked": False,
         },
         status=201,
     )
@@ -1360,7 +1522,11 @@ def work_request_submit(request, pk: int):
         return json_response({"error": "photos_required"}, status=400)
 
     if wr.status == WorkRequestStatus.DRAFT:
-        wr.status = WorkRequestStatus.PENDING
+        # Предзапись к мастеру — сразу в scheduling, без автоподбора.
+        if getattr(wr, "client_prebooked", False) and wr.assigned_contractor_id:
+            wr.status = WorkRequestStatus.SCHEDULING
+        else:
+            wr.status = WorkRequestStatus.PENDING
         wr.save(update_fields=["status", "updated_at"])
 
     ActivityLog.objects.create(
@@ -1388,17 +1554,28 @@ def work_request_submit(request, pk: int):
         pass
 
     dispatched = False
-    try:
-        from services.work_request_dispatch import try_dispatch_request
+    if getattr(wr, "client_prebooked", False) and wr.assigned_contractor_id:
+        try:
+            from services.master_booking import activate_prebooking_after_photos
 
-        if not (wr.client_locality or "").strip():
-            loc = (request.bot_user.locality or "").strip()
-            if loc:
-                wr.client_locality = loc[:255]
-                wr.save(update_fields=["client_locality", "updated_at"])
-        dispatched = bool(try_dispatch_request(wr))
-    except Exception:
-        pass
+            # Уже SCHEDULING — только уведомить, если ещё не уведомляли при create
+            if wr.status == WorkRequestStatus.SCHEDULING:
+                activate_prebooking_after_photos(wr)
+            dispatched = True
+        except Exception:
+            pass
+    else:
+        try:
+            from services.work_request_dispatch import try_dispatch_request
+
+            if not (wr.client_locality or "").strip():
+                loc = (request.bot_user.locality or "").strip()
+                if loc:
+                    wr.client_locality = loc[:255]
+                    wr.save(update_fields=["client_locality", "updated_at"])
+            dispatched = bool(try_dispatch_request(wr))
+        except Exception:
+            pass
 
     return json_response(
         {
