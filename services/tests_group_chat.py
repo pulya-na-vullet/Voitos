@@ -163,6 +163,55 @@ class GroupChatAndAvatarTests(TestCase):
         self.assertEqual(after_close["author_paid"][str(self.user.id)], [False])
         self.assertEqual(after_close["author_paid"][str(self.other.id)], [True])
 
+    def test_family_payer_dots_cover_dependents(self):
+        """Если родитель оплатил сбор — у иждивенца в чате тоже зелёный кружок."""
+        dependent = BotUser.objects.create(
+            max_user_id="chat-dep",
+            real_name="Ребёнок",
+            phone="9625507113",
+            chat_id="c-chat-3",
+            family_payer=self.user,
+        )
+        self.g1.members.add(dependent)
+
+        camp = ServiceCampaign.objects.create(
+            category=ServiceCategory.SNOW,
+            title="Снег семьи",
+            group=self.g1,
+            total_amount=Decimal("1500"),
+            amount_per_user=Decimal("500"),
+            status=CampaignStatus.ACTIVE,
+        )
+        ServiceInvite.objects.create(
+            campaign=camp,
+            user=self.user,
+            amount_due=Decimal("500"),
+            amount_paid=Decimal("500"),
+            status=InviteStatus.PAID,
+        )
+        ServiceInvite.objects.create(
+            campaign=camp,
+            user=dependent,
+            amount_due=Decimal("500"),
+            status=InviteStatus.OFFERED,
+        )
+        ServiceInvite.objects.create(
+            campaign=camp,
+            user=self.other,
+            amount_due=Decimal("500"),
+            status=InviteStatus.OFFERED,
+        )
+        GroupChatMessage.objects.create(
+            group=self.g1, author=dependent, text="я иждивенец"
+        )
+
+        body = self.client.get(
+            f"/api/v1/groups/{self.g1.id}/messages", **self._auth()
+        ).json()
+        self.assertEqual(body["author_paid"][str(self.user.id)], [True])
+        self.assertEqual(body["author_paid"][str(dependent.id)], [True])
+        self.assertEqual(body["author_paid"][str(self.other.id)], [False])
+
     def test_foreign_group_forbidden(self):
         g3 = ServiceGroup.objects.create(name="Чужая")
         resp = self.client.post(
