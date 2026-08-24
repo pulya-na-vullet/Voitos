@@ -264,7 +264,23 @@
   <p class="muted" style="margin-top:0;">
     Назначьте тракториста / водителя камаза. После согласия жителям группы уйдёт статус с временем.
     Исполнитель может предложить другое время в течение 20 минут.
+    После сбора денег приоритетным (команда Voitos) предложения уходят автоматически.
   </p>
+  <form method="post" style="margin:0 0 12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="save_peers_flag">
+    <label style="display:flex; gap:8px; align-items:center; margin:0;">
+      <input type="checkbox" name="show_executor_peers_in_app" value="1"
+             {% if campaign.show_executor_peers_in_app %}checked{% endif %}>
+      Показывать исполнителей друг другу в мобильном приложении
+    </label>
+    <button class="btn secondary small" type="submit">Сохранить</button>
+  </form>
+  <form method="post" style="margin:0 0 14px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="auto_offer_contractors">
+    <button class="btn small" type="submit">Предложить приоритетным исполнителям</button>
+  </form>
   {% if suggested_equipment_types %}
   <p class="muted">Рекомендуемые типы:
     {% for t in suggested_equipment_types %}
@@ -289,6 +305,7 @@
         <td class="mono">{{ a.sort_order|default:forloop.counter }}</td>
         <td>
           <a href="{% url 'panel:user_dashboard' a.contractor.user_id %}">{{ a.contractor.user }}</a>
+          {% if a.contractor.is_voitos_team %}<span class="badge ok">Voitos</span>{% endif %}
           <div class="muted">{{ a.contractor.phone|default:a.contractor.user.phone }}</div>
         </td>
         <td>{{ a.get_equipment_type_display }}
@@ -343,7 +360,7 @@
         <option value="">— выберите —</option>
         {% for c in assignable_contractors %}
         <option value="{{ c.id }}">
-          {{ c.get_equipment_type_display }} · {{ c.user }}
+          {% if c.is_voitos_team %}★ Voitos · {% endif %}{{ c.get_equipment_type_display }} · {{ c.user }}
           {% if c.equipment_label %} ({{ c.equipment_label }}){% endif %}
         </option>
         {% endfor %}

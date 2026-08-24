@@ -1,5 +1,7 @@
 package ru.voitos.app.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -38,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.Instant
@@ -48,6 +51,7 @@ import java.util.Locale
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import ru.voitos.app.api.VoitosApiClient
+import ru.voitos.app.model.ExecutorCampaignJobBrief
 import ru.voitos.app.model.ExecutorJobBrief
 import ru.voitos.app.model.ExecutorOfferBrief
 import ru.voitos.app.model.ExecutorProfileBrief
@@ -69,6 +73,7 @@ fun ExecutorOffersScreen(
     var profiles by remember { mutableStateOf<List<ExecutorProfileBrief>>(emptyList()) }
     var offers by remember { mutableStateOf<List<ExecutorOfferBrief>>(emptyList()) }
     var jobs by remember { mutableStateOf<List<ExecutorJobBrief>>(emptyList()) }
+    var campaignJobs by remember { mutableStateOf<List<ExecutorCampaignJobBrief>>(emptyList()) }
     var schedule by remember { mutableStateOf<List<ExecutorScheduleEvent>>(emptyList()) }
     var workNotices by remember { mutableStateOf<List<ru.voitos.app.model.WorkNotice>>(emptyList()) }
     var weekStart by remember { mutableStateOf(mondayOf(LocalDate.now())) }
@@ -79,6 +84,14 @@ fun ExecutorOffersScreen(
     var slotDrafts by remember { mutableStateOf<Map<Int, List<String>>>(emptyMap()) }
     var proposeForJobId by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    fun openMapUrl(url: String) {
+        if (url.isBlank()) return
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
+    }
 
     fun offersFor(profile: ExecutorProfileBrief): List<ExecutorOfferBrief> =
         offers.filter { offer ->
@@ -99,6 +112,8 @@ fun ExecutorOffersScreen(
                 workNotices = me.workNotices
                 offers = client.executorOffers().items
                 jobs = runCatching { client.executorJobs().items }.getOrDefault(emptyList())
+                campaignJobs = runCatching { client.executorCampaignJobs().items }
+                    .getOrDefault(emptyList())
                 schedule = runCatching {
                     client.executorSchedule(weekStart.toString()).items
                 }.getOrDefault(emptyList())
@@ -297,6 +312,122 @@ fun ExecutorOffersScreen(
                     }
                 }
 
+                if (campaignJobs.isNotEmpty()) {
+                    item {
+                        Text(
+                            "Сборы: снег и дорога",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = VoitosColors.Accent2,
+                        )
+                    }
+                    items(campaignJobs, key = { "camp-${it.assignmentId}" }) { job ->
+                        PanelCard {
+                            Text(
+                                job.title.ifBlank { "Задача #${job.campaignId}" },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = VoitosColors.Text,
+                            )
+                            Text(
+                                listOf(job.categoryLabel, job.equipmentLabel, job.statusLabel)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" · "),
+                                color = VoitosColors.Muted,
+                            )
+                            if (job.address.isNotBlank()) {
+                                Text("Адрес: ${job.address}", color = VoitosColors.Text)
+                            } else if (job.groupName.isNotBlank()) {
+                                Text("Объект: ${job.groupName}", color = VoitosColors.Text)
+                            }
+                            if (job.scheduledAt != null) {
+                                Text("Время: ${job.scheduledAt}", color = VoitosColors.Muted)
+                            }
+                            if (job.description.isNotBlank()) {
+                                Text(job.description, color = VoitosColors.Text)
+                            }
+                            if (job.yandexMapsUrl.isNotBlank() || job.dgisMapsUrl.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (job.yandexMapsUrl.isNotBlank()) {
+                                        TextButton(onClick = { openMapUrl(job.yandexMapsUrl) }) {
+                                            Text("Яндекс.Карты", color = VoitosColors.Accent2)
+                                        }
+                                    }
+                                    if (job.dgisMapsUrl.isNotBlank()) {
+                                        TextButton(onClick = { openMapUrl(job.dgisMapsUrl) }) {
+                                            Text("2ГИС", color = VoitosColors.Accent2)
+                                        }
+                                    }
+                                }
+                            }
+                            if (job.showPeers && job.peers.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Коллеги на задаче", color = VoitosColors.Accent2)
+                                job.peers.forEach { peer ->
+                                    Text(peer.name, color = VoitosColors.Text)
+                                    if (peer.phone.isNotBlank()) {
+                                        Text("Тел.: ${peer.phone}", color = VoitosColors.Muted)
+                                    }
+                                    if (peer.maxUsername.isNotBlank()) {
+                                        Text("MAX: @${peer.maxUsername}", color = VoitosColors.Muted)
+                                    }
+                                    if (peer.plateNumber.isNotBlank()) {
+                                        Text("Госномер: ${peer.plateNumber}", color = VoitosColors.Muted)
+                                    }
+                                }
+                            }
+                            if (job.needsResponse) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                busyId = job.assignmentId
+                                                error = null
+                                                try {
+                                                    val res = client.respondExecutorCampaignJob(
+                                                        job.assignmentId,
+                                                        action = "accept",
+                                                    )
+                                                    message = res.message.ifBlank { "Заказ принят" }
+                                                    reload(keepMessage = true)
+                                                } catch (e: Exception) {
+                                                    error = friendlyNetworkError(e)
+                                                } finally {
+                                                    busyId = null
+                                                }
+                                            }
+                                        },
+                                        enabled = busyId != job.assignmentId,
+                                        colors = voitosPrimaryButtonColors(),
+                                    ) { Text("Согласен") }
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                busyId = job.assignmentId
+                                                error = null
+                                                try {
+                                                    val res = client.respondExecutorCampaignJob(
+                                                        job.assignmentId,
+                                                        action = "decline",
+                                                    )
+                                                    message = res.message.ifBlank { "Отказ отправлен" }
+                                                    reload(keepMessage = true)
+                                                } catch (e: Exception) {
+                                                    error = friendlyNetworkError(e)
+                                                } finally {
+                                                    busyId = null
+                                                }
+                                            }
+                                        },
+                                        enabled = busyId != job.assignmentId,
+                                        colors = voitosSecondaryButtonColors(),
+                                    ) { Text("Отказаться") }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if (profiles.isEmpty()) {
                     item {
                         Text("Вы ещё не зарегистрированы как исполнитель", color = VoitosColors.Muted)
@@ -306,6 +437,9 @@ fun ExecutorOffersScreen(
                     val roleOffers = offersFor(profile)
                     PanelCard {
                         Text(profile.roleName, style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
+                        if (profile.isVoitosTeam) {
+                            Text("Команда Voitos · высокий приоритет", color = VoitosColors.Ok)
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         if (roleOffers.isEmpty()) {
                             Text(
@@ -326,6 +460,20 @@ fun ExecutorOffersScreen(
                                     Text(offer.locality.ifBlank { "НП не указан" }, color = VoitosColors.Muted)
                                     if (offer.address.isNotBlank()) {
                                         Text(offer.address, color = VoitosColors.Muted)
+                                    }
+                                    if (offer.yandexMapsUrl.isNotBlank() || offer.dgisMapsUrl.isNotBlank()) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            if (offer.yandexMapsUrl.isNotBlank()) {
+                                                TextButton(onClick = { openMapUrl(offer.yandexMapsUrl) }) {
+                                                    Text("Яндекс.Карты", color = VoitosColors.Accent2)
+                                                }
+                                            }
+                                            if (offer.dgisMapsUrl.isNotBlank()) {
+                                                TextButton(onClick = { openMapUrl(offer.dgisMapsUrl) }) {
+                                                    Text("2ГИС", color = VoitosColors.Accent2)
+                                                }
+                                            }
+                                        }
                                     }
                                     if (offer.clientPhone.isNotBlank()) {
                                         Text("Тел.: ${offer.clientPhone}", color = VoitosColors.Text)

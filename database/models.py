@@ -1132,6 +1132,14 @@ class ServiceCampaign(models.Model):
         default=False,
         help_text="Для чистки снега: подбирать водителей грузовых (камаз) на вывоз.",
     )
+    show_executor_peers_in_app = models.BooleanField(
+        "Показывать исполнителей друг другу в приложении",
+        default=False,
+        help_text=(
+            "Если на задаче несколько исполнителей — их контакты видны коллегам "
+            "в мобильном приложении."
+        ),
+    )
     status = models.CharField(
         max_length=16,
         choices=CampaignStatus.choices,
@@ -1360,6 +1368,13 @@ class ContractorProfile(models.Model):
         default="",
     )
     plate_number = models.CharField("Госномер", max_length=32, blank=True, default="")
+    experience_text = models.CharField(
+        "Стаж / опыт",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Например: 5 лет. Для тракториста и водителя — стаж вождения техники.",
+    )
     phone = models.CharField("Телефон для связи", max_length=32, blank=True, default="")
     payout_phone = models.CharField(
         "Телефон для перевода денег",
@@ -1376,6 +1391,15 @@ class ContractorProfile(models.Model):
         help_text="Например: Сбер, Тинькофф, Альфа.",
     )
     locality = models.CharField("Населённый пункт", max_length=255, blank=True, default="")
+    is_voitos_team = models.BooleanField(
+        "Член команды Voitos",
+        default=False,
+        db_index=True,
+        help_text=(
+            "Высокий приоритет на заявках для ролей тракторист / водитель грузовика / "
+            "компьютерный мастер: сначала им, и только если слоты на сегодня заняты — остальным."
+        ),
+    )
     qualification_doc = models.FileField(
         "Документ о квалификации",
         upload_to="contractor_docs/%Y/%m/",

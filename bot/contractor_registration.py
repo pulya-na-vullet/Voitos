@@ -20,6 +20,8 @@ from services.executor_roles import (
     format_roles_list,
     match_role_from_text,
     role_by_code,
+    role_docs_prompt,
+    role_requires_docs,
 )
 from subscriptions.receipts import normalize_phone
 
@@ -80,8 +82,8 @@ def _after_role_chosen(user: BotUser, pending: PendingAction, role: ExecutorRole
             "Модель или описание техники (например: МТЗ-82)."
         )
     doc = ""
-    if role.requires_qualification_docs:
-        doc = "\nПозже попросим фото документа."
+    if role_requires_docs(role):
+        doc = "\nПозже попросим фото прав / документа."
     return (
         f"Роль: {role.name}.\n"
         f"Кратко опишите опыт (или «нет»).{doc}"
@@ -126,14 +128,17 @@ def handle_contractor_registration_step(
         if role.is_equipment and len(raw) < 2:
             return "Напишите модель или краткое описание техники."
         if raw.lower() in _SKIP | {"нет", "no", "n", "-", "нету"}:
-            payload["equipment_label"] = ""
+            label_val = ""
         else:
-            payload["equipment_label"] = raw[:255]
+            label_val = raw[:255]
         if role.is_equipment:
+            payload["equipment_label"] = label_val
             payload["step"] = "plate"
             pending.pending_payload = payload
             pending.save(update_fields=["pending_payload", "updated_at"])
             return "Укажите госномер (или «нет», если пока без номера)."
+        payload["experience_text"] = label_val
+        payload["equipment_label"] = ""
         return _ask_phone_or_locality(user, payload, pending)
 
     if step == "plate":
@@ -144,6 +149,18 @@ def handle_contractor_registration_step(
             return "Укажите госномер цифрами и буквами (или «нет», если без номера)."
         else:
             payload["plate_number"] = raw[:32]
+        payload["step"] = "experience"
+        pending.pending_payload = payload
+        pending.save(update_fields=["pending_payload", "updated_at"])
+        return "Укажите стаж работы на технике (например: 5 лет)."
+
+    if step == "experience":
+        if raw.lower() in _SKIP | {"нет", "no", "n", "-", "нету"}:
+            payload["experience_text"] = ""
+        else:
+            if len(raw) < 1:
+                return "Укажите стаж (например: 5 лет) или «нет»."
+            payload["experience_text"] = raw[:255]
         return _ask_phone_or_locality(user, payload, pending)
 
     if step == "phone":
@@ -193,14 +210,11 @@ def handle_contractor_registration_step(
                     "если совпадает с телефоном для связи."
                 )
             payload["payout_phone"] = phone
-        if role.requires_qualification_docs:
+        if role_requires_docs(role):
             payload["step"] = "qual_doc"
             pending.pending_payload = payload
             pending.save(update_fields=["pending_payload", "updated_at"])
-            return (
-                "Для этой роли нужны подтверждающие документы о квалификации.\n"
-                "Пришлите фото документа (диплом, удостоверение, сертификат)."
-            )
+            return role_docs_prompt(role)
         return _finish(user, pending, payload, role)
 
     if step == "qual_doc":
@@ -277,6 +291,7 @@ def _finish(
             "role": role,
             "equipment_label": (payload.get("equipment_label") or "")[:255],
             "plate_number": (payload.get("plate_number") or "")[:32],
+            "experience_text": (payload.get("experience_text") or "")[:255],
             "phone": contact,
             "payout_phone": payout,
             "bank_name": (payload.get("bank_name") or "")[:255],
@@ -314,6 +329,7 @@ def _finish(
             description=(
                 f"{role.name}\n"
                 f"{profile.equipment_label}\n"
+                f"Стаж: {profile.experience_text or '—'}\n"
                 f"Госномер: {profile.plate_number or '—'}\n"
                 f"Связь: {profile.phone or '—'}\n"
                 f"Перевод: {profile.payout_phone or '—'} / {profile.bank_name or '—'}\n"
@@ -321,7 +337,7 @@ def _finish(
                 f"Документ: {'есть' if profile.qualification_doc else 'нет'}"
             ),
             user=user,
-            action_url="/panel/contractors/",
+            action_url=f"/panel/contractors/{profile.id}/",
             source_model="ContractorProfile",
             source_id=profile.id,
             priority=30,
@@ -329,7 +345,7 @@ def _finish(
     except Exception:
         pass
     doc_line = ""
-    if role.requires_qualification_docs:
+    if role_requires_docs(role):
         doc_line = f"\nДокумент: {'получен' if profile.qualification_doc else 'не приложен'}"
     all_roles = list(
         ContractorProfile.objects.filter(user=user).select_related("role").order_by("id")
@@ -341,6 +357,7 @@ def _finish(
         "Анкета отправлена на проверку.\n"
         f"Роль: {role.name}\n"
         f"Описание: {profile.equipment_label or '—'}\n"
+        f"Стаж: {profile.experience_text or '—'}\n"
         f"Телефон для перевода: {profile.payout_phone or profile.phone or '—'}"
         f"{doc_line}{roles_line}\n"
         "После проверки начнёте получать заказы."
@@ -368,14 +385,23 @@ def submit_contractor_registration_api(user: BotUser, data: dict) -> tuple[Contr
         payout = normalize_phone(payout_raw)
         if len(payout) < 10:
             raise ValueError("payout_phone_invalid")
-    if role.requires_qualification_docs and not (data.get("qual_base64") or data.get("qual_b64")):
+    if role_requires_docs(role) and not (data.get("qual_base64") or data.get("qual_b64")):
         raise ValueError("qualification_doc_required")
-    label = str(data.get("equipment_label") or data.get("experience") or "").strip()
+    label = str(data.get("equipment_label") or "").strip()
+    experience = str(data.get("experience_text") or data.get("experience") or "").strip()
     if role.is_equipment and len(label) < 2:
         raise ValueError("equipment_label_required")
+    if not role.is_equipment and not experience and label:
+        # Для обычных ролей «опыт» приходит в equipment_label.
+        experience = label
+        label = ""
+    if role.is_equipment and len(experience) < 1:
+        # Стаж желателен, но пустой «нет» допускаем с клиента как пустую строку.
+        experience = experience[:255]
     payload = {
         "equipment_label": label[:255],
         "plate_number": str(data.get("plate_number") or "")[:32],
+        "experience_text": experience[:255],
         "phone": phone,
         "locality": locality[:255],
         "bank_name": bank[:255],

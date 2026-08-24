@@ -1963,6 +1963,40 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             n = notify_residents_about_assignments(campaign, send_fn=_notify_user)
             messages.success(request, f"Статус исполнителя разослан: {n} сообщ.")
             return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "save_peers_flag":
+            if not is_panel_admin(request.user):
+                messages.error(request, "Только администратор может менять эту настройку.")
+            else:
+                campaign.show_executor_peers_in_app = bool(
+                    request.POST.get("show_executor_peers_in_app")
+                )
+                campaign.save(update_fields=["show_executor_peers_in_app"])
+                messages.success(
+                    request,
+                    "Показ контактов исполнителей в приложении: "
+                    + ("включён." if campaign.show_executor_peers_in_app else "выключен."),
+                )
+            return redirect("panel:service_campaign_detail", pk=pk)
+        if action == "auto_offer_contractors":
+            if not is_panel_admin(request.user):
+                messages.error(request, "Только администратор.")
+            else:
+                from services.contractors import auto_offer_priority_contractors_for_campaign
+
+                n = auto_offer_priority_contractors_for_campaign(
+                    campaign, send_fn=_notify_user
+                )
+                if n:
+                    messages.success(
+                        request,
+                        f"Предложения отправлены приоритетным исполнителям: {n}.",
+                    )
+                else:
+                    messages.info(
+                        request,
+                        "Некого назначать: нет подходящих ролей или все уже назначены.",
+                    )
+            return redirect("panel:service_campaign_detail", pk=pk)
 
     from django.db.models import Sum
 
@@ -2099,13 +2133,20 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             profile.status = ContractorStatus.VERIFIED
             profile.verified_at = timezone.now()
             profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.is_voitos_team = bool(request.POST.get("is_voitos_team"))
             profile.save()
             close_task_for_source(
                 AdminTaskKind.CONTRACTOR_REVIEW, "ContractorProfile", profile.id
             )
+            team_mark = (
+                " Вы в приоритете команды Voitos по этой роли."
+                if profile.is_voitos_team
+                else ""
+            )
             _notify_user(
                 profile.user,
-                "Анкета исполнителя проверена. Теперь вы можете получать заказы.",
+                "Анкета исполнителя проверена. Теперь вы можете получать заказы."
+                + team_mark,
             )
             try:
                 from services.work_request_dispatch import dispatch_for_new_contractor
@@ -2118,7 +2159,10 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
                     )
             except Exception:
                 pass
-            messages.success(request, f"Исполнитель «{profile}» подтверждён.")
+            team_label = " (команда Voitos)" if profile.is_voitos_team else ""
+            messages.success(
+                request, f"Исполнитель «{profile}» подтверждён{team_label}."
+            )
         elif action == "reject":
             profile.status = ContractorStatus.REJECTED
             profile.admin_note = (request.POST.get("note") or "").strip()
@@ -2136,6 +2180,18 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             profile.status = ContractorStatus.DISABLED
             profile.save(update_fields=["status", "updated_at"])
             messages.info(request, f"Исполнитель «{profile}» отключён.")
+        elif action == "set_voitos_team":
+            profile.is_voitos_team = bool(request.POST.get("is_voitos_team"))
+            profile.save(update_fields=["is_voitos_team", "updated_at"])
+            messages.success(
+                request,
+                f"«{profile}»: "
+                + (
+                    "член команды Voitos (высокий приоритет)."
+                    if profile.is_voitos_team
+                    else "обычный приоритет."
+                ),
+            )
         elif action == "update_payout_details":
             from subscriptions.receipts import normalize_phone
 
@@ -2193,6 +2249,109 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
             "localities": [
                 {"name": name, "count": locality_counts[name]} for name in localities
             ],
+            "status_verified": ContractorStatus.VERIFIED,
+            "status_pending": ContractorStatus.PENDING_REVIEW,
+        },
+    )
+
+
+@login_required
+@admin_required
+@require_http_methods(["GET", "POST"])
+def contractor_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    """Карточка заявки исполнителя: данные, документ, приоритет Voitos."""
+    from database.models import AdminTaskKind, ContractorProfile, ContractorStatus
+    from panel.admin_tasks import close_task_for_source
+
+    if not is_panel_admin(request.user):
+        messages.error(request, "Раздел исполнителей доступен только администратору.")
+        return redirect(panel_home_url_name(request.user))
+
+    profile = get_object_or_404(
+        ContractorProfile.objects.select_related("user", "role"),
+        pk=pk,
+    )
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "verify":
+            profile.status = ContractorStatus.VERIFIED
+            profile.verified_at = timezone.now()
+            profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.is_voitos_team = bool(request.POST.get("is_voitos_team"))
+            profile.save()
+            close_task_for_source(
+                AdminTaskKind.CONTRACTOR_REVIEW, "ContractorProfile", profile.id
+            )
+            team_mark = (
+                " Вы в приоритете команды Voitos по этой роли."
+                if profile.is_voitos_team
+                else ""
+            )
+            _notify_user(
+                profile.user,
+                "Анкета исполнителя проверена. Теперь вы можете получать заказы."
+                + team_mark,
+            )
+            try:
+                from services.work_request_dispatch import dispatch_for_new_contractor
+
+                n = dispatch_for_new_contractor(profile, send_fn=_notify_user)
+                if n:
+                    messages.info(
+                        request,
+                        f"Исполнителю предложено открытых заявок: {n}.",
+                    )
+            except Exception:
+                pass
+            messages.success(
+                request,
+                f"Исполнитель подтверждён"
+                + (" (команда Voitos)." if profile.is_voitos_team else "."),
+            )
+            return redirect("panel:contractor_detail", pk=profile.id)
+        if action == "reject":
+            profile.status = ContractorStatus.REJECTED
+            profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.save()
+            close_task_for_source(
+                AdminTaskKind.CONTRACTOR_REVIEW, "ContractorProfile", profile.id
+            )
+            _notify_user(
+                profile.user,
+                "Анкета исполнителя отклонена."
+                + (f"\n{profile.admin_note}" if profile.admin_note else ""),
+            )
+            messages.info(request, "Анкета отклонена.")
+            return redirect("panel:contractor_detail", pk=profile.id)
+        if action == "disable":
+            profile.status = ContractorStatus.DISABLED
+            profile.save(update_fields=["status", "updated_at"])
+            messages.info(request, "Исполнитель отключён.")
+            return redirect("panel:contractor_detail", pk=profile.id)
+        if action == "set_voitos_team":
+            profile.is_voitos_team = bool(request.POST.get("is_voitos_team"))
+            profile.save(update_fields=["is_voitos_team", "updated_at"])
+            messages.success(
+                request,
+                "Приоритет Voitos: "
+                + ("включён." if profile.is_voitos_team else "снят."),
+            )
+            return redirect("panel:contractor_detail", pk=profile.id)
+        if action == "save_note":
+            profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.save(update_fields=["admin_note", "updated_at"])
+            messages.success(request, "Заметка сохранена.")
+            return redirect("panel:contractor_detail", pk=profile.id)
+        return redirect("panel:contractor_detail", pk=profile.id)
+
+    loc = (profile.locality or getattr(profile.user, "locality", "") or "").strip()
+    return render(
+        request,
+        "panel/contractor_detail.html",
+        {
+            "c": profile,
+            "locality": loc,
             "status_verified": ContractorStatus.VERIFIED,
             "status_pending": ContractorStatus.PENDING_REVIEW,
         },

@@ -38,7 +38,8 @@ import ru.voitos.app.ui.theme.voitosPrimaryButtonColors
 
 /**
  * Регистрация исполнителя — шаги как в MAX-боте:
- * роль → опыт/техника → [госномер] → телефон → НП → банк → телефон перевода → [документ].
+ * роль → опыт/техника → [госномер] → [стаж] → телефон → НП → банк →
+ * телефон перевода → [права/документ].
  */
 @Composable
 fun ExecutorRegisterScreen(
@@ -52,6 +53,7 @@ fun ExecutorRegisterScreen(
     var role by remember { mutableStateOf<ExecutorRole?>(null) }
     var label by remember { mutableStateOf("") }
     var plate by remember { mutableStateOf("") }
+    var experience by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var locality by remember { mutableStateOf("") }
     var bank by remember { mutableStateOf("") }
@@ -66,6 +68,9 @@ fun ExecutorRegisterScreen(
     var proposeSending by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    fun needsDocs(r: ExecutorRole?): Boolean =
+        r != null && (r.requiresQualificationDocs || r.isEquipment)
 
     LaunchedEffect(Unit) {
         try {
@@ -95,7 +100,7 @@ fun ExecutorRegisterScreen(
     }
 
     fun nextAfterLabel() {
-        if (role?.isEquipment == true) step = 2 else step = 3
+        if (role?.isEquipment == true) step = 2 else step = 4
     }
 
     Column(
@@ -156,8 +161,8 @@ fun ExecutorRegisterScreen(
                     value = label,
                     onValueChange = { label = it },
                     modifier = Modifier.fillMaxWidth(),
-            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
-        )
+                    colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+                )
                 Button(
                     onClick = {
                         if (r?.isEquipment == true && label.trim().length < 2) {
@@ -177,8 +182,8 @@ fun ExecutorRegisterScreen(
                     value = plate,
                     onValueChange = { plate = it },
                     modifier = Modifier.fillMaxWidth(),
-            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
-        )
+                    colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+                )
                 Button(
                     onClick = { step = 3 },
                     modifier = Modifier.fillMaxWidth(),
@@ -186,19 +191,15 @@ fun ExecutorRegisterScreen(
                 ) { Text("Далее") }
             }
             3 -> {
-                Text("Телефон для связи", color = VoitosColors.Text)
+                Text("Стаж работы на технике (например: 5 лет)", color = VoitosColors.Text)
                 OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it },
+                    value = experience,
+                    onValueChange = { experience = it },
                     modifier = Modifier.fillMaxWidth(),
-            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
-        )
+                    colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+                )
                 Button(
                     onClick = {
-                        if (phone.filter { it.isDigit() }.length < 10) {
-                            error = "Нужен корректный телефон"
-                            return@Button
-                        }
                         error = null
                         step = 4
                     },
@@ -207,17 +208,17 @@ fun ExecutorRegisterScreen(
                 ) { Text("Далее") }
             }
             4 -> {
-                Text("Населённый пункт, где работаете", color = VoitosColors.Text)
+                Text("Телефон для связи", color = VoitosColors.Text)
                 OutlinedTextField(
-                    value = locality,
-                    onValueChange = { locality = it },
+                    value = phone,
+                    onValueChange = { phone = it },
                     modifier = Modifier.fillMaxWidth(),
-            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
-        )
+                    colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+                )
                 Button(
                     onClick = {
-                        if (locality.trim().length < 2) {
-                            error = "Укажите населённый пункт"
+                        if (phone.filter { it.isDigit() }.length < 10) {
+                            error = "Нужен корректный телефон"
                             return@Button
                         }
                         error = null
@@ -228,17 +229,17 @@ fun ExecutorRegisterScreen(
                 ) { Text("Далее") }
             }
             5 -> {
-                Text("Банк для перевода (Сбер, Тинькофф…)", color = VoitosColors.Text)
+                Text("Населённый пункт, где работаете", color = VoitosColors.Text)
                 OutlinedTextField(
-                    value = bank,
-                    onValueChange = { bank = it },
+                    value = locality,
+                    onValueChange = { locality = it },
                     modifier = Modifier.fillMaxWidth(),
-            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
-        )
+                    colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+                )
                 Button(
                     onClick = {
-                        if (bank.trim().length < 2) {
-                            error = "Укажите банк"
+                        if (locality.trim().length < 2) {
+                            error = "Укажите населённый пункт"
                             return@Button
                         }
                         error = null
@@ -249,6 +250,27 @@ fun ExecutorRegisterScreen(
                 ) { Text("Далее") }
             }
             6 -> {
+                Text("Банк для перевода (Сбер, Тинькофф…)", color = VoitosColors.Text)
+                OutlinedTextField(
+                    value = bank,
+                    onValueChange = { bank = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+                )
+                Button(
+                    onClick = {
+                        if (bank.trim().length < 2) {
+                            error = "Укажите банк"
+                            return@Button
+                        }
+                        error = null
+                        step = 7
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = voitosPrimaryButtonColors(),
+                ) { Text("Далее") }
+            }
+            7 -> {
                 Text("Телефон для перевода денег", color = VoitosColors.Text)
                 TextButton(onClick = { samePayout = true; payoutPhone = phone }) {
                     Text("Тот же, что для связи", color = VoitosColors.Accent2)
@@ -261,22 +283,29 @@ fun ExecutorRegisterScreen(
                             samePayout = false
                         },
                         modifier = Modifier.fillMaxWidth(),
-            colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
-        )
+                        colors = ru.voitos.app.ui.theme.voitosOutlinedFieldColors(),
+                    )
                 }
                 Button(
                     onClick = {
                         val pay = if (samePayout || payoutPhone.isBlank()) phone else payoutPhone
                         payoutPhone = pay
                         error = null
-                        step = if (role?.requiresQualificationDocs == true) 7 else 8
+                        step = if (needsDocs(role)) 8 else 9
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
-            7 -> {
-                Text("Фото документа о квалификации", color = VoitosColors.Text)
+            8 -> {
+                Text(
+                    if (role?.isEquipment == true) {
+                        "Фото водительских прав / удостоверения на технику"
+                    } else {
+                        "Фото документа о квалификации"
+                    },
+                    color = VoitosColors.Text,
+                )
                 Button(
                     onClick = { picker.launch("image/*") },
                     modifier = Modifier.fillMaxWidth(),
@@ -291,13 +320,13 @@ fun ExecutorRegisterScreen(
                             return@Button
                         }
                         error = null
-                        step = 8
+                        step = 9
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = voitosPrimaryButtonColors(),
                 ) { Text("Далее") }
             }
-            8 -> {
+            9 -> {
                 Text("Отправить анкету на проверку?", color = VoitosColors.Text)
                 if (loading) CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                 Button(
@@ -307,10 +336,19 @@ fun ExecutorRegisterScreen(
                             loading = true
                             error = null
                             try {
+                                val exp = if (r.isEquipment) {
+                                    experience
+                                } else {
+                                    label.ifBlank { "нет" }
+                                }
+                                val equipLabel = if (r.isEquipment) label else ""
                                 val res = client.registerExecutor(
                                     roleId = r.id,
-                                    equipmentLabel = label.ifBlank { "нет" },
+                                    equipmentLabel = equipLabel.ifBlank {
+                                        if (r.isEquipment) "нет" else ""
+                                    },
                                     plateNumber = plate,
+                                    experienceText = exp,
                                     phone = phone,
                                     locality = locality,
                                     bankName = bank,

@@ -535,6 +535,7 @@ data class ExecutorProfileBrief(
     @SerialName("status_label") val statusLabel: String = "",
     val locality: String = "",
     val phone: String = "",
+    @SerialName("is_voitos_team") val isVoitosTeam: Boolean = false,
 )
 
 @Serializable
@@ -574,6 +575,8 @@ data class ExecutorOfferBrief(
     @SerialName("accepts_at_home") val acceptsAtHome: Boolean = false,
     val status: String = "",
     @SerialName("respond_deadline") val respondDeadline: String? = null,
+    @SerialName("yandex_maps_url") val yandexMapsUrl: String = "",
+    @SerialName("dgis_maps_url") val dgisMapsUrl: String = "",
 )
 
 @Serializable
@@ -614,6 +617,55 @@ data class ExecutorJobBrief(
 @Serializable
 data class ExecutorJobList(
     val items: List<ExecutorJobBrief> = emptyList(),
+)
+
+@Serializable
+data class ExecutorCampaignPeer(
+    @SerialName("assignment_id") val assignmentId: Int = 0,
+    val name: String = "",
+    @SerialName("role_label") val roleLabel: String = "",
+    @SerialName("equipment_label") val equipmentLabel: String = "",
+    val phone: String = "",
+    @SerialName("max_username") val maxUsername: String = "",
+    @SerialName("max_profile_url") val maxProfileUrl: String = "",
+    @SerialName("plate_number") val plateNumber: String = "",
+)
+
+@Serializable
+data class ExecutorCampaignJobBrief(
+    @SerialName("assignment_id") val assignmentId: Int = 0,
+    @SerialName("campaign_id") val campaignId: Int = 0,
+    val title: String = "",
+    val category: String = "",
+    @SerialName("category_label") val categoryLabel: String = "",
+    val description: String = "",
+    val status: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    @SerialName("equipment_type") val equipmentType: String = "",
+    @SerialName("equipment_label") val equipmentLabel: String = "",
+    @SerialName("scheduled_at") val scheduledAt: String? = null,
+    @SerialName("proposed_at") val proposedAt: String? = null,
+    @SerialName("group_name") val groupName: String = "",
+    val locality: String = "",
+    val address: String = "",
+    @SerialName("yandex_maps_url") val yandexMapsUrl: String = "",
+    @SerialName("dgis_maps_url") val dgisMapsUrl: String = "",
+    @SerialName("show_peers") val showPeers: Boolean = false,
+    val peers: List<ExecutorCampaignPeer> = emptyList(),
+    @SerialName("needs_response") val needsResponse: Boolean = false,
+)
+
+@Serializable
+data class ExecutorCampaignJobList(
+    val items: List<ExecutorCampaignJobBrief> = emptyList(),
+)
+
+@Serializable
+data class ExecutorCampaignJobRespondResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("assignment_id") val assignmentId: Int = 0,
 )
 
 @Serializable

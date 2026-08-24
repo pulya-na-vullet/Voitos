@@ -227,6 +227,7 @@ def me_receipts(request):
 @api_login_required
 @require_GET
 def executor_roles(request):
+    from services.executor_roles import role_requires_docs
     from services.master_booking import role_uses_client_booking, roles_for_client_call
 
     # for=call — только роли, где в НП есть другой мастер (вызов).
@@ -250,9 +251,7 @@ def executor_roles(request):
                     ),
                     "accepts_at_home": bool(getattr(r, "accepts_at_home", False)),
                     "is_equipment": bool(getattr(r, "is_equipment", False)),
-                    "requires_qualification_docs": bool(
-                        getattr(r, "requires_qualification_docs", False)
-                    ),
+                    "requires_qualification_docs": role_requires_docs(r),
                     "client_books_master": role_uses_client_booking(r),
                 }
                 for r in roles
@@ -403,6 +402,7 @@ def me_executor(request):
                 "status_label": p.get_status_display(),
                 "locality": p.locality or "",
                 "phone": p.phone or "",
+                "is_voitos_team": bool(getattr(p, "is_voitos_team", False)),
             }
         )
     return json_response(
@@ -467,9 +467,15 @@ def executor_register(request):
 @api_login_required
 @require_GET
 def executor_offers(request):
+    from services.dispatch_priority import maps_route_urls
+
     items = []
     for offer in _open_offers_qs(request.bot_user)[:50]:
         wr = offer.work_request
+        address = (wr.user.address or "").strip()
+        loc = (wr.client_locality or wr.user.locality or "").strip()
+        route_addr = ", ".join(p for p in [loc, address] if p)
+        maps = maps_route_urls(route_addr)
         items.append(
             {
                 "offer_id": offer.id,
@@ -477,8 +483,8 @@ def executor_offers(request):
                 "role_id": wr.role_id or 0,
                 "role_name": wr.role.name if wr.role_id else "",
                 "description": (wr.description or "")[:800],
-                "locality": (wr.client_locality or wr.user.locality or "")[:255],
-                "address": (wr.user.address or "")[:500],
+                "locality": loc[:255],
+                "address": address[:500],
                 "client_phone": (wr.user.phone or "")[:64],
                 "client_name": str(wr.user),
                 "accepts_at_home": bool(getattr(wr.role, "accepts_at_home", False)),
@@ -486,6 +492,8 @@ def executor_offers(request):
                 "respond_deadline": (
                     offer.respond_deadline.isoformat() if offer.respond_deadline else None
                 ),
+                "yandex_maps_url": maps.get("yandex_maps_url") or "",
+                "dgis_maps_url": maps.get("dgis_maps_url") or "",
             }
         )
     return json_response({"items": items})
@@ -573,6 +581,132 @@ def executor_jobs(request):
             }
         )
     return json_response({"items": items})
+
+
+def _serialize_campaign_job(assignment, *, for_user) -> dict:
+    from services.dispatch_priority import (
+        campaign_work_address,
+        maps_route_urls,
+        peer_contact_payload,
+    )
+    from services.contractors import active_peer_assignments
+
+    campaign = assignment.campaign
+    address = campaign_work_address(campaign)
+    maps = maps_route_urls(address)
+    peers = []
+    if campaign.show_executor_peers_in_app:
+        for peer in active_peer_assignments(campaign):
+            if peer.id == assignment.id:
+                continue
+            peers.append(peer_contact_payload(peer))
+    when = assignment.scheduled_at or campaign.event_at
+    return {
+        "assignment_id": assignment.id,
+        "campaign_id": campaign.id,
+        "title": campaign.title,
+        "category": campaign.category,
+        "category_label": campaign.get_category_display(),
+        "description": (campaign.description or "")[:800],
+        "status": assignment.status,
+        "status_label": assignment.get_status_display(),
+        "equipment_type": assignment.equipment_type,
+        "equipment_label": assignment.get_equipment_type_display(),
+        "scheduled_at": when.isoformat() if when else None,
+        "proposed_at": (
+            assignment.proposed_at.isoformat() if assignment.proposed_at else None
+        ),
+        "group_name": campaign.group.name if campaign.group_id else "",
+        "locality": (campaign.locality or "")[:255],
+        "address": address[:500],
+        "yandex_maps_url": maps.get("yandex_maps_url") or "",
+        "dgis_maps_url": maps.get("dgis_maps_url") or "",
+        "show_peers": bool(campaign.show_executor_peers_in_app),
+        "peers": peers,
+        "needs_response": assignment.status
+        in {"offered", "counter_offer"},
+    }
+
+
+@api_login_required
+@require_GET
+def executor_campaign_jobs(request):
+    """Сервисные задачи (снег / дорога) для исполнителя."""
+    from database.models import AssignmentStatus, CampaignAssignment
+
+    qs = (
+        CampaignAssignment.objects.filter(contractor__user=request.bot_user)
+        .exclude(status=AssignmentStatus.CANCELLED)
+        .select_related(
+            "campaign",
+            "campaign__group",
+            "contractor",
+            "contractor__user",
+        )
+        .order_by("-id")[:50]
+    )
+    items = [_serialize_campaign_job(a, for_user=request.bot_user) for a in qs]
+    return json_response({"items": items})
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def executor_campaign_job_respond(request, pk: int):
+    """Ответ исполнителя на предложение по сбору: accept / decline / counter."""
+    from database.models import AssignmentStatus, CampaignAssignment, PendingAction
+    from services.contractors import (
+        accept_assignment,
+        decline_assignment,
+        parse_user_datetime,
+        _submit_counter_offer,
+    )
+
+    assignment = (
+        CampaignAssignment.objects.select_related(
+            "campaign", "campaign__group", "contractor", "contractor__user"
+        )
+        .filter(pk=pk, contractor__user=request.bot_user)
+        .first()
+    )
+    if not assignment:
+        return json_response({"error": "not_found"}, status=404)
+    if assignment.status not in {
+        AssignmentStatus.OFFERED,
+        AssignmentStatus.COUNTER_OFFER,
+    }:
+        return json_response({"error": "already_handled", "status": assignment.status}, status=400)
+
+    data = parse_json(request)
+    action = (data.get("action") or "").strip().lower()
+    pending, _ = PendingAction.objects.get_or_create(user=request.bot_user)
+
+    if action in {"accept", "yes", "да"} or data.get("accept"):
+        msg = accept_assignment(assignment, pending=pending)
+    elif action in {"decline", "no", "нет"} or data.get("accept") is False:
+        msg = decline_assignment(assignment, pending=pending)
+    elif action in {"counter", "other_time", "другое"}:
+        when = parse_user_datetime(str(data.get("proposed_at") or data.get("when") or ""))
+        if when is None:
+            return json_response(
+                {"error": "bad_time", "detail": "Укажите proposed_at: ДД.ММ.ГГГГ ЧЧ:ММ"},
+                status=400,
+            )
+        msg = _submit_counter_offer(assignment, when, pending)
+    else:
+        return json_response(
+            {"error": "bad_action", "detail": "action: accept | decline | counter"},
+            status=400,
+        )
+    assignment.refresh_from_db()
+    return json_response(
+        {
+            "ok": True,
+            "message": msg,
+            "status": assignment.status,
+            "assignment_id": assignment.id,
+            "job": _serialize_campaign_job(assignment, for_user=request.bot_user),
+        }
+    )
 
 
 @api_login_required

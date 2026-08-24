@@ -39,6 +39,36 @@ def active_roles():
     return ExecutorRole.objects.filter(is_active=True).order_by("id")
 
 
+VEHICLE_ROLE_CODES = frozenset({"tractor", "truck"})
+
+
+def role_requires_docs(role: ExecutorRole | None) -> bool:
+    """Нужны ли документы при регистрации (права / удостоверение / диплом)."""
+    if role is None:
+        return False
+    if getattr(role, "requires_qualification_docs", False):
+        return True
+    code = (getattr(role, "code", None) or "").strip().lower()
+    if code in VEHICLE_ROLE_CODES:
+        return True
+    return bool(getattr(role, "is_equipment", False))
+
+
+def role_docs_prompt(role: ExecutorRole | None) -> str:
+    if role is not None and (
+        (getattr(role, "code", "") or "").lower() in VEHICLE_ROLE_CODES
+        or getattr(role, "is_equipment", False)
+    ):
+        return (
+            "Для этой роли нужны водительские права / удостоверение "
+            "на технику.\n"
+            "Пришлите фото документа."
+        )
+    return (
+        "Для этой роли нужны подтверждающие документы о квалификации.\n"
+        "Пришлите фото документа (диплом, удостоверение, сертификат)."
+    )
+
 def role_by_code(code: str) -> ExecutorRole | None:
     code = (code or "").strip().lower()
     if not code:

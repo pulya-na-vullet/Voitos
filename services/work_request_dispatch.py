@@ -102,7 +102,13 @@ def heuristic_candidates(req: WorkRequest) -> list[tuple[ContractorProfile, floa
             out.append((c, 0.35, f"НП жителя пуст; исполнитель: {cloc}"))
         elif not loc and not cloc:
             out.append((c, 0.2, "НП не указаны"))
-    out.sort(key=lambda x: (-x[1], x[0].id))
+    out.sort(
+        key=lambda x: (
+            -x[1],
+            0 if getattr(x[0], "is_voitos_team", False) else 1,
+            x[0].id,
+        )
+    )
     return out
 
 
@@ -422,6 +428,7 @@ def try_dispatch_request(req: WorkRequest, *, send_fn=None, use_ai: bool = True)
         return None
 
     excluded = excluded_contractor_ids(req)
+    from services.dispatch_priority import prioritize_dispatch_candidates
     from services.work_request_completion import contractor_blocked_for_new_offers
 
     raw = heuristic_candidates(req)
@@ -430,12 +437,15 @@ def try_dispatch_request(req: WorkRequest, *, send_fn=None, use_ai: bool = True)
         for c, s, r in raw
         if c.id not in excluded and not contractor_blocked_for_new_offers(c)
     ]
+    # Сначала Voitos-команда со свободным слотом на сегодня; иначе — остальные.
+    raw = prioritize_dispatch_candidates(raw)
     ranked = ai_rank_candidates(req, raw) if use_ai else raw
     ranked = [
         (c, s, r)
         for c, s, r in ranked
         if c.id not in excluded and not contractor_blocked_for_new_offers(c)
     ]
+    ranked = prioritize_dispatch_candidates(ranked)
 
     if not ranked:
         notify_client_no_executor(req, send_fn=send_fn)
