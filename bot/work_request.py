@@ -20,6 +20,7 @@ from services.executor_roles import (
     extract_role_from_call_phrase,
     format_roles_list,
     match_role_from_text,
+    role_client_notice,
 )
 from services.master_booking import role_has_local_masters, roles_for_client_call
 
@@ -64,8 +65,10 @@ def start_work_request(
         )
     pending.pending_payload = {"step": "description", "role_id": role.id}
     pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
+    notice = role_client_notice(role)
+    extra = f"\n{notice}" if notice else ""
     return (
-        f"Заявка: {role.name}.\n"
+        f"Заявка: {role.name}.{extra}\n"
         "Кратко опишите, что нужно сделать."
     )
 
@@ -100,7 +103,9 @@ def handle_work_request_step(user: BotUser, text: str, pending: PendingAction) -
         payload = {"step": "description", "role_id": role.id}
         pending.pending_payload = payload
         pending.save(update_fields=["pending_payload", "updated_at"])
-        return f"Заявка: {role.name}.\nОпишите, что нужно сделать."
+        notice = role_client_notice(role)
+        extra = f"\n{notice}" if notice else ""
+        return f"Заявка: {role.name}.{extra}\nОпишите, что нужно сделать."
 
     if step == "description":
         if len(raw) < 5:

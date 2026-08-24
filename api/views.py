@@ -227,7 +227,7 @@ def me_receipts(request):
 @api_login_required
 @require_GET
 def executor_roles(request):
-    from services.executor_roles import role_requires_docs
+    from services.executor_roles import role_client_notice, role_requires_docs
     from services.master_booking import role_uses_client_booking, roles_for_client_call
 
     # for=call — только роли, где в НП есть другой мастер (вызов).
@@ -253,6 +253,7 @@ def executor_roles(request):
                     "is_equipment": bool(getattr(r, "is_equipment", False)),
                     "requires_qualification_docs": role_requires_docs(r),
                     "client_books_master": role_uses_client_booking(r),
+                    "client_notice": role_client_notice(r),
                 }
                 for r in roles
             ]
@@ -889,6 +890,7 @@ def _slot_labels(wr) -> list[str]:
 
 
 def _work_request_brief(wr) -> dict:
+    from services.executor_roles import role_client_notice
     from services.work_request_rating import work_request_needs_rating
 
     slots = _slot_labels(wr)
@@ -898,9 +900,11 @@ def _work_request_brief(wr) -> dict:
         "status": wr.status,
         "status_label": wr.get_status_display(),
         "role_name": wr.role.name if wr.role_id else "",
+        "role_code": wr.role.code if wr.role_id else "",
         "role_accepts_at_home": bool(
             getattr(wr.role, "accepts_at_home", False) if wr.role_id else False
         ),
+        "client_notice": role_client_notice(wr.role) if wr.role_id else "",
         "description": wr.description or "",
         "created_at": wr.created_at.isoformat(),
         "assigned_executor_name": (
@@ -1596,6 +1600,7 @@ def collection_receipt(request, pk: int):
 @require_http_methods(["POST"])
 def work_requests_create(request):
     from database.models import WorkRequestStatus
+    from services.executor_roles import role_client_notice
     from services.master_booking import create_client_booking, role_uses_client_booking
 
     data = parse_json(request)
@@ -1644,6 +1649,7 @@ def work_requests_create(request):
                 "photo_count": 0,
                 "agreed_slot": wr.agreed_slot or "",
                 "client_prebooked": True,
+                "client_notice": role_client_notice(role),
             },
             status=201,
         )
@@ -1674,6 +1680,7 @@ def work_requests_create(request):
             "needs_photos": requires_photos,
             "photo_count": 0,
             "client_prebooked": False,
+            "client_notice": role_client_notice(role),
         },
         status=201,
     )

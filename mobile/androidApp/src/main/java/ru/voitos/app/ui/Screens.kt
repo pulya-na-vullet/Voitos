@@ -361,6 +361,34 @@ fun WorkRequestsScreen(
 }
 
 @Composable
+private fun ClientRoleNoticeBanner(
+    notice: String = "",
+    roleCode: String = "",
+    roleName: String = "",
+) {
+    val text = notice.ifBlank {
+        val c = roleCode.lowercase()
+        val n = roleName.lowercase().replace('ё', 'е')
+        when {
+            c == "tractor" -> "Минимальный тариф тракториста — 4 часа работы."
+            "тракторист" in n -> "Минимальный тариф тракториста — 4 часа работы."
+            "трактор" in n && "компьютер" !in n ->
+                "Минимальный тариф тракториста — 4 часа работы."
+            else -> ""
+        }
+    }
+    if (text.isBlank()) return
+    Text(
+        text,
+        color = VoitosColors.Accent2,
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+    )
+}
+
+@Composable
 private fun ClientWorkRequestCard(
     wr: WorkRequestBrief,
     cancellable: Set<String>,
@@ -380,6 +408,11 @@ private fun ClientWorkRequestCard(
                 "#${wr.id} ${wr.roleName}",
                 style = MaterialTheme.typography.titleMedium,
                 color = VoitosColors.Text,
+            )
+            ClientRoleNoticeBanner(
+                notice = wr.clientNotice,
+                roleCode = wr.roleCode,
+                roleName = wr.roleName,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -528,6 +561,11 @@ fun WorkRequestDetailScreen(
                     "#${wr.id} ${wr.roleName}",
                     style = MaterialTheme.typography.titleLarge,
                     color = VoitosColors.Text,
+                )
+                ClientRoleNoticeBanner(
+                    notice = wr.clientNotice,
+                    roleCode = wr.roleCode,
+                    roleName = wr.roleName,
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
@@ -1560,6 +1598,14 @@ fun NewWorkRequestScreen(
             onSelect = { selectedId = it },
         )
 
+        selectedRole?.let { role ->
+            ClientRoleNoticeBanner(
+                notice = role.clientNotice,
+                roleCode = role.code,
+                roleName = role.name,
+            )
+        }
+
         if (booksMaster) {
             Spacer(modifier = Modifier.height(16.dp))
             Text("Мастер", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
@@ -1746,11 +1792,23 @@ fun WorkRequestPhotosScreen(
 ) {
     BackHandler(enabled = true) { onBack() }
     var photoCount by remember { mutableIntStateOf(0) }
+    var clientNotice by remember { mutableStateOf("") }
+    var roleName by remember { mutableStateOf("") }
+    var roleCode by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    LaunchedEffect(workRequestId) {
+        runCatching { client.workRequest(workRequestId) }.onSuccess { wr ->
+            clientNotice = wr.clientNotice
+            roleName = wr.roleName
+            roleCode = wr.roleCode
+            photoCount = wr.photoCount
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -1773,6 +1831,7 @@ fun WorkRequestPhotosScreen(
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         VoitosBackButton(onClick = onBack)
         Text("Фото заявки #$workRequestId", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
+        ClientRoleNoticeBanner(notice = clientNotice, roleCode = roleCode, roleName = roleName)
         Text("Нужно хотя бы одно фото места работ.", color = VoitosColors.Muted)
         Spacer(modifier = Modifier.height(12.dp))
         Button(

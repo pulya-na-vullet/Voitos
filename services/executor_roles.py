@@ -41,6 +41,29 @@ def active_roles():
 
 VEHICLE_ROLE_CODES = frozenset({"tractor", "truck"})
 
+TRACTOR_MIN_HOURS_NOTICE = (
+    "Минимальный тариф тракториста — 4 часа работы."
+)
+
+
+def role_is_tractor(role: ExecutorRole | None) -> bool:
+    if role is None:
+        return False
+    code = (getattr(role, "code", None) or "").strip().lower()
+    if code == "tractor":
+        return True
+    name = (getattr(role, "name", None) or "").lower().replace("ё", "е")
+    return "тракторист" in name or (
+        "трактор" in name and "компьютер" not in name
+    )
+
+
+def role_client_notice(role: ExecutorRole | None) -> str:
+    """Подсказка клиенту на экранах заявки (тариф и т.п.)."""
+    if role_is_tractor(role):
+        return TRACTOR_MIN_HOURS_NOTICE
+    return ""
+
 
 def role_requires_docs(role: ExecutorRole | None) -> bool:
     """Нужны ли документы при регистрации (права / удостоверение / диплом)."""
