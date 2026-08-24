@@ -2256,6 +2256,109 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@admin_required
+@require_http_methods(["GET", "POST"])
+def contractor_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    """Карточка заявки исполнителя: данные, документ, приоритет Voitos."""
+    from database.models import AdminTaskKind, ContractorProfile, ContractorStatus
+    from panel.admin_tasks import close_task_for_source
+
+    if not is_panel_admin(request.user):
+        messages.error(request, "Раздел исполнителей доступен только администратору.")
+        return redirect(panel_home_url_name(request.user))
+
+    profile = get_object_or_404(
+        ContractorProfile.objects.select_related("user", "role"),
+        pk=pk,
+    )
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "verify":
+            profile.status = ContractorStatus.VERIFIED
+            profile.verified_at = timezone.now()
+            profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.is_voitos_team = bool(request.POST.get("is_voitos_team"))
+            profile.save()
+            close_task_for_source(
+                AdminTaskKind.CONTRACTOR_REVIEW, "ContractorProfile", profile.id
+            )
+            team_mark = (
+                " Вы в приоритете команды Voitos по этой роли."
+                if profile.is_voitos_team
+                else ""
+            )
+            _notify_user(
+                profile.user,
+                "Анкета исполнителя проверена. Теперь вы можете получать заказы."
+                + team_mark,
+            )
+            try:
+                from services.work_request_dispatch import dispatch_for_new_contractor
+
+                n = dispatch_for_new_contractor(profile, send_fn=_notify_user)
+                if n:
+                    messages.info(
+                        request,
+                        f"Исполнителю предложено открытых заявок: {n}.",
+                    )
+            except Exception:
+                pass
+            messages.success(
+                request,
+                f"Исполнитель подтверждён"
+                + (" (команда Voitos)." if profile.is_voitos_team else "."),
+            )
+            return redirect("panel:contractor_detail", pk=profile.id)
+        if action == "reject":
+            profile.status = ContractorStatus.REJECTED
+            profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.save()
+            close_task_for_source(
+                AdminTaskKind.CONTRACTOR_REVIEW, "ContractorProfile", profile.id
+            )
+            _notify_user(
+                profile.user,
+                "Анкета исполнителя отклонена."
+                + (f"\n{profile.admin_note}" if profile.admin_note else ""),
+            )
+            messages.info(request, "Анкета отклонена.")
+            return redirect("panel:contractor_detail", pk=profile.id)
+        if action == "disable":
+            profile.status = ContractorStatus.DISABLED
+            profile.save(update_fields=["status", "updated_at"])
+            messages.info(request, "Исполнитель отключён.")
+            return redirect("panel:contractor_detail", pk=profile.id)
+        if action == "set_voitos_team":
+            profile.is_voitos_team = bool(request.POST.get("is_voitos_team"))
+            profile.save(update_fields=["is_voitos_team", "updated_at"])
+            messages.success(
+                request,
+                "Приоритет Voitos: "
+                + ("включён." if profile.is_voitos_team else "снят."),
+            )
+            return redirect("panel:contractor_detail", pk=profile.id)
+        if action == "save_note":
+            profile.admin_note = (request.POST.get("note") or "").strip()
+            profile.save(update_fields=["admin_note", "updated_at"])
+            messages.success(request, "Заметка сохранена.")
+            return redirect("panel:contractor_detail", pk=profile.id)
+        return redirect("panel:contractor_detail", pk=profile.id)
+
+    loc = (profile.locality or getattr(profile.user, "locality", "") or "").strip()
+    return render(
+        request,
+        "panel/contractor_detail.html",
+        {
+            "c": profile,
+            "locality": loc,
+            "status_verified": ContractorStatus.VERIFIED,
+            "status_pending": ContractorStatus.PENDING_REVIEW,
+        },
+    )
+
+
+@login_required
 @require_POST
 def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
     receipt = get_object_or_404(

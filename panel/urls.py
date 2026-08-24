@@ -43,6 +43,7 @@ urlpatterns = [
         name="role_proposal_detail",
     ),
     path("contractors/", views.contractors_list, name="contractors"),
+    path("contractors/<int:pk>/", views.contractor_detail, name="contractor_detail"),
     path("work-requests/", executor_views.work_requests_list, name="work_requests"),
     path(
         "work-requests/<int:pk>/",

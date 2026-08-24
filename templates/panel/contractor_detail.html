@@ -1,0 +1,121 @@
+{% extends "panel/base.html" %}
+{% block title %}Заявка исполнителя — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Заявка исполнителя</h1>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn secondary small" href="{% url 'panel:contractors' %}{% if locality %}?locality={{ locality|urlencode }}{% endif %}">← К списку</a>
+    <a class="btn secondary small" href="{% url 'panel:user_dashboard' c.user_id %}">Профиль пользователя</a>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+    <h2 style="margin:0; font-size:1.25rem;">{{ c.user }}</h2>
+    <span class="badge {% if c.status == status_verified %}ok{% elif c.status == 'rejected' or c.status == 'disabled' %}bad{% endif %}">
+      {{ c.get_status_display }}
+    </span>
+    {% if c.is_voitos_team %}<span class="badge ok">Команда Voitos</span>{% endif %}
+  </div>
+
+  <table>
+    <tbody>
+      <tr><th style="width:180px;">Роль</th><td>{{ c.role_label }} <span class="muted mono">({{ c.equipment_type }})</span></td></tr>
+      <tr><th>Техника / описание</th><td>{{ c.equipment_label|default:"—" }}</td></tr>
+      <tr><th>Стаж / опыт</th><td>{{ c.experience_text|default:"—" }}</td></tr>
+      <tr><th>Госномер</th><td class="mono">{{ c.plate_number|default:"—" }}</td></tr>
+      <tr><th>НП</th><td>{{ locality|default:"—" }}</td></tr>
+      <tr><th>Телефон связи</th><td class="mono">{{ c.phone|default:c.user.phone|default:"—" }}</td></tr>
+      <tr><th>Телефон перевода</th><td class="mono">{{ c.payout_phone|default:"—" }}</td></tr>
+      <tr><th>Банк</th><td>{{ c.bank_name|default:"—" }}</td></tr>
+      <tr><th>Подано</th><td class="mono">{% if c.submitted_at %}{{ c.submitted_at|date:"d.m.Y H:i" }}{% else %}—{% endif %}</td></tr>
+      <tr><th>Проверено</th><td class="mono">{% if c.verified_at %}{{ c.verified_at|date:"d.m.Y H:i" }}{% else %}—{% endif %}</td></tr>
+      <tr>
+        <th>Документ</th>
+        <td>
+          {% if c.qualification_doc %}
+            <a href="{{ c.qualification_doc.url }}" target="_blank" rel="noopener">Открыть файл</a>
+            {% with url=c.qualification_doc.url|lower %}
+              {% if ".jpg" in url or ".jpeg" in url or ".png" in url or ".webp" in url or ".gif" in url %}
+              <div style="margin-top:10px;">
+                <img src="{{ c.qualification_doc.url }}" alt="Документ"
+                     style="max-width:min(420px,100%); border-radius:8px; border:1px solid var(--border);">
+              </div>
+              {% endif %}
+            {% endwith %}
+          {% else %}
+            <span class="muted">не приложен</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% if c.admin_note %}
+      <tr><th>Заметка админа</th><td>{{ c.admin_note }}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% if c.status == status_pending %}
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Проверка анкеты</h3>
+  <p class="muted" style="margin-top:0;">
+    Укажите, член ли это команды Voitos (высокий приоритет на заявках тракториста / водителя / комп. мастера).
+  </p>
+  <form method="post" style="display:flex; flex-direction:column; gap:12px; max-width:520px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="verify">
+    <label style="display:flex; gap:8px; align-items:center;">
+      <input type="checkbox" name="is_voitos_team" value="1">
+      Член команды Voitos? (высокий приоритет)
+    </label>
+    <div class="form-row" style="margin:0;">
+      <label>Комментарий (необязательно)</label>
+      <textarea name="note" rows="2" placeholder="Заметка для себя / к отклонению"></textarea>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn" type="submit">Подтвердить</button>
+    </div>
+  </form>
+  <form method="post" style="margin-top:14px; max-width:520px;"
+        onsubmit="return confirm('Отклонить анкету исполнителя?');">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="reject">
+    <div class="form-row">
+      <label>Причина отклонения</label>
+      <textarea name="note" rows="2" placeholder="Укажите причину — уйдёт исполнителю"></textarea>
+    </div>
+    <button class="btn danger small" type="submit">Отклонить</button>
+  </form>
+</div>
+{% else %}
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Приоритет и статус</h3>
+  {% if c.status == status_verified %}
+  <form method="post" style="display:inline; margin-right:8px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="set_voitos_team">
+    {% if c.is_voitos_team %}
+    <button class="btn secondary small" type="submit">Снять приоритет Voitos</button>
+    {% else %}
+    <input type="hidden" name="is_voitos_team" value="1">
+    <button class="btn small" type="submit">В команду Voitos</button>
+    {% endif %}
+  </form>
+  <form method="post" style="display:inline;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="disable">
+    <button class="btn secondary small" type="submit">Отключить</button>
+  </form>
+  {% endif %}
+  <form method="post" style="margin-top:14px; max-width:520px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="save_note">
+    <div class="form-row">
+      <label>Заметка</label>
+      <textarea name="note" rows="2">{{ c.admin_note }}</textarea>
+    </div>
+    <button class="btn secondary small" type="submit">Сохранить заметку</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

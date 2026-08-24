@@ -753,6 +753,7 @@ class VoitosApiClient(
         roleId: Int,
         equipmentLabel: String,
         plateNumber: String = "",
+        experienceText: String = "",
         phone: String,
         locality: String,
         bankName: String,
@@ -768,6 +769,7 @@ class VoitosApiClient(
                     put("role_id", roleId)
                     put("equipment_label", equipmentLabel)
                     put("plate_number", plateNumber)
+                    put("experience_text", experienceText)
                     put("phone", phone)
                     put("locality", locality)
                     put("bank_name", bankName)

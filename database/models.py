@@ -1368,6 +1368,13 @@ class ContractorProfile(models.Model):
         default="",
     )
     plate_number = models.CharField("Госномер", max_length=32, blank=True, default="")
+    experience_text = models.CharField(
+        "Стаж / опыт",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Например: 5 лет. Для тракториста и водителя — стаж вождения техники.",
+    )
     phone = models.CharField("Телефон для связи", max_length=32, blank=True, default="")
     payout_phone = models.CharField(
         "Телефон для перевода денег",

@@ -74,9 +74,12 @@
     <tbody>
     {% for c in contractors %}
       <tr>
-        <td><a href="{% url 'panel:user_dashboard' c.user_id %}">{{ c.user }}</a></td>
+        <td><a href="{% url 'panel:contractor_detail' c.id %}">{{ c.user }}</a>
+          <div class="muted"><a href="{% url 'panel:user_dashboard' c.user_id %}">профиль</a></div>
+        </td>
         <td>{{ c.role_label }}</td>
         <td>{{ c.equipment_label|default:"—" }}
+          {% if c.experience_text %}<div class="muted">Стаж: {{ c.experience_text }}</div>{% endif %}
           <div class="muted mono">{{ c.plate_number|default:"" }}</div>
         </td>
         <td>{% if c.qualification_doc %}<a href="{{ c.qualification_doc.url }}" target="_blank">файл</a>{% else %}—{% endif %}</td>

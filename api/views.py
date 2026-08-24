@@ -227,6 +227,7 @@ def me_receipts(request):
 @api_login_required
 @require_GET
 def executor_roles(request):
+    from services.executor_roles import role_requires_docs
     from services.master_booking import role_uses_client_booking, roles_for_client_call
 
     # for=call — только роли, где в НП есть другой мастер (вызов).
@@ -250,9 +251,7 @@ def executor_roles(request):
                     ),
                     "accepts_at_home": bool(getattr(r, "accepts_at_home", False)),
                     "is_equipment": bool(getattr(r, "is_equipment", False)),
-                    "requires_qualification_docs": bool(
-                        getattr(r, "requires_qualification_docs", False)
-                    ),
+                    "requires_qualification_docs": role_requires_docs(r),
                     "client_books_master": role_uses_client_booking(r),
                 }
                 for r in roles
