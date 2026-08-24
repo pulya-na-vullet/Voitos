@@ -132,6 +132,7 @@ class MaxClient:
         chat_id: str | int | None = None,
         attachments: list[dict[str, Any]] | None = None,
         retries: int = 3,
+        timeout: int = 60,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if user_id is not None:
@@ -144,7 +145,9 @@ class MaxClient:
         last_exc: Exception | None = None
         for attempt in range(max(1, retries)):
             try:
-                return self._request("POST", "/messages", params=params, json=body)
+                return self._request(
+                    "POST", "/messages", params=params, json=body, timeout=timeout
+                )
             except MaxApiError as exc:
                 last_exc = exc
                 # MAX may need a moment after upload before attachment is ready
@@ -152,6 +155,11 @@ class MaxClient:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 raise
+            except Exception as exc:
+                last_exc = exc
+                if attempt + 1 >= max(1, retries):
+                    raise
+                time.sleep(0.4 * (attempt + 1))
         assert last_exc is not None
         raise last_exc
 

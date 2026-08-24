@@ -662,6 +662,19 @@ class AppEmitHookTests(TestCase):
         self.assertIn(wr.status, {WorkRequestStatus.PENDING, WorkRequestStatus.OFFERING})
         self.assertEqual(wr.photos.count(), 2)
 
+        # Повторный submit (после таймаута на телефоне) — идемпотентен.
+        wr.status = WorkRequestStatus.OFFERING
+        wr.save(update_fields=["status", "updated_at"])
+        again = self.client.post(
+            f"/api/v1/work-requests/{wr.id}/submit",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {tok.token}",
+        )
+        self.assertEqual(again.status_code, 200)
+        self.assertTrue(again.json().get("already_submitted") or again.json().get("ok"))
+        self.assertEqual(again.json()["status"], "offering")
+
     def test_work_request_detail_includes_photo_urls(self):
         import base64
 

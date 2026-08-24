@@ -639,6 +639,11 @@ class VoitosApiClient(
     suspend fun submitWorkRequest(workRequestId: Int): WorkRequestSubmitResult =
         http.post("$baseUrl/work-requests/$workRequestId/submit") {
             applyAuth()
+            timeout {
+                // Автоподбор ушёл в фон на бэке; запас на медленный LAN.
+                requestTimeoutMillis = 60_000
+                socketTimeoutMillis = 60_000
+            }
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {})
         }.body()

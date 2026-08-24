@@ -1503,9 +1503,9 @@ def work_requests_create(request):
     )
     if status == WorkRequestStatus.PENDING:
         try:
-            from services.work_request_dispatch import try_dispatch_request
+            from services.work_request_dispatch import schedule_dispatch_request
 
-            try_dispatch_request(wr)
+            schedule_dispatch_request(wr.id)
         except Exception:
             pass
     return json_response(
@@ -1576,7 +1576,26 @@ def work_request_submit(request, pk: int):
     )
     if not wr:
         return json_response({"error": "not_found"}, status=404)
+
+    # Повторный submit после таймаута сети — не ошибка, заявка уже ушла.
     if wr.status not in {WorkRequestStatus.DRAFT, WorkRequestStatus.PENDING}:
+        if wr.status in {
+            WorkRequestStatus.OFFERING,
+            WorkRequestStatus.SCHEDULING,
+            WorkRequestStatus.IN_PROGRESS,
+            WorkRequestStatus.AWAITING_CLIENT,
+            WorkRequestStatus.AWAITING_COMMISSION,
+        }:
+            return json_response(
+                {
+                    "ok": True,
+                    "id": wr.id,
+                    "status": wr.status,
+                    "photo_count": wr.photos.count(),
+                    "dispatched": True,
+                    "already_submitted": True,
+                }
+            )
         return json_response({"error": "already_submitted"}, status=400)
 
     requires_photos = bool(getattr(wr.role, "requires_work_photos", True))
@@ -1584,7 +1603,8 @@ def work_request_submit(request, pk: int):
     if requires_photos and photo_n < 1:
         return json_response({"error": "photos_required"}, status=400)
 
-    if wr.status == WorkRequestStatus.DRAFT:
+    was_draft = wr.status == WorkRequestStatus.DRAFT
+    if was_draft:
         # Предзапись к мастеру — сразу в scheduling, без автоподбора.
         if getattr(wr, "client_prebooked", False) and wr.assigned_contractor_id:
             wr.status = WorkRequestStatus.SCHEDULING
@@ -1592,51 +1612,79 @@ def work_request_submit(request, pk: int):
             wr.status = WorkRequestStatus.PENDING
         wr.save(update_fields=["status", "updated_at"])
 
-    ActivityLog.objects.create(
-        user=request.bot_user,
-        kind=ActivityKind.WORK_REQUEST,
-        title=f"Заявка на исполнителя: {wr.role.name}",
-        detail=wr.description[:500],
-        meta={"work_request_id": wr.id, "role": wr.role.code, "via": "api"},
-    )
-    try:
-        from panel.admin_tasks import upsert_task
-        from database.models import AdminTaskKind
-
-        upsert_task(
-            kind=AdminTaskKind.WORK_REQUEST,
-            title=f"Заявка: {wr.role.name} — {request.bot_user}",
-            description=wr.description[:500],
+    if was_draft:
+        ActivityLog.objects.create(
             user=request.bot_user,
-            action_url=f"/panel/work-requests/{wr.id}/",
-            source_model="WorkRequest",
-            source_id=wr.id,
-            priority=25,
+            kind=ActivityKind.WORK_REQUEST,
+            title=f"Заявка на исполнителя: {wr.role.name}",
+            detail=wr.description[:500],
+            meta={"work_request_id": wr.id, "role": wr.role.code, "via": "api"},
         )
-    except Exception:
-        pass
+        try:
+            from panel.admin_tasks import upsert_task
+            from database.models import AdminTaskKind
+
+            upsert_task(
+                kind=AdminTaskKind.WORK_REQUEST,
+                title=f"Заявка: {wr.role.name} — {request.bot_user}",
+                description=wr.description[:500],
+                user=request.bot_user,
+                action_url=f"/panel/work-requests/{wr.id}/",
+                source_model="WorkRequest",
+                source_id=wr.id,
+                priority=25,
+            )
+        except Exception:
+            pass
 
     dispatched = False
     if getattr(wr, "client_prebooked", False) and wr.assigned_contractor_id:
         try:
             from services.master_booking import activate_prebooking_after_photos
 
-            # Уже SCHEDULING — только уведомить, если ещё не уведомляли при create
+            # Уже SCHEDULING — только уведомить (в фоне, чтобы не держать HTTP).
             if wr.status == WorkRequestStatus.SCHEDULING:
-                activate_prebooking_after_photos(wr)
+                import threading
+
+                from django.db import connection, transaction
+
+                wr_id = wr.id
+
+                def _activate() -> None:
+                    try:
+                        from database.models import WorkRequest as WR
+
+                        activate_prebooking_after_photos(WR.objects.get(pk=wr_id))
+                    except Exception:
+                        pass
+                    finally:
+                        connection.close()
+
+                def _start() -> None:
+                    threading.Thread(
+                        target=_activate, name=f"wr-prebook-{wr.id}", daemon=True
+                    ).start()
+
+                if transaction.get_connection().in_atomic_block:
+                    transaction.on_commit(_start)
+                else:
+                    _start()
             dispatched = True
         except Exception:
             pass
     else:
         try:
-            from services.work_request_dispatch import try_dispatch_request
+            from services.work_request_dispatch import schedule_dispatch_request
 
             if not (wr.client_locality or "").strip():
                 loc = (request.bot_user.locality or "").strip()
                 if loc:
                     wr.client_locality = loc[:255]
                     wr.save(update_fields=["client_locality", "updated_at"])
-            dispatched = bool(try_dispatch_request(wr))
+            # Автоподбор + MAX-уведомления — в фоне (иждивенец/житель без роли
+            # исполнителя тоже создаёт заявки; MAX не должен ронять submit).
+            schedule_dispatch_request(wr.id)
+            dispatched = True
         except Exception:
             pass
 
