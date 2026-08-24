@@ -117,6 +117,16 @@ urlpatterns = [
     path("executor/jobs", views.executor_jobs, name="executor_jobs"),
     path("executor/schedule", views.executor_schedule, name="executor_schedule"),
     path(
+        "executor/schedule/busy",
+        views.executor_busy_slot_create,
+        name="executor_busy_slot_create",
+    ),
+    path(
+        "executor/schedule/busy/<int:pk>",
+        views.executor_busy_slot_delete,
+        name="executor_busy_slot_delete",
+    ),
+    path(
         "executor/campaign-jobs",
         views.executor_campaign_jobs,
         name="executor_campaign_jobs",

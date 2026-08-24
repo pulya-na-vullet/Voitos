@@ -15,6 +15,7 @@ from database.models import (
     BotUser,
     ContractorProfile,
     ContractorStatus,
+    ExecutorBusySlot,
     WorkRequest,
     WorkRequestCommissionStatus,
     WorkRequestStatus,
@@ -72,6 +73,31 @@ def role_uses_client_booking(role) -> bool:
     if hasattr(role, "client_books_master"):
         return bool(role.client_books_master)
     return not role_is_dispatch_only(role)
+
+
+def user_can_manage_busy_slots(user) -> bool:
+    """
+    Тракторист / водитель грузовика / компьютерный мастер могут сами
+    отмечать занятость (часть заказов приходит вне Voitos).
+    """
+    if user is None:
+        return False
+    profiles = (
+        ContractorProfile.objects.filter(
+            user=user,
+            status=ContractorStatus.VERIFIED,
+        )
+        .select_related("role")
+        .only("id", "equipment_type", "role_id", "role__code", "role__name")
+    )
+    for p in profiles:
+        role = p.role
+        if role is not None and role_is_dispatch_only(role):
+            return True
+        code = (p.equipment_type or "").strip().lower()
+        if code in DISPATCH_ONLY_CODES:
+            return True
+    return False
 
 
 def contractor_blocked_for_commission(contractor: ContractorProfile) -> bool:
@@ -138,6 +164,12 @@ def busy_intervals_for_user(
         if end <= range_start or start >= range_end:
             continue
         out.append((start, end))
+    for block in ExecutorBusySlot.objects.filter(
+        user_id=user_id,
+        end_at__gt=range_start,
+        start_at__lt=range_end,
+    ).only("start_at", "end_at")[:300]:
+        out.append((block.start_at, block.end_at))
     out.sort(key=lambda x: x[0])
     return out
 
@@ -157,6 +189,49 @@ def slot_overlaps_user_busy(
         exclude_wr_id=exclude_wr_id,
     )
     return any(_overlaps(start, end, b0, b1) for b0, b1 in busy)
+
+
+def create_busy_slot_for_user(
+    user,
+    *,
+    start,
+    end,
+    note: str = "",
+) -> ExecutorBusySlot:
+    """Создать личную занятость (только для dispatch-ролей)."""
+    if not user_can_manage_busy_slots(user):
+        raise ValueError(
+            "Отмечать занятость могут тракторист, водитель грузовика "
+            "и компьютерный мастер."
+        )
+    if start is None or end is None:
+        raise ValueError("Укажите начало и конец окна.")
+    if end <= start:
+        raise ValueError("Конец должен быть позже начала.")
+    duration = end - start
+    if duration > timedelta(hours=24):
+        raise ValueError("Одно окно занятости — не длиннее 24 часов.")
+    if duration < timedelta(minutes=15):
+        raise ValueError("Окно должно быть не короче 15 минут.")
+    now = timezone.localtime(timezone.now())
+    if end < now - timedelta(hours=1):
+        raise ValueError("Нельзя отметить занятость в прошлом.")
+    if start > now + timedelta(days=60):
+        raise ValueError("Нельзя отметить занятость дальше чем на 60 дней.")
+    cleaned_note = (note or "").strip()[:255] or "Внешняя работа"
+    return ExecutorBusySlot.objects.create(
+        user=user,
+        start_at=start,
+        end_at=end,
+        note=cleaned_note,
+    )
+
+
+def delete_busy_slot_for_user(user, busy_id: int) -> None:
+    slot = ExecutorBusySlot.objects.filter(pk=busy_id, user=user).first()
+    if not slot:
+        raise ValueError("Слот не найден.")
+    slot.delete()
 
 
 def _overlaps(a0, a1, b0, b1) -> bool:

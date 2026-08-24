@@ -246,18 +246,18 @@ class AppSettings(models.Model):
     )
     mobile_min_version_code = models.PositiveIntegerField(
         "Мин. versionCode приложения",
-        default=37,
+        default=41,
         help_text="Клиенты со меньшим versionCode увидят требование обновить приложение.",
     )
     mobile_latest_version_code = models.PositiveIntegerField(
         "Актуальный versionCode",
-        default=37,
+        default=41,
     )
     mobile_latest_version_name = models.CharField(
         "Актуальная versionName",
         max_length=64,
         blank=True,
-        default="0.2.33-kmp",
+        default="0.2.37-kmp",
     )
     mobile_apk_url = models.CharField(
         "Ссылка на APK для обновления",
@@ -1445,6 +1445,37 @@ class ContractorProfile(models.Model):
     def get_equipment_type_display(self) -> str:
         """Совместимость со старыми шаблонами."""
         return self.role_label
+
+
+class ExecutorBusySlot(models.Model):
+    """Личная занятость исполнителя вне заявок Voitos (внешние заказы)."""
+
+    user = models.ForeignKey(
+        BotUser,
+        on_delete=models.CASCADE,
+        related_name="busy_slots",
+        verbose_name="Исполнитель",
+    )
+    start_at = models.DateTimeField("Начало")
+    end_at = models.DateTimeField("Конец")
+    note = models.CharField(
+        "Комментарий",
+        max_length=255,
+        blank=True,
+        default="Внешняя работа",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Занятый слот исполнителя"
+        verbose_name_plural = "Занятые слоты исполнителей"
+        ordering = ["start_at", "id"]
+        indexes = [
+            models.Index(fields=["user", "start_at", "end_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}: {self.start_at}–{self.end_at}"
 
 
 class ExecutorRole(models.Model):

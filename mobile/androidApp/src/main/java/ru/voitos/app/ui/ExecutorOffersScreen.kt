@@ -77,6 +77,7 @@ fun ExecutorOffersScreen(
     var jobs by remember { mutableStateOf<List<ExecutorJobBrief>>(emptyList()) }
     var campaignJobs by remember { mutableStateOf<List<ExecutorCampaignJobBrief>>(emptyList()) }
     var schedule by remember { mutableStateOf<List<ExecutorScheduleEvent>>(emptyList()) }
+    var canAddBusy by remember { mutableStateOf(false) }
     var workNotices by remember { mutableStateOf<List<ru.voitos.app.model.WorkNotice>>(emptyList()) }
     var weekStart by remember { mutableStateOf(mondayOf(LocalDate.now())) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -85,6 +86,8 @@ fun ExecutorOffersScreen(
     var busyId by remember { mutableStateOf<Int?>(null) }
     var slotDrafts by remember { mutableStateOf<Map<Int, List<String>>>(emptyMap()) }
     var proposeForJobId by remember { mutableStateOf<Int?>(null) }
+    var showBusyPicker by remember { mutableStateOf(false) }
+    var deleteBusyId by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -103,6 +106,16 @@ fun ExecutorOffersScreen(
             }
         }
 
+    fun reloadSchedule() {
+        scope.launch {
+            runCatching { client.executorSchedule(weekStart.toString()) }
+                .onSuccess { res ->
+                    schedule = res.items
+                    canAddBusy = res.canAddBusy
+                }
+        }
+    }
+
     fun reload(keepMessage: Boolean = false) {
         scope.launch {
             loading = true
@@ -116,9 +129,11 @@ fun ExecutorOffersScreen(
                 jobs = runCatching { client.executorJobs().items }.getOrDefault(emptyList())
                 campaignJobs = runCatching { client.executorCampaignJobs().items }
                     .getOrDefault(emptyList())
-                schedule = runCatching {
-                    client.executorSchedule(weekStart.toString()).items
-                }.getOrDefault(emptyList())
+                val sched = runCatching {
+                    client.executorSchedule(weekStart.toString())
+                }.getOrNull()
+                schedule = sched?.items.orEmpty()
+                canAddBusy = sched?.canAddBusy == true
             } catch (e: Exception) {
                 error = friendlyNetworkError(e)
             } finally {
@@ -129,9 +144,11 @@ fun ExecutorOffersScreen(
 
     LaunchedEffect(Unit) { reload() }
     LaunchedEffect(weekStart) {
-        schedule = runCatching {
-            client.executorSchedule(weekStart.toString()).items
-        }.getOrDefault(emptyList())
+        runCatching { client.executorSchedule(weekStart.toString()) }
+            .onSuccess { res ->
+                schedule = res.items
+                canAddBusy = res.canAddBusy
+            }
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -163,9 +180,12 @@ fun ExecutorOffersScreen(
                     WeekScheduleFrame(
                         weekStart = weekStart,
                         events = schedule,
+                        canAddBusy = canAddBusy,
                         onPrevWeek = { weekStart = weekStart.minusWeeks(1) },
                         onNextWeek = { weekStart = weekStart.plusWeeks(1) },
                         onOpenEvent = onOpenWorkRequest,
+                        onAddBusy = { showBusyPicker = true },
+                        onDeleteBusy = { id -> deleteBusyId = id },
                     )
                 }
 
@@ -552,15 +572,85 @@ fun ExecutorOffersScreen(
             },
         )
     }
+
+    if (showBusyPicker) {
+        ProposeSlotPickerDialog(
+            title = "Занятый слот",
+            confirmLabel = "Занять",
+            onDismiss = { showBusyPicker = false },
+            onAdd = { label ->
+                showBusyPicker = false
+                scope.launch {
+                    busyId = -1
+                    try {
+                        val res = client.createExecutorBusySlot(label)
+                        if (res.ok) {
+                            message = res.message.ifBlank { "Слот отмечен как занятый." }
+                            reloadSchedule()
+                        } else {
+                            error = res.detail.ifBlank { res.error }.ifBlank {
+                                "Не удалось отметить занятость"
+                            }
+                        }
+                    } catch (e: Exception) {
+                        error = friendlyNetworkError(e)
+                    } finally {
+                        busyId = null
+                    }
+                }
+            },
+        )
+    }
+
+    deleteBusyId?.let { id ->
+        AlertDialog(
+            onDismissRequest = { deleteBusyId = null },
+            title = { Text("Снять занятость?") },
+            text = {
+                Text("Слот снова станет свободным для заявок Voitos.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteBusyId = null
+                        scope.launch {
+                            busyId = id
+                            try {
+                                val res = client.deleteExecutorBusySlot(id)
+                                if (res.ok) {
+                                    message = res.message.ifBlank { "Занятость снята." }
+                                    reloadSchedule()
+                                } else {
+                                    error = res.detail.ifBlank { res.error }.ifBlank {
+                                        "Не удалось снять занятость"
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                error = friendlyNetworkError(e)
+                            } finally {
+                                busyId = null
+                            }
+                        }
+                    },
+                ) { Text("Снять") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteBusyId = null }) { Text("Отмена") }
+            },
+        )
+    }
 }
 
 @Composable
 private fun WeekScheduleFrame(
     weekStart: LocalDate,
     events: List<ExecutorScheduleEvent>,
+    canAddBusy: Boolean = false,
     onPrevWeek: () -> Unit,
     onNextWeek: () -> Unit,
     onOpenEvent: (Int) -> Unit,
+    onAddBusy: () -> Unit = {},
+    onDeleteBusy: (Int) -> Unit = {},
 ) {
     val weekEnd = weekStart.plusDays(6)
     val byDay = events.groupBy { it.day }
@@ -583,6 +673,22 @@ private fun WeekScheduleFrame(
                 style = MaterialTheme.typography.titleSmall,
             )
             TextButton(onClick = onNextWeek) { Text("›") }
+        }
+        if (canAddBusy) {
+            Text(
+                "Часть заказов вне Voitos? Отметьте занятые окна — заявки на это время не придут.",
+                color = VoitosColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Button(
+                onClick = onAddBusy,
+                colors = voitosSecondaryButtonColors(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Отметить занятый слот")
+            }
+            Spacer(modifier = Modifier.height(4.dp))
         }
         Spacer(modifier = Modifier.height(4.dp))
         if (events.isEmpty()) {
@@ -608,6 +714,7 @@ private fun WeekScheduleFrame(
                     )
                     dayEvents.forEach { ev ->
                         val timePart = formatEventTime(ev)
+                        val isBusy = ev.isBusy
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -616,25 +723,42 @@ private fun WeekScheduleFrame(
                                     VoitosColors.BgSoft.copy(alpha = 0.55f),
                                     RoundedCornerShape(10.dp),
                                 )
-                                .clickable(enabled = ev.workRequestId > 0) {
+                                .clickable(enabled = !isBusy && ev.workRequestId > 0) {
                                     onOpenEvent(ev.workRequestId)
                                 }
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                         ) {
                             Text(
-                                timePart.ifBlank { ev.label }.ifBlank { "Визит" },
+                                timePart.ifBlank { ev.label }.ifBlank {
+                                    if (isBusy) "Занято" else "Визит"
+                                },
                                 color = VoitosColors.Text,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
-                            val subtitle = listOf(ev.roleName, ev.clientName)
-                                .filter { it.isNotBlank() }
-                                .joinToString(" · ")
+                            val subtitle = if (isBusy) {
+                                listOf(
+                                    ev.statusLabel.ifBlank { "Занято" },
+                                    ev.note.ifBlank { ev.clientName }.ifBlank { "Внешняя работа" },
+                                ).joinToString(" · ")
+                            } else {
+                                listOf(ev.roleName, ev.clientName)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" · ")
+                            }
                             if (subtitle.isNotBlank()) {
                                 Text(
                                     subtitle,
                                     color = VoitosColors.Muted,
                                     style = MaterialTheme.typography.bodySmall,
                                 )
+                            }
+                            if (isBusy && ev.busyId > 0) {
+                                TextButton(
+                                    onClick = { onDeleteBusy(ev.busyId) },
+                                    contentPadding = PaddingValues(0.dp),
+                                ) {
+                                    Text("Снять занятость", color = VoitosColors.Danger)
+                                }
                             }
                         }
                     }
@@ -669,6 +793,8 @@ private fun formatEventTime(ev: ExecutorScheduleEvent): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProposeSlotPickerDialog(
+    title: String = "Окно визита",
+    confirmLabel: String = "Добавить",
     onDismiss: () -> Unit,
     onAdd: (String) -> Unit,
 ) {
@@ -682,7 +808,7 @@ private fun ProposeSlotPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Окно визита") },
+        title = { Text(title) },
         text = {
             Column {
                 Text("Дата", color = VoitosColors.Muted, style = MaterialTheme.typography.labelMedium)
@@ -761,7 +887,7 @@ private fun ProposeSlotPickerDialog(
                         ),
                     )
                 },
-            ) { Text("Добавить") }
+            ) { Text(confirmLabel) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
