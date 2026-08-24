@@ -297,3 +297,67 @@ class WorkRequestCompletionFlowTests(TestCase):
         req2.refresh_from_db()
         self.assertEqual(req2.status, WorkRequestStatus.CANCELLED)
         self.assertEqual(req2.client_cancel_comment, "Передумал")
+
+    def test_api_commission_submit_method_mismatch_task(self):
+        """Мастер cash / клиент transfer — одинаковые суммы → задача с пометкой расхождения."""
+        import base64
+
+        self._both_mark_done()
+        self.req.pay_method = WorkRequestPayMethod.CASH
+        self.req.reported_amount = Decimal("5000.00")
+        self.req.confirmed_amount = Decimal("5000.00")
+        self.req.client_pay_method = WorkRequestPayMethod.TRANSFER
+        self.req.commission_amount = Decimal("500.00")
+        self.req.executor_earned_amount = Decimal("4500.00")
+        self.req.commission_status = WorkRequestCommissionStatus.AWAITING
+        self.req.status = WorkRequestStatus.AWAITING_COMMISSION
+        self.req.save()
+
+        e_tok = MobileAuthToken.objects.create(bot_user=self.exec_user)
+        http = Client()
+        # jpeg stub
+        jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkS"
+            "Ew8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJ"
+            "CQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy"
+            "MjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAA"
+            "AAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAA"
+            "AAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQ"
+            "AQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAA"
+            "AAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
+        )
+        b64 = base64.b64encode(jpeg).decode("ascii")
+        with self.settings(MEDIA_ROOT="/tmp/voitos_commission_test"):
+            detail = http.get(
+                f"/api/v1/work-requests/{self.req.id}",
+                HTTP_AUTHORIZATION=f"Bearer {e_tok.token}",
+            )
+            self.assertEqual(detail.status_code, 200)
+            body = detail.json()
+            self.assertTrue(body["needs_commission_submit"])
+            self.assertEqual(body["commission_amount"], 500.0)
+
+            resp = http.post(
+                f"/api/v1/work-requests/{self.req.id}/commission",
+                data=__import__("json").dumps(
+                    {
+                        "amount": 500,
+                        "content_base64": b64,
+                        "filename": "c.jpg",
+                    }
+                ),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {e_tok.token}",
+            )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertIn("апрув", resp.json()["message"].lower())
+        self.req.refresh_from_db()
+        self.assertEqual(
+            self.req.commission_status, WorkRequestCommissionStatus.PENDING_REVIEW
+        )
+        task = AdminTask.objects.filter(
+            kind=AdminTaskKind.WORK_COMMISSION, source_id=self.req.id
+        ).first()
+        self.assertIsNotNone(task)
+        self.assertIn("Поступила оплата комиссии", task.title)
+        self.assertIn("расходятся", task.description.lower())

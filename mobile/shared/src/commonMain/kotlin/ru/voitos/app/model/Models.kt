@@ -244,6 +244,14 @@ data class WorkRequestDetail(
     @SerialName("executor_cancel_comment") val executorCancelComment: String = "",
     @SerialName("amount_mismatch_message") val amountMismatchMessage: String = "",
     @SerialName("amount_mismatch_due") val amountMismatchDue: Double? = null,
+    @SerialName("commission_amount") val commissionAmount: Double? = null,
+    @SerialName("commission_status") val commissionStatus: String = "",
+    @SerialName("commission_status_label") val commissionStatusLabel: String = "",
+    @SerialName("commission_admin_note") val commissionAdminNote: String = "",
+    @SerialName("commission_payee_text") val commissionPayeeText: String = "",
+    @SerialName("client_pay_method") val clientPayMethod: String = "",
+    @SerialName("needs_commission_submit") val needsCommissionSubmit: Boolean = false,
+    @SerialName("commission_awaiting_approval") val commissionAwaitingApproval: Boolean = false,
 )
 
 @Serializable
@@ -445,6 +453,15 @@ data class WorkRequestReportPaymentResult(
     val message: String = "",
     val status: String = "",
     @SerialName("reported_amount") val reportedAmount: Double? = null,
+    @SerialName("commission_amount") val commissionAmount: Double? = null,
+)
+
+@Serializable
+data class WorkRequestCommissionSubmitResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val status: String = "",
+    @SerialName("commission_status") val commissionStatus: String = "",
     @SerialName("commission_amount") val commissionAmount: Double? = null,
 )
 
