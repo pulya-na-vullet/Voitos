@@ -89,14 +89,21 @@
           <span class="badge {% if c.status == status_verified %}ok{% elif c.status == 'rejected' or c.status == 'disabled' %}bad{% endif %}">
             {{ c.get_status_display }}
           </span>
+          {% if c.is_voitos_team %}
+          <span class="badge ok" title="Высокий приоритет на заявках">Voitos</span>
+          {% endif %}
         </td>
         <td>
           {% if c.status == status_pending %}
-          <form method="post" style="display:inline;">{% csrf_token %}
+          <form method="post" style="display:inline-flex; flex-direction:column; gap:4px; align-items:flex-start;">{% csrf_token %}
             <input type="hidden" name="retain_locality" value="{{ locality_filter }}">
             <input type="hidden" name="retain_type" value="{{ type_filter }}">
             <input type="hidden" name="action" value="verify">
             <input type="hidden" name="contractor_id" value="{{ c.id }}">
+            <label style="font-size:12px; display:flex; gap:6px; align-items:center;">
+              <input type="checkbox" name="is_voitos_team" value="1">
+              Член команды Voitos?
+            </label>
             <button class="btn small" type="submit">Подтвердить</button>
           </form>
           <form method="post" style="display:inline;">{% csrf_token %}
@@ -107,6 +114,18 @@
             <button class="btn danger small" type="submit">Отклонить</button>
           </form>
           {% elif c.status == status_verified %}
+          <form method="post" style="display:inline;">{% csrf_token %}
+            <input type="hidden" name="retain_locality" value="{{ locality_filter }}">
+            <input type="hidden" name="retain_type" value="{{ type_filter }}">
+            <input type="hidden" name="action" value="set_voitos_team">
+            <input type="hidden" name="contractor_id" value="{{ c.id }}">
+            {% if c.is_voitos_team %}
+            <button class="btn secondary small" type="submit">Снять приоритет Voitos</button>
+            {% else %}
+            <input type="hidden" name="is_voitos_team" value="1">
+            <button class="btn small" type="submit">В команду Voitos</button>
+            {% endif %}
+          </form>
           <form method="post" style="display:inline;">{% csrf_token %}
             <input type="hidden" name="retain_locality" value="{{ locality_filter }}">
             <input type="hidden" name="retain_type" value="{{ type_filter }}">

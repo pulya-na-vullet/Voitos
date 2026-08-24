@@ -468,6 +468,22 @@ def close_campaign_goal_reached(campaign: ServiceCampaign, send_fn=None) -> bool
         send_fn,
         kind=CampaignNoticeKind.CLOSED,
     )
+    # Снег / дорога: предложить приоритетным трактористам и водителям.
+    try:
+        from services.contractors import auto_offer_priority_contractors_for_campaign
+
+        n = auto_offer_priority_contractors_for_campaign(campaign, send_fn=send_fn)
+        if n:
+            logger.info(
+                "Campaign %s funded: auto-offered to %s contractor(s)",
+                campaign.id,
+                n,
+            )
+    except Exception:
+        logger.exception(
+            "Failed auto-offer contractors after campaign %s funded",
+            campaign.id,
+        )
     return True
 
 

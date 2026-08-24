@@ -107,7 +107,9 @@ def verified_contractors(*, equipment_type: str | None = None):
     ).select_related("user")
     if equipment_type:
         qs = qs.filter(equipment_type=equipment_type)
-    return qs.order_by("equipment_type", "user__real_name", "id")
+    return qs.order_by(
+        "-is_voitos_team", "equipment_type", "user__real_name", "id"
+    )
 
 
 def suggested_equipment_for_campaign(campaign: ServiceCampaign) -> list[str]:
@@ -124,22 +126,121 @@ def _fmt_dt(dt) -> str:
 
 
 def offer_message(assignment: CampaignAssignment) -> str:
+    from services.dispatch_priority import campaign_work_address, maps_route_urls
+
     c = assignment.campaign
     eq = assignment.get_equipment_type_display()
     when = _fmt_dt(assignment.scheduled_at or c.event_at)
-    return (
-        f"Вам предложен заказ как исполнителю ({eq}).\n"
-        f"Задача: {c.title}\n"
-        f"Категория: {c.get_category_display()}\n"
-        f"Время: {when}\n"
-        f"{(c.description or '').strip()}\n\n"
-        "Ответьте:\n"
-        "1 / да — согласен на это время\n"
-        "2 / нет — отказаться\n"
-        "3 / другое время — предложить своё время "
-        f"(у вас будет {COUNTER_OFFER_MINUTES} минут; "
-        "администратор подтвердит или отклонит)"
+    address = campaign_work_address(c)
+    maps = maps_route_urls(address)
+    lines = [
+        f"Вам предложен заказ как исполнителю ({eq}).",
+        f"Задача: {c.title}",
+        f"Категория: {c.get_category_display()}",
+        f"Время: {when}",
+    ]
+    if address:
+        lines.append(f"Адрес / объект: {address}")
+    if maps.get("yandex_maps_url"):
+        lines.append(f"Маршрут Яндекс.Карты: {maps['yandex_maps_url']}")
+    if maps.get("dgis_maps_url"):
+        lines.append(f"Маршрут 2ГИС: {maps['dgis_maps_url']}")
+    desc = (c.description or "").strip()
+    if desc:
+        lines.append(desc)
+    lines.extend(
+        [
+            "",
+            "Ответьте:",
+            "1 / да — согласен на это время",
+            "2 / нет — отказаться",
+            "3 / другое время — предложить своё время "
+            f"(у вас будет {COUNTER_OFFER_MINUTES} минут; "
+            "администратор подтвердит или отклонит)",
+        ]
     )
+    return "\n".join(lines)
+
+
+def auto_offer_priority_contractors_for_campaign(
+    campaign: ServiceCampaign,
+    *,
+    send_fn=None,
+) -> int:
+    """
+    После сбора денег: предложить работу приоритетным (Voitos) исполнителям
+    по рекомендуемым ролям. Если у приоритетных нет свободного слота — низкий приоритет.
+    """
+    from services.dispatch_priority import contractor_has_capacity_today
+    from services.resident_helpers import uses_resident_helpers
+    from services.work_request_dispatch import localities_match
+
+    if uses_resident_helpers(campaign):
+        return 0
+    codes = suggested_equipment_for_campaign(campaign)
+    if not codes:
+        return 0
+
+    when = campaign.event_at or timezone.now()
+    camp_loc = (campaign.locality or "").strip()
+    if campaign.group_id and not camp_loc:
+        # НП часто на жителях группы — возьмём у первого с НП
+        member = (
+            campaign.group.members.exclude(locality="")
+            .order_by("id")
+            .only("locality")
+            .first()
+        )
+        if member:
+            camp_loc = (member.locality or "").strip()
+
+    offered = 0
+    active_statuses = {
+        AssignmentStatus.OFFERED,
+        AssignmentStatus.COUNTER_OFFER,
+        AssignmentStatus.ACCEPTED,
+    }
+    for code in codes:
+        if campaign.assignments.filter(
+            equipment_type=code, status__in=active_statuses
+        ).exists():
+            continue
+        candidates = list(verified_contractors(equipment_type=code))
+        if not candidates:
+            continue
+
+        def _score(c: ContractorProfile) -> tuple:
+            cloc = (c.locality or getattr(c.user, "locality", "") or "").strip()
+            loc_ok = 1.0 if (camp_loc and cloc and localities_match(camp_loc, cloc)) else (
+                0.4 if not camp_loc else 0.1
+            )
+            team = 1 if c.is_voitos_team else 0
+            free = 1 if contractor_has_capacity_today(c) else 0
+            return (team * free, free, loc_ok, team, -c.id)
+
+        # Сначала команда Voitos со свободным слотом; иначе — остальные со слотом.
+        team_free = [c for c in candidates if c.is_voitos_team and contractor_has_capacity_today(c)]
+        pool = team_free or [
+            c for c in candidates if not c.is_voitos_team and contractor_has_capacity_today(c)
+        ]
+        if not pool:
+            # Ни у кого нет «слота» — всё равно предложим лучшему по НП/приоритету.
+            pool = candidates
+        pool.sort(key=_score, reverse=True)
+        pick = pool[0]
+        try:
+            assign_contractor(campaign, pick, scheduled_at=when, send_fn=send_fn)
+            offered += 1
+        except ValueError:
+            continue
+        except Exception:
+            logger.exception(
+                "auto_offer failed campaign=%s code=%s contractor=%s",
+                campaign.id,
+                code,
+                pick.id,
+            )
+    return offered
 
 
 _PEER_ACTIVE_STATUSES = {

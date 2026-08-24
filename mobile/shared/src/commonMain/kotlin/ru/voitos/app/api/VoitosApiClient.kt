@@ -34,6 +34,8 @@ import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
 import ru.voitos.app.model.CollectionReceiptResult
 import ru.voitos.app.model.ConfirmBookingResult
+import ru.voitos.app.model.ExecutorCampaignJobList
+import ru.voitos.app.model.ExecutorCampaignJobRespondResult
 import ru.voitos.app.model.ExecutorMe
 import ru.voitos.app.model.ExecutorJobList
 import ru.voitos.app.model.ExecutorOfferList
@@ -828,6 +830,37 @@ class VoitosApiClient(
         }
         return response.body()
     }
+
+    suspend fun executorCampaignJobs(): ExecutorCampaignJobList {
+        val response: HttpResponse = http.get("$baseUrl/executor/campaign-jobs") { applyAuth() }
+        if (response.status.value == 404) {
+            return ExecutorCampaignJobList()
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                "Сервер вернул ${response.status.value} на /executor/campaign-jobs. Обновите бэкенд.",
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun respondExecutorCampaignJob(
+        assignmentId: Int,
+        action: String,
+        proposedAt: String? = null,
+    ): ExecutorCampaignJobRespondResult =
+        http.post("$baseUrl/executor/campaign-jobs/$assignmentId/respond") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("action", action)
+                    if (!proposedAt.isNullOrBlank()) {
+                        put("proposed_at", proposedAt)
+                    }
+                },
+            )
+        }.body()
 
     suspend fun executorSchedule(weekStart: String? = null): ExecutorScheduleResponse {
         val response: HttpResponse = http.get("$baseUrl/executor/schedule") {
