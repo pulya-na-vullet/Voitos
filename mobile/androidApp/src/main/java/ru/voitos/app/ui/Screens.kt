@@ -555,6 +555,26 @@ fun WorkRequestDetailScreen(
                 )
             }
 
+            if (wr.viewer == "executor" && (
+                    wr.needsCommissionSubmit ||
+                        wr.commissionAwaitingApproval ||
+                        wr.commissionStatus == "rejected"
+                    )
+            ) {
+                Spacer(modifier = Modifier.height(10.dp))
+                ExecutorCommissionCard(
+                    wr = wr,
+                    enabled = !confirming,
+                    onSubmitted = { msg ->
+                        message = msg
+                        reload()
+                    },
+                    onError = { error = it },
+                    setBusy = { confirming = it },
+                    client = client,
+                )
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
             PanelCard {
                 Text("Детали", style = MaterialTheme.typography.titleMedium, color = VoitosColors.Text)
@@ -806,6 +826,141 @@ private fun ExecutorPaymentReportCard(
             enabled = enabled && amountText.isNotBlank(),
             colors = voitosPrimaryButtonColors(),
         ) { Text("Отправить отчёт по оплате") }
+    }
+}
+
+@Composable
+private fun ExecutorCommissionCard(
+    wr: WorkRequestDetail,
+    enabled: Boolean,
+    client: VoitosApiClient,
+    onSubmitted: (String) -> Unit,
+    onError: (String) -> Unit,
+    setBusy: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val expected = wr.commissionAmount?.roundToInt()?.toString().orEmpty()
+    var amountText by remember(wr.id, wr.commissionAmount) {
+        mutableStateOf(expected)
+    }
+    var receiptName by remember { mutableStateOf<String?>(null) }
+    var receiptB64 by remember { mutableStateOf<String?>(null) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            setBusy(true)
+            try {
+                val (b64, name) = prepareWorkPhotoJpegBase64(context, uri)
+                receiptB64 = b64
+                receiptName = name
+            } catch (e: Exception) {
+                onError(friendlyNetworkError(e, "Не удалось прочитать чек"))
+            } finally {
+                setBusy(false)
+            }
+        }
+    }
+
+    PanelCard {
+        Text(
+            "Комиссия платформе 10%",
+            style = MaterialTheme.typography.titleMedium,
+            color = VoitosColors.Text,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        if (wr.commissionAwaitingApproval) {
+            Text(
+                "Ожидается апрув от менеджера",
+                color = VoitosColors.Gold,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            wr.commissionAmount?.let {
+                Text(
+                    "Сумма комиссии: ${it.roundToInt()} ₽",
+                    color = VoitosColors.Muted,
+                )
+            }
+            return@PanelCard
+        }
+        if (wr.commissionAdminNote.isNotBlank()) {
+            Text(
+                "Резолюция менеджера: ${wr.commissionAdminNote}",
+                color = VoitosColors.Danger,
+            )
+            Text(
+                "Нужно снова отправить чек перевода комиссии.",
+                color = VoitosColors.Muted,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        wr.commissionAmount?.let {
+            Text(
+                "К переводу: ${it.roundToInt()} ₽ (10% от заказа)",
+                color = VoitosColors.Text,
+            )
+        }
+        if (wr.commissionPayeeText.isNotBlank()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(wr.commissionPayeeText, color = VoitosColors.Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = amountText,
+            onValueChange = { amountText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Сумма комиссии, ₽") },
+            enabled = enabled && wr.needsCommissionSubmit,
+            label = { Text("Сумма перевода комиссии") },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { picker.launch("image/*") },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled && wr.needsCommissionSubmit,
+            colors = voitosSecondaryButtonColors(),
+        ) {
+            Text(
+                if (receiptName != null) "Чек: $receiptName" else "Приложить фото чека перевода",
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                val amount = amountText.replace(',', '.').toDoubleOrNull()
+                val b64 = receiptB64
+                if (amount == null || amount <= 0) {
+                    onError("Укажите сумму комиссии 10%")
+                    return@Button
+                }
+                if (b64.isNullOrBlank()) {
+                    onError("Приложите фото чека перевода")
+                    return@Button
+                }
+                scope.launch {
+                    setBusy(true)
+                    try {
+                        val res = client.submitWorkRequestCommission(
+                            workRequestId = wr.id,
+                            amount = amount,
+                            contentBase64 = b64,
+                            filename = receiptName ?: "commission.jpg",
+                        )
+                        onSubmitted(
+                            res.message.ifBlank { "Ожидается апрув от менеджера" },
+                        )
+                    } catch (e: Exception) {
+                        onError(friendlyNetworkError(e, "Не удалось отправить комиссию"))
+                    } finally {
+                        setBusy(false)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled && wr.needsCommissionSubmit,
+            colors = voitosPrimaryButtonColors(),
+        ) { Text("Отправить комиссию") }
     }
 }
 

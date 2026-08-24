@@ -821,19 +821,91 @@ def handle_commission_receipt_photo(
         return "Сейчас чек комиссии не ожидается."
     payload = dict(pending.pending_payload or {})
     req = (
-        WorkRequest.objects.select_related("role", "assigned_contractor")
+        WorkRequest.objects.select_related("role", "assigned_contractor", "user")
         .filter(pk=payload.get("work_request_id"))
         .first()
     )
     if not req or not req.assigned_contractor or req.assigned_contractor.user_id != user.id:
         pending.clear_pending()
         return "Заявка для комиссии не найдена."
+    return submit_commission_from_executor(
+        user,
+        req,
+        declared_amount=req.commission_amount,
+        image_bytes=image_bytes,
+        filename=filename,
+        clear_pending=True,
+    )
+
+
+def _commission_admin_task_description(req: WorkRequest) -> str:
+    master_method = req.get_pay_method_display() if req.pay_method else "—"
+    client_method = (
+        req.get_client_pay_method_display() if req.client_pay_method else "—"
+    )
+    reported = req.reported_amount
+    confirmed = req.confirmed_amount
+    lines = [
+        f"Поступила оплата комиссии по заказу №{req.id}",
+        f"Роль: {req.role.name if req.role_id else '—'}",
+        f"Сумма по отчёту мастера: {reported if reported is not None else '—'} ₽ "
+        f"({master_method})",
+        f"Сумма по клиенту: {confirmed if confirmed is not None else '—'} ₽ "
+        f"({client_method})",
+        f"Комиссия 10%: {req.commission_amount} ₽",
+    ]
+    if (
+        reported is not None
+        and confirmed is not None
+        and Decimal(reported) == Decimal(confirmed)
+        and (req.pay_method or "") != (req.client_pay_method or "")
+        and req.pay_method
+        and req.client_pay_method
+    ):
+        lines.append("Суммы верны. Ответы по способу оплаты расходятся.")
+    elif (
+        reported is not None
+        and confirmed is not None
+        and Decimal(reported) != Decimal(confirmed)
+    ):
+        lines.append("Суммы мастера и клиента различаются — проверьте.")
+    else:
+        lines.append("Проверьте чек перевода комиссии.")
+    return "\n".join(lines)
+
+
+def submit_commission_from_executor(
+    user: BotUser,
+    req: WorkRequest,
+    *,
+    declared_amount: Decimal | None,
+    image_bytes: bytes | None = None,
+    filename: str = "commission.jpg",
+    clear_pending: bool = True,
+) -> str:
+    """Мастер подтверждает перевод комиссии 10% (+ чек) → pending_review."""
+    if not req.assigned_contractor or req.assigned_contractor.user_id != user.id:
+        raise ValueError("forbidden")
+    if req.status != WorkRequestStatus.AWAITING_COMMISSION:
+        raise ValueError("not_awaiting_commission")
     if req.commission_status not in {
         WorkRequestCommissionStatus.AWAITING,
         WorkRequestCommissionStatus.REJECTED,
     }:
-        pending.clear_pending()
-        return "Комиссия по этой заявке уже на проверке или принята."
+        raise ValueError("already_submitted")
+    if not req.commission_amount:
+        raise ValueError("no_commission_amount")
+
+    expected = Decimal(req.commission_amount).quantize(Decimal("0.01"))
+    declared = (
+        Decimal(declared_amount).quantize(Decimal("0.01"))
+        if declared_amount is not None
+        else expected
+    )
+    if abs(declared - expected) > Decimal("1.00"):
+        raise ValueError("amount_mismatch")
+    if not image_bytes:
+        raise ValueError("receipt_required")
 
     req.commission_receipt.save(
         (filename or "commission.jpg")[:120],
@@ -842,24 +914,26 @@ def handle_commission_receipt_photo(
     )
     req.commission_status = WorkRequestCommissionStatus.PENDING_REVIEW
     req.commission_submitted_at = timezone.now()
+    # Сбрасываем прошлую резолюцию отклонения — ждём новый апрув.
+    req.commission_admin_note = ""
     req.save(
         update_fields=[
             "commission_receipt",
             "commission_status",
             "commission_submitted_at",
+            "commission_admin_note",
             "updated_at",
         ]
     )
-    pending.clear_pending()
+    if clear_pending:
+        pending, _ = PendingAction.objects.get_or_create(user=user)
+        if pending.pending_kind == COMMISSION_PENDING:
+            pending.clear_pending()
     try:
         upsert_task(
             kind=AdminTaskKind.WORK_COMMISSION,
-            title=f"Комиссия 10%: заявка #{req.id} — {user}",
-            description=(
-                f"Роль: {req.role.name}\n"
-                f"Сумма работы: {req.confirmed_amount} ₽\n"
-                f"Комиссия: {req.commission_amount} ₽"
-            ),
+            title=f"Поступила оплата комиссии по заказу №{req.id}",
+            description=_commission_admin_task_description(req),
             user=user,
             action_url=f"/panel/work-requests/{req.id}/",
             source_model="WorkRequest",
@@ -869,9 +943,9 @@ def handle_commission_receipt_photo(
     except Exception:
         logger.exception("admin task commission WR %s", req.id)
     return (
-        f"Чек комиссии по заявке #{req.id} отправлен администратору.\n"
-        f"Сумма к проверке: {req.commission_amount} ₽.\n"
-        "После подтверждения снова сможете получать заявки."
+        f"Чек комиссии по заявке #{req.id} отправлен на проверку.\n"
+        f"Сумма: {expected} ₽.\n"
+        "Ожидается апрув от менеджера."
     )
 
 

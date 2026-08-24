@@ -69,6 +69,7 @@ import ru.voitos.app.model.WorkRequestDetail
 import ru.voitos.app.model.WorkRequestList
 import ru.voitos.app.model.WorkRequestMarkDoneResult
 import ru.voitos.app.model.WorkRequestReportPaymentResult
+import ru.voitos.app.model.WorkRequestCommissionSubmitResult
 import ru.voitos.app.model.WorkRequestSubmitResult
 
 /**
@@ -692,6 +693,28 @@ class VoitosApiClient(
                 buildJsonObject {
                     put("pay_method", payMethod)
                     put("amount", amount)
+                },
+            )
+        }.body()
+
+    suspend fun submitWorkRequestCommission(
+        workRequestId: Int,
+        amount: Double,
+        contentBase64: String,
+        filename: String = "commission.jpg",
+    ): WorkRequestCommissionSubmitResult =
+        http.post("$baseUrl/work-requests/$workRequestId/commission") {
+            applyAuth()
+            timeout {
+                requestTimeoutMillis = 120_000
+                socketTimeoutMillis = 120_000
+            }
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("amount", amount)
+                    put("content_base64", contentBase64)
+                    put("filename", filename)
                 },
             )
         }.body()

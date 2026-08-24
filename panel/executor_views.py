@@ -365,10 +365,10 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 )
             return redirect("panel:work_request_detail", pk=pk)
         if action == "approve_commission":
-            if not is_panel_admin(request.user):
+            if not (is_panel_admin(request.user) or is_panel_manager(request.user)):
                 messages.error(
                     request,
-                    "Принять комиссию может только администратор.",
+                    "Принять комиссию может администратор или менеджер.",
                 )
                 return redirect("panel:work_request_detail", pk=pk)
             from services.work_request_completion import approve_commission
@@ -388,10 +388,10 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             messages.success(request, f"Комиссия по заявке #{req.id} принята.")
             return redirect("panel:work_request_detail", pk=pk)
         if action == "reject_commission":
-            if not is_panel_admin(request.user):
+            if not (is_panel_admin(request.user) or is_panel_manager(request.user)):
                 messages.error(
                     request,
-                    "Отклонить комиссию может только администратор.",
+                    "Отклонить комиссию может администратор или менеджер.",
                 )
                 return redirect("panel:work_request_detail", pk=pk)
             from services.work_request_completion import reject_commission
@@ -495,7 +495,8 @@ def work_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "assigned_phone": assigned_phone,
             "assigned_max_link": assigned_max_link,
             "can_delete": is_panel_admin(request.user) or is_panel_manager(request.user),
-            "can_manage_commission": is_panel_admin(request.user),
+            "can_manage_commission": is_panel_admin(request.user)
+            or is_panel_manager(request.user),
             "can_mark_done": is_panel_admin(request.user),
             "reassign_candidates": reassign_candidates,
             "can_reassign": req.status

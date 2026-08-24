@@ -813,6 +813,7 @@ def work_request_detail(request, pk: int):
     from services.work_request_completion import (
         both_parties_marked_done,
         can_mark_work_done,
+        platform_payee_lines,
     )
     from services.work_request_rating import work_request_needs_rating
 
@@ -898,6 +899,27 @@ def work_request_detail(request, pk: int):
             "amount_mismatch_due": float(wr.amount_mismatch_due)
             if wr.amount_mismatch_due is not None
             else None,
+            "commission_amount": float(wr.commission_amount)
+            if wr.commission_amount is not None
+            else None,
+            "commission_status": wr.commission_status or "",
+            "commission_status_label": wr.get_commission_status_display()
+            if wr.commission_status
+            else "",
+            "commission_admin_note": (wr.commission_admin_note or "").strip(),
+            "commission_payee_text": platform_payee_lines() if is_executor else "",
+            "client_pay_method": wr.client_pay_method or "",
+            "needs_commission_submit": bool(
+                is_executor
+                and wr.status == "awaiting_commission"
+                and wr.commission_status
+                in ("awaiting", "rejected")
+            ),
+            "commission_awaiting_approval": bool(
+                is_executor
+                and wr.status == "awaiting_commission"
+                and wr.commission_status == "pending_review"
+            ),
         }
     )
     return json_response(payload)
@@ -1855,6 +1877,70 @@ def work_request_report_payment(request, pk: int):
             "reported_amount": float(wr.reported_amount) if wr.reported_amount else None,
             "commission_amount": float(wr.commission_amount)
             if wr.commission_amount
+            else None,
+        }
+    )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def work_request_submit_commission(request, pk: int):
+    """Мастер: сумма комиссии 10% + фото/PDF чека перевода."""
+    from api.media import decode_base64_payload
+    from services.work_request_completion import (
+        parse_money,
+        submit_commission_from_executor,
+    )
+
+    wr = (
+        WorkRequest.objects.select_related(
+            "role", "assigned_contractor", "assigned_contractor__user", "user"
+        )
+        .filter(pk=pk)
+        .first()
+    )
+    if not wr:
+        return json_response({"error": "not_found"}, status=404)
+    if not wr.assigned_contractor or wr.assigned_contractor.user_id != request.bot_user.id:
+        return json_response({"error": "forbidden"}, status=403)
+
+    data = parse_json(request)
+    amount = parse_money(str(data.get("amount") or ""))
+    if amount is None and wr.commission_amount is not None:
+        amount = wr.commission_amount
+    raw_b64 = (data.get("content_base64") or data.get("image_base64") or "").strip()
+    raw_name = (data.get("filename") or "commission.jpg").strip()[:120] or "commission.jpg"
+    image_bytes = decode_base64_payload(raw_b64) if raw_b64 else None
+
+    try:
+        message = submit_commission_from_executor(
+            request.bot_user,
+            wr,
+            declared_amount=amount,
+            image_bytes=image_bytes,
+            filename=raw_name,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        detail = {
+            "forbidden": "Нет доступа.",
+            "not_awaiting_commission": "Сейчас комиссия по заявке не ожидается.",
+            "already_submitted": "Комиссия уже на проверке или принята.",
+            "no_commission_amount": "У заявки нет суммы комиссии.",
+            "amount_mismatch": "Введите сумму комиссии 10% (как указано в заявке).",
+            "receipt_required": "Приложите фото или PDF чека перевода комиссии.",
+        }.get(code, code)
+        return json_response({"error": code, "detail": detail}, status=400)
+
+    wr.refresh_from_db()
+    return json_response(
+        {
+            "ok": True,
+            "message": message,
+            "status": wr.status,
+            "commission_status": wr.commission_status,
+            "commission_amount": float(wr.commission_amount)
+            if wr.commission_amount is not None
             else None,
         }
     )
