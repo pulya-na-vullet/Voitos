@@ -1638,7 +1638,10 @@ fun WorkRequestPhotosScreen(
                         message = "Заявка отправлена (фото: ${res.photoCount})"
                         onSubmitted()
                     } catch (e: Exception) {
-                        error = e.message
+                        error = friendlyNetworkError(
+                            e,
+                            fallback = "Не удалось отправить заявку. Проверьте сеть и попробуйте ещё раз.",
+                        )
                     } finally {
                         loading = false
                     }

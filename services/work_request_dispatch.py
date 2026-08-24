@@ -234,15 +234,48 @@ def _default_send_fn():
             logger.warning("No MAX token — skip notify %s", user.max_user_id)
             return
         client = MaxClient(token)
+        # Короткий таймаут: уведомление не должно блокировать HTTP submit заявки.
+        send_kwargs = {"timeout": 8, "retries": 1}
         if user.chat_id:
             try:
-                client.send_message(text, chat_id=user.chat_id)
+                client.send_message(text, chat_id=user.chat_id, **send_kwargs)
                 return
             except Exception:
                 logger.exception("chat_id send failed for %s", user.max_user_id)
-        client.send_message(text, user_id=user.max_user_id)
+        client.send_message(text, user_id=user.max_user_id, **send_kwargs)
 
     return send_fn
+
+
+def schedule_dispatch_request(req_id: int, *, use_ai: bool = True) -> None:
+    """Автоподбор в фоне — submit/create сразу отвечают клиенту."""
+    import threading
+
+    from django.db import connection, transaction
+
+    def _run() -> None:
+        try:
+            req = WorkRequest.objects.filter(pk=req_id).first()
+            if req is None:
+                return
+            try_dispatch_request(req, use_ai=use_ai)
+        except Exception:
+            logger.exception("background dispatch failed for WR %s", req_id)
+        finally:
+            connection.close()
+
+    def _start() -> None:
+        threading.Thread(
+            target=_run,
+            name=f"wr-dispatch-{req_id}",
+            daemon=True,
+        ).start()
+
+    # После commit транзакции теста/запроса — иначе SQLite lock / гонка.
+    if transaction.get_connection().in_atomic_block:
+        transaction.on_commit(_start)
+    else:
+        _start()
 
 
 def send_offer(
