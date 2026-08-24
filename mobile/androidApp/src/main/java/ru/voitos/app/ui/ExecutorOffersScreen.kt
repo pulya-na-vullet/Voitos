@@ -6,6 +6,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -805,41 +807,64 @@ private fun NumberScrollWheel(
     onValueChange: (Int) -> Unit,
 ) {
     val values = remember(range) { range.toList() }
-    val initialIndex = values.indexOf(value).coerceAtLeast(0)
+    val itemHeightDp = 40.dp
+    val viewportHeightDp = 120.dp
+    val verticalPad = (viewportHeightDp - itemHeightDp) / 2
+    val initialIndex = values.indexOf(value).let { if (it >= 0) it else 0 }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val fling = rememberSnapFlingBehavior(lazyListState = listState)
 
-    LaunchedEffect(listState) {
+    // Центр viewport → ближайший item (а не firstVisible + offset>20, из‑за чего
+    // «00» сразу прыгало на «05», а «50/55» не дотягивались до выбора).
+    LaunchedEffect(listState, values) {
         snapshotFlow {
-            listState.firstVisibleItemIndex +
-                if (listState.firstVisibleItemScrollOffset > 20) 1 else 0
+            val info = listState.layoutInfo
+            if (info.visibleItemsInfo.isEmpty()) return@snapshotFlow null
+            val viewportCenter =
+                (info.viewportStartOffset + info.viewportEndOffset) / 2f
+            info.visibleItemsInfo.minByOrNull { item ->
+                val center = item.offset + item.size / 2f
+                abs(center - viewportCenter)
+            }?.index
         }
             .distinctUntilChanged()
             .collect { idx ->
-                val v = values.getOrNull(idx.coerceIn(0, values.lastIndex)) ?: return@collect
+                if (idx == null) return@collect
+                val v = values.getOrNull(idx) ?: return@collect
                 if (v != value) onValueChange(v)
             }
     }
 
     Box(
         modifier = Modifier
-            .height(120.dp)
+            .height(viewportHeightDp)
             .width(48.dp),
         contentAlignment = Alignment.Center,
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(itemHeightDp)
+                .align(Alignment.Center)
+                .background(
+                    color = VoitosColors.Accent2.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(8.dp),
+                ),
+        )
         LazyColumn(
             state = listState,
             flingBehavior = fling,
+            contentPadding = PaddingValues(vertical = verticalPad),
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxSize(),
         ) {
-            items(values.size) { i ->
+            items(values.size, key = { values[it] }) { i ->
                 val n = values[i]
                 val selected = n == value
                 Text(
                     text = "%02d".format(n),
                     modifier = Modifier
-                        .height(40.dp)
+                        .height(itemHeightDp)
                         .fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     color = if (selected) VoitosColors.Text else VoitosColors.Muted,

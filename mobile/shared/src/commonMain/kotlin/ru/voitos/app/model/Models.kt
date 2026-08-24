@@ -184,7 +184,9 @@ data class WorkRequestBrief(
     val status: String,
     @SerialName("status_label") val statusLabel: String = "",
     @SerialName("role_name") val roleName: String = "",
+    @SerialName("role_code") val roleCode: String = "",
     @SerialName("role_accepts_at_home") val roleAcceptsAtHome: Boolean = false,
+    @SerialName("client_notice") val clientNotice: String = "",
     val description: String = "",
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("assigned_executor_name") val assignedExecutorName: String? = null,
@@ -212,6 +214,8 @@ data class WorkRequestDetail(
     @SerialName("updated_at") val updatedAt: String = "",
     /** client | executor — кто открыл карточку. */
     val viewer: String = "client",
+    @SerialName("client_notice") val clientNotice: String = "",
+    @SerialName("role_code") val roleCode: String = "",
     @SerialName("assigned_executor_name") val assignedExecutorName: String? = null,
     @SerialName("assigned_name") val assignedName: String? = null,
     @SerialName("assigned_phone") val assignedPhone: String? = null,
@@ -389,6 +393,7 @@ data class ExecutorRole(
     @SerialName("is_equipment") val isEquipment: Boolean = false,
     @SerialName("requires_qualification_docs") val requiresQualificationDocs: Boolean = false,
     @SerialName("client_books_master") val clientBooksMaster: Boolean = true,
+    @SerialName("client_notice") val clientNotice: String = "",
 )
 
 @Serializable
@@ -407,6 +412,7 @@ data class WorkRequestCreated(
     @SerialName("photo_count") val photoCount: Int = 0,
     @SerialName("agreed_slot") val agreedSlot: String = "",
     @SerialName("client_prebooked") val clientPrebooked: Boolean = false,
+    @SerialName("client_notice") val clientNotice: String = "",
 )
 
 @Serializable
