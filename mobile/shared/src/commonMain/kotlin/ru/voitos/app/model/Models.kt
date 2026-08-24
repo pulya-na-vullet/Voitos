@@ -686,22 +686,37 @@ data class ProposeSlotsResult(
 
 @Serializable
 data class ExecutorScheduleEvent(
+    val kind: String = "visit",
+    @SerialName("busy_id") val busyId: Int = 0,
     @SerialName("work_request_id") val workRequestId: Int = 0,
     @SerialName("role_name") val roleName: String = "",
     @SerialName("client_name") val clientName: String = "",
     val status: String = "",
     @SerialName("status_label") val statusLabel: String = "",
     val label: String = "",
+    val note: String = "",
     @SerialName("start_at") val startAt: String = "",
     @SerialName("end_at") val endAt: String = "",
     val day: String = "",
-)
+) {
+    val isBusy: Boolean get() = kind == "busy" || busyId > 0
+}
 
 @Serializable
 data class ExecutorScheduleResponse(
     @SerialName("week_start") val weekStart: String = "",
     @SerialName("week_end") val weekEnd: String = "",
+    @SerialName("can_add_busy") val canAddBusy: Boolean = false,
     val items: List<ExecutorScheduleEvent> = emptyList(),
+)
+
+@Serializable
+data class ExecutorBusySlotResult(
+    val ok: Boolean = true,
+    val message: String = "",
+    val item: ExecutorScheduleEvent? = null,
+    val detail: String = "",
+    val error: String = "",
 )
 
 @Serializable

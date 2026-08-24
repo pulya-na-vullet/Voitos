@@ -10,6 +10,7 @@ from database.models import (
     ChatMessage,
     ContractorPayout,
     ContractorProfile,
+    ExecutorBusySlot,
     ExecutorRole,
     MemoryItem,
     NeighborhoodWish,
@@ -133,6 +134,13 @@ class ContractorProfileAdmin(admin.ModelAdmin):
         "payout_phone",
     )
     raw_id_fields = ("user", "role")
+
+
+@admin.register(ExecutorBusySlot)
+class ExecutorBusySlotAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "start_at", "end_at", "note", "created_at")
+    search_fields = ("user__real_name", "user__display_name", "note")
+    raw_id_fields = ("user",)
 
 
 @admin.register(ExecutorRole)

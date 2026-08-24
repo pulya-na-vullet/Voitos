@@ -713,14 +713,15 @@ def executor_campaign_job_respond(request, pk: int):
 @api_login_required
 @require_GET
 def executor_schedule(request):
-    """Недельный график мастера: согласованные визиты."""
-    from datetime import datetime, timedelta
+    """Недельный график мастера: согласованные визиты + личная занятость."""
+    from datetime import timedelta
 
     from django.utils import timezone as dj_tz
     from django.utils.dateparse import parse_date
 
-    from database.models import WorkRequestStatus
-    from services.work_request_schedule import parse_slot_datetime_range
+    from database.models import ExecutorBusySlot, WorkRequestStatus
+    from services.master_booking import user_can_manage_busy_slots
+    from services.work_request_schedule import format_slot_label, parse_slot_datetime_range
 
     week_raw = (request.GET.get("week_start") or "").strip()
     now = dj_tz.localtime(dj_tz.now())
@@ -738,6 +739,7 @@ def executor_schedule(request):
             hour=0, minute=0, second=0, microsecond=0
         )
     week_end = week_start + timedelta(days=7)
+    can_add_busy = user_can_manage_busy_slots(request.bot_user)
 
     active = {
         WorkRequestStatus.IN_PROGRESS,
@@ -764,25 +766,146 @@ def executor_schedule(request):
             continue
         events.append(
             {
+                "kind": "visit",
+                "busy_id": 0,
                 "work_request_id": wr.id,
                 "role_name": wr.role.name if wr.role_id else "",
                 "client_name": str(wr.user),
                 "status": wr.status,
                 "status_label": wr.get_status_display(),
                 "label": wr.agreed_slot or "",
+                "note": "",
                 "start_at": start.isoformat(),
                 "end_at": end.isoformat(),
                 "day": start.date().isoformat(),
             }
         )
+    if can_add_busy:
+        for block in ExecutorBusySlot.objects.filter(
+            user=request.bot_user,
+            end_at__gt=week_start,
+            start_at__lt=week_end,
+        ).order_by("start_at", "id")[:200]:
+            start = dj_tz.localtime(block.start_at)
+            end = dj_tz.localtime(block.end_at)
+            note = (block.note or "").strip() or "Внешняя работа"
+            events.append(
+                {
+                    "kind": "busy",
+                    "busy_id": block.id,
+                    "work_request_id": 0,
+                    "role_name": "",
+                    "client_name": note,
+                    "status": "busy",
+                    "status_label": "Занято",
+                    "label": format_slot_label(start, end),
+                    "note": note,
+                    "start_at": start.isoformat(),
+                    "end_at": end.isoformat(),
+                    "day": start.date().isoformat(),
+                }
+            )
     events.sort(key=lambda e: e["start_at"])
     return json_response(
         {
             "week_start": week_start.date().isoformat(),
             "week_end": (week_end - timedelta(days=1)).date().isoformat(),
+            "can_add_busy": can_add_busy,
             "items": events,
         }
     )
+
+
+@api_login_required
+@require_http_methods(["POST"])
+def executor_busy_slot_create(request):
+    """Отметить личную занятость в графике (тракторист / водитель / комп. мастер)."""
+    from django.utils import timezone as dj_tz
+    from django.utils.dateparse import parse_datetime
+
+    from services.master_booking import create_busy_slot_for_user
+    from services.work_request_schedule import format_slot_label, parse_slot_datetime_range
+
+    data = parse_json(request)
+    note = str(data.get("note") or "").strip()
+    start = end = None
+    start_raw = str(data.get("start_at") or "").strip()
+    end_raw = str(data.get("end_at") or "").strip()
+    label = str(data.get("label") or data.get("slot") or "").strip()
+    now = dj_tz.localtime(dj_tz.now())
+    if start_raw and end_raw:
+        start = parse_datetime(start_raw)
+        end = parse_datetime(end_raw)
+        if start is not None and dj_tz.is_naive(start):
+            start = dj_tz.make_aware(start, dj_tz.get_current_timezone())
+        if end is not None and dj_tz.is_naive(end):
+            end = dj_tz.make_aware(end, dj_tz.get_current_timezone())
+    elif label:
+        parsed = parse_slot_datetime_range(label, ref_now=now)
+        if not parsed:
+            return json_response(
+                {"error": "bad_label", "detail": "Не понял окно времени."},
+                status=400,
+            )
+        start, end = parsed
+    else:
+        return json_response(
+            {
+                "error": "missing_slot",
+                "detail": "Укажите label или start_at/end_at.",
+            },
+            status=400,
+        )
+    try:
+        slot = create_busy_slot_for_user(
+            request.bot_user,
+            start=start,
+            end=end,
+            note=note,
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=400)
+    start_l = dj_tz.localtime(slot.start_at)
+    end_l = dj_tz.localtime(slot.end_at)
+    return json_response(
+        {
+            "ok": True,
+            "message": "Слот отмечен как занятый.",
+            "item": {
+                "kind": "busy",
+                "busy_id": slot.id,
+                "work_request_id": 0,
+                "role_name": "",
+                "client_name": slot.note,
+                "status": "busy",
+                "status_label": "Занято",
+                "label": format_slot_label(start_l, end_l),
+                "note": slot.note,
+                "start_at": start_l.isoformat(),
+                "end_at": end_l.isoformat(),
+                "day": start_l.date().isoformat(),
+            },
+        }
+    )
+
+
+@api_login_required
+@require_http_methods(["DELETE", "POST"])
+def executor_busy_slot_delete(request, pk: int):
+    """Снять личную занятость из графика."""
+    from services.master_booking import delete_busy_slot_for_user
+
+    # POST с action=delete — запасной путь для клиентов без DELETE.
+    if request.method == "POST":
+        data = parse_json(request)
+        action = str(data.get("action") or "delete").strip().lower()
+        if action not in {"delete", "remove"}:
+            return json_response({"error": "bad_action"}, status=400)
+    try:
+        delete_busy_slot_for_user(request.bot_user, pk)
+    except ValueError as exc:
+        return json_response({"error": str(exc), "detail": str(exc)}, status=404)
+    return json_response({"ok": True, "message": "Занятость снята."})
 
 
 @api_login_required

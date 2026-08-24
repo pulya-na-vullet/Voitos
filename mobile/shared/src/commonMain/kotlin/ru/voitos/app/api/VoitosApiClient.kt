@@ -7,6 +7,7 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
@@ -34,6 +35,7 @@ import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
 import ru.voitos.app.model.CollectionReceiptResult
 import ru.voitos.app.model.ConfirmBookingResult
+import ru.voitos.app.model.ExecutorBusySlotResult
 import ru.voitos.app.model.ExecutorCampaignJobList
 import ru.voitos.app.model.ExecutorCampaignJobRespondResult
 import ru.voitos.app.model.ExecutorMe
@@ -878,6 +880,38 @@ class VoitosApiClient(
             throw IllegalStateException(
                 "Сервер вернул ${response.status.value} на /executor/schedule. Обновите бэкенд.",
             )
+        }
+        return response.body()
+    }
+
+    suspend fun createExecutorBusySlot(
+        label: String,
+        note: String = "",
+    ): ExecutorBusySlotResult {
+        val response: HttpResponse = http.post("$baseUrl/executor/schedule/busy") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    put("label", label)
+                    if (note.isNotBlank()) put("note", note)
+                },
+            )
+        }
+        return response.body()
+    }
+
+    suspend fun deleteExecutorBusySlot(busyId: Int): ExecutorBusySlotResult {
+        val response: HttpResponse = http.delete("$baseUrl/executor/schedule/busy/$busyId") {
+            applyAuth()
+        }
+        if (response.status.value == 404 || response.status.value == 405) {
+            // Fallback for older proxies without DELETE.
+            return http.post("$baseUrl/executor/schedule/busy/$busyId") {
+                applyAuth()
+                contentType(ContentType.Application.Json)
+                setBody(buildJsonObject { put("action", "delete") })
+            }.body()
         }
         return response.body()
     }
