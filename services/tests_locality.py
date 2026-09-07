@@ -124,13 +124,69 @@ class GroupSettlementAndCallRolesTests(TestCase):
             **self.auth,
         )
         self.assertEqual(api.status_code, 200)
-        got = {r["code"] for r in api.json()["items"]}
+        body = api.json()
+        self.assertEqual(body.get("locality"), "Куюки")
+        got = {r["code"] for r in body["items"]}
         self.assertIn("tractor", got)
         self.assertIn("r_elec_g", got)
 
-    def test_client_address_blob_finds_settlement(self):
+    def test_group_name_beats_member_profiles(self):
+        """Чат «Чебоксары» — мастера Чебоксар, даже если жители прописаны в Куюках."""
+        other_role = ExecutorRole.objects.create(
+            code="r_nails_ch", name="Маникюр", is_active=True, client_books_master=True
+        )
+        ch_user = BotUser.objects.create(
+            max_user_id="loc-ch",
+            real_name="Мастер Чебоксары",
+            locality="Чебоксары",
+            profile_status=ProfileStatus.VERIFIED,
+        )
+        ContractorProfile.objects.create(
+            user=ch_user,
+            role=other_role,
+            equipment_type=other_role.code,
+            locality="Чебоксары",
+            status=ContractorStatus.VERIFIED,
+            verified_at=timezone.now(),
+        )
+        g = ServiceGroup.objects.create(name="Чебоксары")
+        g.members.add(self.client, self.t_user, ch_user)
+        self.assertEqual(settlement_for_group(g), "Чебоксары")
+        loc = settlement_for_client(self.client, group_id=g.id)
+        self.assertEqual(loc, "Чебоксары")
+        codes = {r.code for r in roles_for_client_call(self.client, locality=loc)}
+        self.assertIn("r_nails_ch", codes)
+        self.assertNotIn("tractor", codes)
+
+        api = self.http.get(
+            f"/api/v1/executor-roles?for=call&group_id={g.id}",
+            **self.auth,
+        )
+        self.assertEqual(api.status_code, 200)
+        body = api.json()
+        self.assertEqual(body.get("locality"), "Чебоксары")
+        got = {r["code"] for r in body["items"]}
+        self.assertIn("r_nails_ch", got)
+        self.assertNotIn("tractor", got)
         loc = settlement_for_client(self.client)
         self.assertEqual(loc, "Куюки")
+
+    def test_city_group_without_masters_is_empty(self):
+        g = ServiceGroup.objects.create(name="Чебоксары")
+        g.members.add(self.client, self.t_user)
+        self.assertEqual(settlement_for_group(g), "Чебоксары")
+        loc = settlement_for_client(self.client, group_id=g.id)
+        self.assertEqual(loc, "Чебоксары")
+        codes = {r.code for r in roles_for_client_call(self.client, locality=loc)}
+        self.assertEqual(codes, set())
+        api = self.http.get(
+            f"/api/v1/executor-roles?for=call&group_id={g.id}",
+            **self.auth,
+        )
+        self.assertEqual(api.status_code, 200)
+        body = api.json()
+        self.assertEqual(body.get("locality"), "Чебоксары")
+        self.assertEqual(body.get("items"), [])
 
 
 class PanelMastersMergeTests(TestCase):

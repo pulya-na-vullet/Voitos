@@ -240,10 +240,36 @@ def executor_roles(request):
             request.bot_user, group_id=request.GET.get("group_id")
         )
         roles = roles_for_client_call(request.bot_user, locality=loc)
-    else:
-        roles = list(
-            ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
+        gid_raw = request.GET.get("group_id")
+        try:
+            gid = int(gid_raw) if gid_raw else None
+        except (TypeError, ValueError):
+            gid = None
+        return json_response(
+            {
+                "items": [
+                    {
+                        "id": r.id,
+                        "code": r.code,
+                        "name": r.name,
+                        "requires_work_photos": bool(
+                            getattr(r, "requires_work_photos", True)
+                        ),
+                        "accepts_at_home": bool(getattr(r, "accepts_at_home", False)),
+                        "is_equipment": bool(getattr(r, "is_equipment", False)),
+                        "requires_qualification_docs": role_requires_docs(r),
+                        "client_books_master": role_uses_client_booking(r),
+                        "client_notice": role_client_notice(r),
+                    }
+                    for r in roles
+                ],
+                "locality": loc,
+                "group_id": gid,
+            }
         )
+    roles = list(
+        ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
+    )
     return json_response(
         {
             "items": [

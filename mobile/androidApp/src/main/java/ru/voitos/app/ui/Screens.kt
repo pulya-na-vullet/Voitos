@@ -9,6 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,10 +25,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -42,9 +46,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -56,6 +62,7 @@ import ru.voitos.app.model.AppNotification
 import ru.voitos.app.model.CollectionBrief
 import ru.voitos.app.model.OnboardingProgress
 import ru.voitos.app.model.OnboardingStep
+import ru.voitos.app.model.ServiceGroupBrief
 import ru.voitos.app.model.WorkRequestBrief
 import ru.voitos.app.model.WorkRequestDetail
 import ru.voitos.app.nav.DeepLinks
@@ -1491,6 +1498,7 @@ fun NewWorkRequestScreen(
     onCreated: (id: Int, needsPhotos: Boolean) -> Unit,
     onBack: (() -> Unit)? = null,
     groupId: Int? = null,
+    onGroupSelected: (Int) -> Unit = {},
 ) {
     var roles by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorRole>>(emptyList()) }
     var selectedId by remember { mutableStateOf<Int?>(null) }
@@ -1506,20 +1514,63 @@ fun NewWorkRequestScreen(
     var selectedSlot by remember { mutableStateOf<String?>(null) }
     var slotsExpanded by remember { mutableStateOf(false) }
     var masterBlockMessage by remember { mutableStateOf<String?>(null) }
+    var groups by remember { mutableStateOf<List<ServiceGroupBrief>>(emptyList()) }
+    var selectedGroupId by remember { mutableStateOf(groupId) }
+    var locality by remember { mutableStateOf("") }
+    var waitingGroups by remember { mutableStateOf(true) }
+    var menuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val selectedRole = roles.firstOrNull { it.id == selectedId }
     val booksMaster = selectedRole?.clientBooksMaster == true
+    val selectedGroup = groups.firstOrNull { it.id == selectedGroupId } ?: groups.firstOrNull()
 
     LaunchedEffect(groupId) {
+        if (groupId != null && groupId != selectedGroupId) {
+            selectedGroupId = groupId
+        }
+    }
+
+    LaunchedEffect(Unit) {
         try {
-            roles = client.executorRoles(forCall = true, groupId = groupId).items
+            groups = client.groups().items
+            if (selectedGroupId == null || groups.none { it.id == selectedGroupId }) {
+                groups.firstOrNull()?.id?.let { gid ->
+                    selectedGroupId = gid
+                    onGroupSelected(gid)
+                }
+            }
+        } catch (e: Exception) {
+            error = friendlyNetworkError(e)
+        } finally {
+            waitingGroups = false
+        }
+    }
+
+    LaunchedEffect(selectedGroupId, waitingGroups) {
+        if (waitingGroups) return@LaunchedEffect
+        selectedId = null
+        selectedMasterId = null
+        selectedSlot = null
+        slotsExpanded = false
+        freeSlots = emptyList()
+        masterBlockMessage = null
+        masters = emptyList()
+        roles = emptyList()
+        locality = selectedGroup?.locality.orEmpty()
+        error = null
+        try {
+            val res = client.executorRoles(forCall = true, groupId = selectedGroupId)
+            roles = res.items
+            if (res.locality.isNotBlank()) {
+                locality = res.locality
+            }
         } catch (e: Exception) {
             error = friendlyNetworkError(e)
         }
     }
 
-    LaunchedEffect(selectedId, groupId) {
+    LaunchedEffect(selectedId, selectedGroupId) {
         selectedMasterId = null
         selectedSlot = null
         slotsExpanded = false
@@ -1531,7 +1582,7 @@ fun NewWorkRequestScreen(
         mastersLoading = true
         error = null
         try {
-            masters = client.roleMasters(role.id, groupId = groupId).items
+            masters = client.roleMasters(role.id, groupId = selectedGroupId).items
         } catch (e: Exception) {
             error = friendlyNetworkError(e)
         } finally {
@@ -1582,12 +1633,82 @@ fun NewWorkRequestScreen(
             VoitosBackButton(onClick = onBack)
         }
         Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
-        Text("Выбрать роли доступные в вашем регионе", color = VoitosColors.Muted)
+        Text(
+            "Роли, у которых есть проверенные мастера в выбранной группе",
+            color = VoitosColors.Muted,
+        )
         Spacer(modifier = Modifier.height(12.dp))
 
-        if (roles.isEmpty() && error == null) {
+        if (groups.isNotEmpty()) {
+            Box {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, VoitosColors.Line, RoundedCornerShape(12.dp))
+                        .background(VoitosColors.BgSoft)
+                        .clickable(enabled = groups.size > 1) { menuOpen = true }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Группа", color = VoitosColors.Muted, style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            selectedGroup?.name?.ifBlank { "Группа" } ?: "Выберите группу",
+                            color = VoitosColors.Text,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    if (groups.size > 1) {
+                        Text("▾", color = VoitosColors.Accent2)
+                    }
+                }
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                ) {
+                    groups.forEach { g ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    buildString {
+                                        append(g.name.ifBlank { "Группа ${g.id}" })
+                                        val loc = g.locality.trim()
+                                        if (loc.isNotBlank() && !loc.equals(g.name, ignoreCase = true)) {
+                                            append(" · $loc")
+                                        }
+                                    },
+                                )
+                            },
+                            onClick = {
+                                selectedGroupId = g.id
+                                onGroupSelected(g.id)
+                                menuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
+            if (locality.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Населённый пункт: $locality",
+                    color = VoitosColors.Accent2,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        if (roles.isEmpty() && error == null && !waitingGroups) {
             Text(
-                "В вашем населённом пункте пока нет доступных мастеров",
+                if (locality.isNotBlank()) {
+                    "В населённом пункте «$locality» пока нет доступных мастеров"
+                } else {
+                    "В вашем населённом пункте пока нет доступных мастеров"
+                },
                 color = VoitosColors.Muted,
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -1759,7 +1880,7 @@ fun NewWorkRequestScreen(
                             description = description,
                             contractorId = if (booksMaster) selectedMasterId else null,
                             slot = if (booksMaster) selectedSlot else null,
-                            groupId = groupId,
+                            groupId = selectedGroupId,
                         )
                         message = when {
                             created.needsPhotos -> "Заявка #${created.id}: добавьте фото"

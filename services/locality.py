@@ -213,9 +213,32 @@ def locality_bucket_label(raw: str, known: list[str] | None = None) -> str:
 
 
 def settlement_for_group(group, known: list[str] | None = None) -> str:
+    """НП группы = название группы (Чебоксары / Куюки), не анкеты жителей.
+
+    Жители могут быть прописаны в другом посёлке — чат «Чебоксары» всё равно
+    должен показывать мастеров Чебоксар.
+    """
     if group is None:
         return ""
     names = known if known is not None else _seed_known_settlements()
+    raw_name = (group.name or "").strip()
+    hit = match_known_settlement(raw_name, names)
+    if hit:
+        # Название группы само попадает в known («Куюки двор») — это не НП.
+        # Если внутри есть более короткий известный город («Куюки») — берём его.
+        if normalize_locality(hit) == normalize_locality(raw_name):
+            others = [
+                n
+                for n in names
+                if normalize_locality(n) != normalize_locality(raw_name)
+            ]
+            shorter = match_known_settlement(raw_name, others)
+            if shorter:
+                return shorter
+        return hit
+    from_name = canonicalize_locality(raw_name, use_ai=False, known=names)
+    if from_name and not looks_like_address(raw_name):
+        return from_name
     counts: Counter[str] = Counter()
     display: dict[str, str] = {}
     members = getattr(group, "members", None)
@@ -235,12 +258,6 @@ def settlement_for_group(group, known: list[str] | None = None) -> str:
     if counts:
         top = counts.most_common(1)[0][0]
         return display[top]
-    hit = match_known_settlement(group.name or "", names)
-    if hit:
-        return hit
-    from_name = canonicalize_locality(group.name or "", use_ai=False, known=names)
-    if from_name and not looks_like_address(group.name or ""):
-        return from_name
     return ""
 
 

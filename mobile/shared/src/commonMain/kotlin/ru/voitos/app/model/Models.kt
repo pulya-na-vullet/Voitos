@@ -399,6 +399,8 @@ data class ExecutorRole(
 @Serializable
 data class ExecutorRoleList(
     val items: List<ExecutorRole> = emptyList(),
+    val locality: String = "",
+    @SerialName("group_id") val groupId: Int? = null,
 )
 
 @Serializable

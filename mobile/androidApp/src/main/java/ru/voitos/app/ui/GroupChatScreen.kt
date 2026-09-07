@@ -222,6 +222,7 @@ fun GroupChatScreen(
                                 },
                                 onClick = {
                                     selectedGroupId = g.id
+                                    onGroupSelected(g.id)
                                     menuOpen = false
                                 },
                             )
