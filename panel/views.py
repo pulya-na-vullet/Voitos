@@ -1219,11 +1219,6 @@ def services_home(request: HttpRequest) -> HttpResponse:
             photo_uploads: list[tuple[bytes, str]] = []
             for f in request.FILES.getlist("offer_photos")[:2]:
                 photo_uploads.append((f.read(), f.name))
-            token_cache: dict = {}
-
-            def send_media(user, text, images, _cache=token_cache):
-                _notify_user_with_images(user, text, images, _token_cache=_cache)
-
             try:
                 campaign, sent = launch_campaign_to_group(
                     category=category,
@@ -1239,8 +1234,6 @@ def services_home(request: HttpRequest) -> HttpResponse:
                         and bool(request.POST.get("needs_snow_haul"))
                     ),
                     photo_uploads=photo_uploads,
-                    send_fn=_notify_user,
-                    send_media_fn=send_media,
                 )
                 ballot_raw = (request.POST.get("wish_ballot_id") or "").strip()
                 if ballot_raw.isdigit():
@@ -1262,7 +1255,7 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 extra = f", с фото ({photo_n})" if photo_n else ""
                 messages.success(
                     request,
-                    f"Сбор запущен для группы «{group.name}»: разослано {sent} сообщ.{extra}",
+                    f"Сбор запущен для группы «{group.name}»: в очередь MAX {sent} сообщ.{extra}",
                 )
                 tax_warn = AppSettings.load().tax_limit_warning()
                 if tax_warn and is_panel_admin(request.user):
@@ -1611,25 +1604,13 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         group_notices = 0
         campaign_notices = 0
         if new_ids:
-            group_notices = notify_members_added_to_group(
-                group, new_ids, send_fn=_notify_user
-            )
-            token_cache: dict = {}
-
-            def send_media(user, text, images, _cache=token_cache):
-                _notify_user_with_images(user, text, images, _token_cache=_cache)
-
-            campaign_notices = invite_new_members_to_group_campaigns(
-                group,
-                new_ids,
-                send_fn=_notify_user,
-                send_media_fn=send_media,
-            )
+            group_notices = notify_members_added_to_group(group, new_ids)
+            campaign_notices = invite_new_members_to_group_campaigns(group, new_ids)
         parts = ["Группа сохранена"]
         if group_notices:
-            parts.append(f"уведомлений о группе: {group_notices}")
+            parts.append(f"в очередь MAX уведомлений о группе: {group_notices}")
         if campaign_notices:
-            parts.append(f"отправленных сборов: {campaign_notices}")
+            parts.append(f"в очередь MAX сборов: {campaign_notices}")
         messages.success(request, ". ".join(parts) + ".")
         log_manager_action(
             request,
@@ -1780,20 +1761,11 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             elif (campaign.amount_per_user or 0) <= 0:
                 messages.error(request, "Нет суммы для рассылки")
             else:
-                token_cache: dict = {}
-
-                def send_media(user, text, images, _cache=token_cache):
-                    _notify_user_with_images(user, text, images, _token_cache=_cache)
-
-                sent = resend_to_unpaid(
-                    campaign,
-                    send_fn=_notify_user,
-                    send_media_fn=send_media,
-                )
+                sent = resend_to_unpaid(campaign)
                 if sent:
                     messages.success(
                         request,
-                        f"Напоминание отправлено неоплатившим: {sent} сообщ.",
+                        f"Напоминание поставлено в очередь неоплатившим: {sent} сообщ.",
                     )
                 else:
                     messages.info(
@@ -1807,11 +1779,6 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             if next_stage == WorkStage.WORK_DONE:
                 for f in request.FILES.getlist("result_photos")[:2]:
                     photo_uploads.append((f.read(), f.name))
-            token_cache: dict = {}
-
-            def send_media(user, text, images, _cache=token_cache):
-                _notify_user_with_images(user, text, images, _token_cache=_cache)
-
             try:
                 if next_stage == WorkStage.WORK_CLOSED:
                     from services.contractors import close_campaign_requiring_payouts
@@ -1820,15 +1787,11 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     new_stage = close_campaign_requiring_payouts(
                         campaign,
                         payout_items,
-                        send_fn=_notify_user,
-                        send_media_fn=send_media,
                     )
                 else:
                     new_stage = advance_work_stage(
                         campaign,
                         photo_uploads=photo_uploads,
-                        send_fn=_notify_user,
-                        send_media_fn=send_media,
                     )
                 labels = dict(WorkStage.choices)
                 messages.success(request, f"Этап: {labels.get(new_stage, new_stage)}")
@@ -1837,14 +1800,17 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     if n_photos:
                         messages.info(
                             request,
-                            f"Результат разослан участникам с фото ({n_photos}).",
+                            f"Результат поставлен в очередь MAX участникам с фото ({n_photos}).",
                         )
                     else:
-                        messages.info(request, "Результат разослан участникам без фото.")
+                        messages.info(
+                            request,
+                            "Результат поставлен в очередь MAX участникам без фото.",
+                        )
                 if new_stage == WorkStage.WORK_CLOSED:
                     messages.info(
                         request,
-                        "Работа закрыта. Чеки оплаты исполнителям разосланы участникам сбора.",
+                        "Работа закрыта. Чеки оплаты исполнителям поставлены в очередь MAX.",
                     )
             except ValueError as exc:
                 messages.error(request, str(exc))
@@ -1852,22 +1818,12 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
         if action == "backfill_payouts":
             from services.contractors import record_contractor_payouts
 
-            token_cache: dict = {}
-
-            def send_media(user, text, images, _cache=token_cache):
-                _notify_user_with_images(user, text, images, _token_cache=_cache)
-
             try:
                 items = _parse_payout_items_from_request(request, campaign)
-                created = record_contractor_payouts(
-                    campaign,
-                    items,
-                    send_fn=_notify_user,
-                    send_media_fn=send_media,
-                )
+                created = record_contractor_payouts(campaign, items)
                 messages.success(
                     request,
-                    f"Дозаполнено оплат: {len(created)}. Чеки разосланы участникам и исполнителям.",
+                    f"Дозаполнено оплат: {len(created)}. Чеки поставлены в очередь MAX.",
                 )
             except ValueError as exc:
                 messages.error(request, str(exc))
@@ -1960,8 +1916,8 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
         if action == "notify_residents_contractors":
             from services.contractors import notify_residents_about_assignments
 
-            n = notify_residents_about_assignments(campaign, send_fn=_notify_user)
-            messages.success(request, f"Статус исполнителя разослан: {n} сообщ.")
+            n = notify_residents_about_assignments(campaign)
+            messages.success(request, f"Статус исполнителя в очередь MAX: {n} сообщ.")
             return redirect("panel:service_campaign_detail", pk=pk)
         if action == "save_peers_flag":
             if not is_panel_admin(request.user):
@@ -1983,13 +1939,11 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             else:
                 from services.contractors import auto_offer_priority_contractors_for_campaign
 
-                n = auto_offer_priority_contractors_for_campaign(
-                    campaign, send_fn=_notify_user
-                )
+                n = auto_offer_priority_contractors_for_campaign(campaign)
                 if n:
                     messages.success(
                         request,
-                        f"Предложения отправлены приоритетным исполнителям: {n}.",
+                        f"Предложения приоритетным исполнителям в очередь MAX: {n}.",
                     )
                 else:
                     messages.info(
@@ -2387,7 +2341,6 @@ def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
             receipt,
             comment=comment,
             amount=amount,
-            send_fn=_notify_user,
         )
         receipt.refresh_from_db()
         receipt.invite.refresh_from_db()
