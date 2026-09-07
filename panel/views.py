@@ -2169,9 +2169,12 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
     if eq_filter:
         qs = qs.filter(equipment_type=eq_filter)
 
-    # Нас. пункт: сначала анкета исполнителя, иначе профиль жителя.
+    # Нас. пункт: каноническое имя (Куюки / куюки / адрес в Куюках → одна карточка).
+    from services.locality import locality_bucket_label, localities_match, normalize_locality
+
     def _loc_of(c) -> str:
-        return (c.locality or getattr(c.user, "locality", None) or "").strip() or "Без населённого пункта"
+        raw = (c.locality or getattr(c.user, "locality", None) or "").strip()
+        return locality_bucket_label(raw)
 
     locality_counts: dict[str, int] = {}
     for c in qs:
@@ -2183,7 +2186,16 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
     )
 
     if locality_filter:
-        contractors = [c for c in qs if _loc_of(c) == locality_filter]
+        want = normalize_locality(locality_bucket_label(locality_filter))
+        contractors = [
+            c
+            for c in qs
+            if normalize_locality(_loc_of(c)) == want
+            or localities_match(
+                c.locality or getattr(c.user, "locality", None) or "",
+                locality_filter,
+            )
+        ]
     else:
         contractors = []
 

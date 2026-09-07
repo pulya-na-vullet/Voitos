@@ -564,6 +564,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                         MainTab.CallMaster -> NewWorkRequestScreen(
                                             client = client,
+                                            groupId = session.selectedGroupId,
                                             onCreated = { id, needsPhotos ->
                                                 screen = if (needsPhotos) {
                                                     Screen.WorkRequestPhotos(id)
@@ -710,6 +711,8 @@ class MainActivity : ComponentActivity() {
 
                             Screen.GroupChat -> GroupChatScreen(
                                 client = client,
+                                initialGroupId = session.selectedGroupId,
+                                onGroupSelected = { session.selectedGroupId = it },
                                 onBack = {
                                     scope.launch {
                                         chatUnread = runCatching {

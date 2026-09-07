@@ -548,13 +548,18 @@ class VoitosApiClient(
             )
         }.body()
 
-    suspend fun executorRoles(forCall: Boolean = false): ExecutorRoleList {
-        val path = if (forCall) "/executor-roles?for=call" else "/executor-roles"
+    suspend fun executorRoles(forCall: Boolean = false, groupId: Int? = null): ExecutorRoleList {
+        val parts = mutableListOf<String>()
+        if (forCall) parts.add("for=call")
+        if (groupId != null && groupId > 0) parts.add("group_id=$groupId")
+        val path = if (parts.isEmpty()) "/executor-roles" else "/executor-roles?${parts.joinToString("&")}"
         return authedGet(path)
     }
 
-    suspend fun roleMasters(roleId: Int): RoleMastersResponse =
-        authedGet("/executor-roles/$roleId/masters")
+    suspend fun roleMasters(roleId: Int, groupId: Int? = null): RoleMastersResponse {
+        val q = if (groupId != null && groupId > 0) "?group_id=$groupId" else ""
+        return authedGet("/executor-roles/$roleId/masters$q")
+    }
 
     suspend fun contractorFreeSlots(contractorId: Int, days: Int = 2): FreeSlotsResponse {
         val response: HttpResponse = http.get("$baseUrl/contractors/$contractorId/free-slots") {
@@ -576,6 +581,7 @@ class VoitosApiClient(
         description: String,
         contractorId: Int? = null,
         slot: String? = null,
+        groupId: Int? = null,
     ): WorkRequestCreated {
         val response: HttpResponse = http.post("$baseUrl/work-requests") {
             applyAuth()
@@ -589,6 +595,9 @@ class VoitosApiClient(
                     }
                     if (!slot.isNullOrBlank()) {
                         put("slot", slot)
+                    }
+                    if (groupId != null && groupId > 0) {
+                        put("group_id", groupId)
                     }
                 },
             )

@@ -822,6 +822,7 @@ data class ServiceGroupBrief(
     @SerialName("member_count") val memberCount: Int = 0,
     @SerialName("unread_count") val unreadCount: Int = 0,
     @SerialName("free_balance") val freeBalance: Double = 0.0,
+    val locality: String = "",
 )
 
 @Serializable

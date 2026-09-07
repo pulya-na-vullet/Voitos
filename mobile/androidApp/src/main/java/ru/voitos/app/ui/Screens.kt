@@ -1490,6 +1490,7 @@ fun NewWorkRequestScreen(
     client: VoitosApiClient,
     onCreated: (id: Int, needsPhotos: Boolean) -> Unit,
     onBack: (() -> Unit)? = null,
+    groupId: Int? = null,
 ) {
     var roles by remember { mutableStateOf<List<ru.voitos.app.model.ExecutorRole>>(emptyList()) }
     var selectedId by remember { mutableStateOf<Int?>(null) }
@@ -1510,15 +1511,15 @@ fun NewWorkRequestScreen(
     val selectedRole = roles.firstOrNull { it.id == selectedId }
     val booksMaster = selectedRole?.clientBooksMaster == true
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(groupId) {
         try {
-            roles = client.executorRoles(forCall = true).items
+            roles = client.executorRoles(forCall = true, groupId = groupId).items
         } catch (e: Exception) {
             error = friendlyNetworkError(e)
         }
     }
 
-    LaunchedEffect(selectedId) {
+    LaunchedEffect(selectedId, groupId) {
         selectedMasterId = null
         selectedSlot = null
         slotsExpanded = false
@@ -1530,7 +1531,7 @@ fun NewWorkRequestScreen(
         mastersLoading = true
         error = null
         try {
-            masters = client.roleMasters(role.id).items
+            masters = client.roleMasters(role.id, groupId = groupId).items
         } catch (e: Exception) {
             error = friendlyNetworkError(e)
         } finally {
@@ -1758,6 +1759,7 @@ fun NewWorkRequestScreen(
                             description = description,
                             contractorId = if (booksMaster) selectedMasterId else null,
                             slot = if (booksMaster) selectedSlot else null,
+                            groupId = groupId,
                         )
                         message = when {
                             created.needsPhotos -> "Заявка #${created.id}: добавьте фото"
