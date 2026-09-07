@@ -7,7 +7,8 @@
 </div>
 <p class="muted" style="margin-top:-6px; margin-bottom:16px;">
   {% if can_manage_groups %}
-  Создавайте группы, назначайте менеджера (один на группу) и управляйте составом. Запуск сбора — на странице сервисных мероприятий.
+  Создавайте группы, указывайте населённый пункт, назначайте менеджера и управляйте составом.
+  По НП группы жители в приложении видят мастеров. Запуск сбора — на странице сервисных мероприятий.
   {% else %}
   Группы, закреплённые за вами как за менеджером. Запуск сбора — на странице сервисных мероприятий.
   {% endif %}
@@ -18,13 +19,22 @@
     <h3 style="margin-top:0;">Список групп</h3>
     <p class="muted">Бюджет — свободный баланс группы (остатки сверх цели после закрытых сборов). Доля в активных сборах не пересчитывается назад.</p>
     <table>
-      <thead><tr><th>Группа</th><th>Участников</th><th>Менеджер</th><th>Свободный баланс</th><th>Пожелания</th><th>Архив</th><th></th></tr></thead>
+      <thead><tr><th>Группа</th><th>Нас. пункт</th><th>Участников</th><th>Менеджер</th><th>Свободный баланс</th><th>Пожелания</th><th>Архив</th><th></th></tr></thead>
       <tbody>
       {% for g in groups %}
         <tr>
           <td>
             <strong>{{ g.name }}</strong>
             {% if g.description %}<div class="muted">{{ g.description|truncatechars:60 }}</div>{% endif %}
+          </td>
+          <td>
+            {% if g.locality %}
+              {{ g.locality }}
+            {% elif g.settlement %}
+              <span class="muted">по жителям:</span> {{ g.settlement }}
+            {% else %}
+              <span class="muted">не указан</span>
+            {% endif %}
           </td>
           <td class="mono">{{ g.member_count }}</td>
           <td>
@@ -53,7 +63,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="7" class="muted">{% if can_manage_groups %}Групп пока нет — создайте первую справа{% else %}Нет закреплённых групп{% endif %}</td></tr>
+        <tr><td colspan="8" class="muted">{% if can_manage_groups %}Групп пока нет — создайте первую справа{% else %}Нет закреплённых групп{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -70,11 +80,21 @@
         <input type="text" name="name" required placeholder="ул. Баумана, дом 1–5">
       </div>
       <div class="form-row">
+        <label>Населённый пункт</label>
+        <input type="text" name="locality" list="known-settlements" placeholder="Куюки" autocomplete="off">
+        <p class="muted" style="margin:6px 0 0;">Обязательно для «Вызвать мастера»: жители увидят все роли мастеров этого НП.</p>
+      </div>
+      <div class="form-row">
         <label>Описание</label>
         <input type="text" name="description" placeholder="необязательно">
       </div>
       <button class="btn" type="submit">Создать группу</button>
     </form>
+    <datalist id="known-settlements">
+      {% for loc in known_settlements %}
+      <option value="{{ loc }}"></option>
+      {% endfor %}
+    </datalist>
   </div>
   {% endif %}
 </div>

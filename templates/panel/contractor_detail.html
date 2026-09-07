@@ -24,7 +24,18 @@
       <tr><th>Техника / описание</th><td>{{ c.equipment_label|default:"—" }}</td></tr>
       <tr><th>Стаж / опыт</th><td>{{ c.experience_text|default:"—" }}</td></tr>
       <tr><th>Госномер</th><td class="mono">{{ c.plate_number|default:"—" }}</td></tr>
-      <tr><th>НП</th><td>{{ locality|default:"—" }}</td></tr>
+      <tr><th>НП</th>
+        <td>
+          {% if display_locality %}
+            <strong>{{ display_locality }}</strong>
+            {% if locality and locality != display_locality %}
+              <div class="muted">{{ locality }}</div>
+            {% endif %}
+          {% else %}
+            {{ locality|default:"—" }}
+          {% endif %}
+        </td>
+      </tr>
       <tr><th>Телефон связи</th><td class="mono">{{ c.phone|default:c.user.phone|default:"—" }}</td></tr>
       <tr><th>Телефон перевода</th><td class="mono">{{ c.payout_phone|default:"—" }}</td></tr>
       <tr><th>Банк</th><td>{{ c.bank_name|default:"—" }}</td></tr>

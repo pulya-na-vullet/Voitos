@@ -1329,13 +1329,27 @@ def services_groups(request: HttpRequest) -> HttpResponse:
             if not name:
                 messages.error(request, "Укажите название группы")
             else:
+                from services.locality import canonicalize_locality
+
+                locality = canonicalize_locality(
+                    request.POST.get("locality") or "", use_ai=False
+                )[:255]
                 group = ServiceGroup.objects.create(
                     name=name,
+                    locality=locality,
                     description=request.POST.get("description", "").strip(),
                 )
-                messages.success(
-                    request, f"Группа «{group.name}» создана. Добавьте участников."
-                )
+                if locality:
+                    messages.success(
+                        request,
+                        f"Группа «{group.name}» ({locality}) создана. Добавьте участников.",
+                    )
+                else:
+                    messages.success(
+                        request,
+                        f"Группа «{group.name}» создана. Укажите населённый пункт — "
+                        "по нему жители видят мастеров.",
+                    )
                 return redirect("panel:service_group_edit", pk=group.id)
         if action == "delete_group":
             group = get_object_or_404(ServiceGroup, pk=request.POST.get("group_id"))
@@ -1352,17 +1366,20 @@ def services_groups(request: HttpRequest) -> HttpResponse:
         .annotate(wish_count=Count("wishes"))
         .all()
     )
+    from services.locality import known_settlements, settlement_for_group
     from services.service import budgets_by_group_ids
 
     budget_map = budgets_by_group_ids([g.id for g in groups])
     for g in groups:
         g.budget = budget_map.get(g.id) or Decimal("0")
+        g.settlement = settlement_for_group(g)
     return render(
         request,
         "panel/services_groups.html",
         {
             "groups": groups,
             "can_manage_groups": is_panel_admin(request.user),
+            "known_settlements": known_settlements(),
         },
     )
 
@@ -1586,6 +1603,11 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
         group.name = request.POST.get("name", group.name).strip() or group.name
         group.description = request.POST.get("description", "").strip()
+        from services.locality import canonicalize_locality
+
+        group.locality = canonicalize_locality(
+            request.POST.get("locality") or "", use_ai=False
+        )[:255]
         group.save()
         old_ids = set(group.members.values_list("id", flat=True))
         ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
@@ -1651,6 +1673,8 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         .first()
     )
     ballot_vote_rows = vote_summary_table(active_ballot) if active_ballot else []
+    from services.locality import known_settlements, settlement_for_group
+
     current_manager_bot_id = None
     manager_login = ""
     if group.manager_id:
@@ -1699,6 +1723,8 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "open_wish_period": open_period,
             "active_wish_ballot": active_ballot,
             "ballot_vote_rows": ballot_vote_rows,
+            "known_settlements": known_settlements(),
+            "settlement": settlement_for_group(group),
         },
     )
 
@@ -2196,6 +2222,10 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
                 locality_filter,
             )
         ]
+        for c in contractors:
+            raw = (c.locality or getattr(c.user, "locality", None) or "").strip()
+            c.display_locality = locality_bucket_label(raw)
+            c.raw_locality = raw
     else:
         contractors = []
 
@@ -2312,12 +2342,15 @@ def contractor_detail(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("panel:contractor_detail", pk=profile.id)
 
     loc = (profile.locality or getattr(profile.user, "locality", "") or "").strip()
+    from services.locality import locality_bucket_label
+
     return render(
         request,
         "panel/contractor_detail.html",
         {
             "c": profile,
             "locality": loc,
+            "display_locality": locality_bucket_label(loc) if loc else "",
             "status_verified": ContractorStatus.VERIFIED,
             "status_pending": ContractorStatus.PENDING_REVIEW,
         },

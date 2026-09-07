@@ -246,18 +246,18 @@ class AppSettings(models.Model):
     )
     mobile_min_version_code = models.PositiveIntegerField(
         "Мин. versionCode приложения",
-        default=44,
+        default=45,
         help_text="Клиенты со меньшим versionCode увидят требование обновить приложение.",
     )
     mobile_latest_version_code = models.PositiveIntegerField(
         "Актуальный versionCode",
-        default=44,
+        default=45,
     )
     mobile_latest_version_name = models.CharField(
         "Актуальная versionName",
         max_length=64,
         blank=True,
-        default="0.2.40-kmp",
+        default="0.2.41-kmp",
     )
     mobile_apk_url = models.CharField(
         "Ссылка на APK для обновления",
@@ -838,6 +838,13 @@ class ServiceGroup(models.Model):
     """Admin-defined group of residents for service campaign broadcasts."""
 
     name = models.CharField("Название группы", max_length=255)
+    locality = models.CharField(
+        "Населённый пункт",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Куюки, Чебоксары… По нему жители в приложении видят мастеров.",
+    )
     description = models.TextField(blank=True, default="")
     members = models.ManyToManyField(
         BotUser, blank=True, related_name="service_groups"

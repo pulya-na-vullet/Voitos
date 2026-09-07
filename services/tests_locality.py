@@ -149,7 +149,7 @@ class GroupSettlementAndCallRolesTests(TestCase):
             status=ContractorStatus.VERIFIED,
             verified_at=timezone.now(),
         )
-        g = ServiceGroup.objects.create(name="Чебоксары")
+        g = ServiceGroup.objects.create(name="Чебоксары", locality="Чебоксары")
         g.members.add(self.client, self.t_user, ch_user)
         self.assertEqual(settlement_for_group(g), "Чебоксары")
         loc = settlement_for_client(self.client, group_id=g.id)
@@ -171,8 +171,35 @@ class GroupSettlementAndCallRolesTests(TestCase):
         loc = settlement_for_client(self.client)
         self.assertEqual(loc, "Куюки")
 
+    def test_courtyard_group_uses_residents_settlement(self):
+        """«ул. А» / «Двор» — не город; мастера Куюков должны быть видны."""
+        g = ServiceGroup.objects.create(name="ул. А")
+        g.members.add(self.client, self.t_user, self.e_user)
+        self.assertEqual(settlement_for_group(g), "Куюки")
+        loc = settlement_for_client(self.client, group_id=g.id)
+        self.assertEqual(loc, "Куюки")
+        codes = {r.code for r in roles_for_client_call(self.client, locality=loc)}
+        self.assertIn("tractor", codes)
+        api = self.http.get(
+            f"/api/v1/executor-roles?for=call&group_id={g.id}",
+            **self.auth,
+        )
+        self.assertEqual(api.status_code, 200)
+        body = api.json()
+        self.assertEqual(body.get("locality"), "Куюки")
+        self.assertIn("tractor", {r["code"] for r in body["items"]})
+
+    def test_explicit_group_locality_overrides_members(self):
+        g = ServiceGroup.objects.create(name="двор 9", locality="Чебоксары")
+        g.members.add(self.client, self.t_user)
+        self.assertEqual(settlement_for_group(g), "Чебоксары")
+        loc = settlement_for_client(self.client, group_id=g.id)
+        self.assertEqual(loc, "Чебоксары")
+        codes = {r.code for r in roles_for_client_call(self.client, locality=loc)}
+        self.assertNotIn("tractor", codes)
+
     def test_city_group_without_masters_is_empty(self):
-        g = ServiceGroup.objects.create(name="Чебоксары")
+        g = ServiceGroup.objects.create(name="Чебоксары", locality="Чебоксары")
         g.members.add(self.client, self.t_user)
         self.assertEqual(settlement_for_group(g), "Чебоксары")
         loc = settlement_for_client(self.client, group_id=g.id)
@@ -229,3 +256,49 @@ class PanelMastersMergeTests(TestCase):
         self.assertContains(resp, "Мастер 0")
         self.assertContains(resp, "Мастер 1")
         self.assertContains(resp, "Мастер 2")
+        self.assertContains(resp, "Нас. пункт")
+        self.assertContains(resp, "Куюки")
+
+
+class PanelGroupLocalityTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        from database.models import PanelProfile, PanelRole
+
+        self.admin = User.objects.create_superuser("grpadm", "g@t.com", "pass")
+        PanelProfile.objects.create(user=self.admin, role=PanelRole.ADMIN)
+        self.client = Client()
+        self.client.login(username="grpadm", password="pass")
+
+    def test_create_group_with_locality(self):
+        resp = self.client.post(
+            "/panel/services/groups/",
+            {
+                "action": "create_group",
+                "name": "ул. Баумана",
+                "locality": "куюки",
+                "description": "",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        g = ServiceGroup.objects.get(name="ул. Баумана")
+        self.assertEqual(g.locality, "Куюки")
+
+    def test_list_shows_settlement_column(self):
+        ServiceGroup.objects.create(name="Двор", locality="Куюки")
+        resp = self.client.get("/panel/services/groups/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Нас. пункт")
+        self.assertContains(resp, "Куюки")
+        self.assertContains(resp, "Двор")
+
+    def test_edit_saves_locality(self):
+        g = ServiceGroup.objects.create(name="Двор")
+        resp = self.client.post(
+            f"/panel/services/groups/{g.id}/",
+            {"name": "Двор", "description": "", "locality": "Чебоксары"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        g.refresh_from_db()
+        self.assertEqual(g.locality, "Чебоксары")

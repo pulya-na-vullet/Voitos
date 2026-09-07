@@ -1634,7 +1634,7 @@ fun NewWorkRequestScreen(
         }
         Text("Вызов мастера", style = MaterialTheme.typography.headlineSmall, color = VoitosColors.Text)
         Text(
-            "Роли, у которых есть проверенные мастера в выбранной группе",
+            "Все роли мастеров выбранного населённого пункта",
             color = VoitosColors.Muted,
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -1697,6 +1697,13 @@ fun NewWorkRequestScreen(
                     color = VoitosColors.Accent2,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
+                )
+            } else if (!waitingGroups) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "У группы не указан населённый пункт — показаны мастера из вашей анкеты. Попросите администратора указать НП у группы.",
+                    color = VoitosColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
