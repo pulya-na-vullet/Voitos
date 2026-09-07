@@ -234,11 +234,42 @@ def executor_roles(request):
     # Без параметра — полный каталог (регистрация исполнителем).
     purpose = (request.GET.get("for") or "").strip().lower()
     if purpose in {"call", "book", "client"}:
-        roles = roles_for_client_call(request.bot_user)
-    else:
-        roles = list(
-            ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
+        from services.locality import settlement_for_client
+
+        loc = settlement_for_client(
+            request.bot_user, group_id=request.GET.get("group_id")
         )
+        roles = roles_for_client_call(request.bot_user, locality=loc)
+        gid_raw = request.GET.get("group_id")
+        try:
+            gid = int(gid_raw) if gid_raw else None
+        except (TypeError, ValueError):
+            gid = None
+        return json_response(
+            {
+                "items": [
+                    {
+                        "id": r.id,
+                        "code": r.code,
+                        "name": r.name,
+                        "requires_work_photos": bool(
+                            getattr(r, "requires_work_photos", True)
+                        ),
+                        "accepts_at_home": bool(getattr(r, "accepts_at_home", False)),
+                        "is_equipment": bool(getattr(r, "is_equipment", False)),
+                        "requires_qualification_docs": role_requires_docs(r),
+                        "client_books_master": role_uses_client_booking(r),
+                        "client_notice": role_client_notice(r),
+                    }
+                    for r in roles
+                ],
+                "locality": loc,
+                "group_id": gid,
+            }
+        )
+    roles = list(
+        ExecutorRole.objects.filter(is_active=True).order_by("sort_order", "id")
+    )
     return json_response(
         {
             "items": [
@@ -266,6 +297,7 @@ def executor_roles(request):
 @require_GET
 def role_masters(request, role_id: int):
     """Доступные мастера роли для записи клиента."""
+    from services.locality import settlement_for_client
     from services.master_booking import list_masters_for_role, role_uses_client_booking
 
     role = ExecutorRole.objects.filter(pk=role_id, is_active=True).first()
@@ -280,8 +312,18 @@ def role_masters(request, role_id: int):
             },
             status=400,
         )
-    items = list_masters_for_role(role, request.bot_user)
-    return json_response({"role_id": role.id, "role_name": role.name, "items": items})
+    loc = settlement_for_client(
+        request.bot_user, group_id=request.GET.get("group_id")
+    )
+    items = list_masters_for_role(role, request.bot_user, locality=loc)
+    return json_response(
+        {
+            "role_id": role.id,
+            "role_name": role.name,
+            "locality": loc,
+            "items": items,
+        }
+    )
 
 
 @api_login_required
@@ -1737,6 +1779,11 @@ def work_requests_create(request):
 
     contractor_id = data.get("contractor_id") or data.get("master_id")
     slot = (data.get("slot") or data.get("agreed_slot") or "").strip()
+    from services.locality import settlement_for_client
+
+    settlement = settlement_for_client(
+        request.bot_user, group_id=data.get("group_id")
+    )
 
     if role_uses_client_booking(role):
         if not contractor_id or not slot:
@@ -1754,6 +1801,7 @@ def work_requests_create(request):
                 description=description,
                 contractor_id=int(contractor_id),
                 slot_label=slot,
+                client_locality=settlement,
             )
         except ValueError as exc:
             return json_response(
@@ -1784,7 +1832,7 @@ def work_requests_create(request):
         role=role,
         description=description[:4000],
         status=status,
-        client_locality=(request.bot_user.locality or "").strip()[:255],
+        client_locality=(settlement or request.bot_user.locality or "").strip()[:255],
     )
     if status == WorkRequestStatus.PENDING:
         try:

@@ -1219,11 +1219,6 @@ def services_home(request: HttpRequest) -> HttpResponse:
             photo_uploads: list[tuple[bytes, str]] = []
             for f in request.FILES.getlist("offer_photos")[:2]:
                 photo_uploads.append((f.read(), f.name))
-            token_cache: dict = {}
-
-            def send_media(user, text, images, _cache=token_cache):
-                _notify_user_with_images(user, text, images, _token_cache=_cache)
-
             try:
                 campaign, sent = launch_campaign_to_group(
                     category=category,
@@ -1239,8 +1234,6 @@ def services_home(request: HttpRequest) -> HttpResponse:
                         and bool(request.POST.get("needs_snow_haul"))
                     ),
                     photo_uploads=photo_uploads,
-                    send_fn=_notify_user,
-                    send_media_fn=send_media,
                 )
                 ballot_raw = (request.POST.get("wish_ballot_id") or "").strip()
                 if ballot_raw.isdigit():
@@ -1262,7 +1255,7 @@ def services_home(request: HttpRequest) -> HttpResponse:
                 extra = f", с фото ({photo_n})" if photo_n else ""
                 messages.success(
                     request,
-                    f"Сбор запущен для группы «{group.name}»: разослано {sent} сообщ.{extra}",
+                    f"Сбор запущен для группы «{group.name}»: в очередь MAX {sent} сообщ.{extra}",
                 )
                 tax_warn = AppSettings.load().tax_limit_warning()
                 if tax_warn and is_panel_admin(request.user):
@@ -1336,13 +1329,27 @@ def services_groups(request: HttpRequest) -> HttpResponse:
             if not name:
                 messages.error(request, "Укажите название группы")
             else:
+                from services.locality import canonicalize_locality
+
+                locality = canonicalize_locality(
+                    request.POST.get("locality") or "", use_ai=False
+                )[:255]
                 group = ServiceGroup.objects.create(
                     name=name,
+                    locality=locality,
                     description=request.POST.get("description", "").strip(),
                 )
-                messages.success(
-                    request, f"Группа «{group.name}» создана. Добавьте участников."
-                )
+                if locality:
+                    messages.success(
+                        request,
+                        f"Группа «{group.name}» ({locality}) создана. Добавьте участников.",
+                    )
+                else:
+                    messages.success(
+                        request,
+                        f"Группа «{group.name}» создана. Укажите населённый пункт — "
+                        "по нему жители видят мастеров.",
+                    )
                 return redirect("panel:service_group_edit", pk=group.id)
         if action == "delete_group":
             group = get_object_or_404(ServiceGroup, pk=request.POST.get("group_id"))
@@ -1359,17 +1366,20 @@ def services_groups(request: HttpRequest) -> HttpResponse:
         .annotate(wish_count=Count("wishes"))
         .all()
     )
+    from services.locality import known_settlements, settlement_for_group
     from services.service import budgets_by_group_ids
 
     budget_map = budgets_by_group_ids([g.id for g in groups])
     for g in groups:
         g.budget = budget_map.get(g.id) or Decimal("0")
+        g.settlement = settlement_for_group(g)
     return render(
         request,
         "panel/services_groups.html",
         {
             "groups": groups,
             "can_manage_groups": is_panel_admin(request.user),
+            "known_settlements": known_settlements(),
         },
     )
 
@@ -1593,6 +1603,11 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
         group.name = request.POST.get("name", group.name).strip() or group.name
         group.description = request.POST.get("description", "").strip()
+        from services.locality import canonicalize_locality
+
+        group.locality = canonicalize_locality(
+            request.POST.get("locality") or "", use_ai=False
+        )[:255]
         group.save()
         old_ids = set(group.members.values_list("id", flat=True))
         ids = [int(x) for x in request.POST.getlist("user_ids") if str(x).isdigit()]
@@ -1611,25 +1626,13 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         group_notices = 0
         campaign_notices = 0
         if new_ids:
-            group_notices = notify_members_added_to_group(
-                group, new_ids, send_fn=_notify_user
-            )
-            token_cache: dict = {}
-
-            def send_media(user, text, images, _cache=token_cache):
-                _notify_user_with_images(user, text, images, _token_cache=_cache)
-
-            campaign_notices = invite_new_members_to_group_campaigns(
-                group,
-                new_ids,
-                send_fn=_notify_user,
-                send_media_fn=send_media,
-            )
+            group_notices = notify_members_added_to_group(group, new_ids)
+            campaign_notices = invite_new_members_to_group_campaigns(group, new_ids)
         parts = ["Группа сохранена"]
         if group_notices:
-            parts.append(f"уведомлений о группе: {group_notices}")
+            parts.append(f"в очередь MAX уведомлений о группе: {group_notices}")
         if campaign_notices:
-            parts.append(f"отправленных сборов: {campaign_notices}")
+            parts.append(f"в очередь MAX сборов: {campaign_notices}")
         messages.success(request, ". ".join(parts) + ".")
         log_manager_action(
             request,
@@ -1670,6 +1673,8 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
         .first()
     )
     ballot_vote_rows = vote_summary_table(active_ballot) if active_ballot else []
+    from services.locality import known_settlements, settlement_for_group
+
     current_manager_bot_id = None
     manager_login = ""
     if group.manager_id:
@@ -1718,6 +1723,8 @@ def service_group_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "open_wish_period": open_period,
             "active_wish_ballot": active_ballot,
             "ballot_vote_rows": ballot_vote_rows,
+            "known_settlements": known_settlements(),
+            "settlement": settlement_for_group(group),
         },
     )
 
@@ -1780,20 +1787,11 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             elif (campaign.amount_per_user or 0) <= 0:
                 messages.error(request, "Нет суммы для рассылки")
             else:
-                token_cache: dict = {}
-
-                def send_media(user, text, images, _cache=token_cache):
-                    _notify_user_with_images(user, text, images, _token_cache=_cache)
-
-                sent = resend_to_unpaid(
-                    campaign,
-                    send_fn=_notify_user,
-                    send_media_fn=send_media,
-                )
+                sent = resend_to_unpaid(campaign)
                 if sent:
                     messages.success(
                         request,
-                        f"Напоминание отправлено неоплатившим: {sent} сообщ.",
+                        f"Напоминание поставлено в очередь неоплатившим: {sent} сообщ.",
                     )
                 else:
                     messages.info(
@@ -1807,11 +1805,6 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             if next_stage == WorkStage.WORK_DONE:
                 for f in request.FILES.getlist("result_photos")[:2]:
                     photo_uploads.append((f.read(), f.name))
-            token_cache: dict = {}
-
-            def send_media(user, text, images, _cache=token_cache):
-                _notify_user_with_images(user, text, images, _token_cache=_cache)
-
             try:
                 if next_stage == WorkStage.WORK_CLOSED:
                     from services.contractors import close_campaign_requiring_payouts
@@ -1820,15 +1813,11 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     new_stage = close_campaign_requiring_payouts(
                         campaign,
                         payout_items,
-                        send_fn=_notify_user,
-                        send_media_fn=send_media,
                     )
                 else:
                     new_stage = advance_work_stage(
                         campaign,
                         photo_uploads=photo_uploads,
-                        send_fn=_notify_user,
-                        send_media_fn=send_media,
                     )
                 labels = dict(WorkStage.choices)
                 messages.success(request, f"Этап: {labels.get(new_stage, new_stage)}")
@@ -1837,14 +1826,17 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     if n_photos:
                         messages.info(
                             request,
-                            f"Результат разослан участникам с фото ({n_photos}).",
+                            f"Результат поставлен в очередь MAX участникам с фото ({n_photos}).",
                         )
                     else:
-                        messages.info(request, "Результат разослан участникам без фото.")
+                        messages.info(
+                            request,
+                            "Результат поставлен в очередь MAX участникам без фото.",
+                        )
                 if new_stage == WorkStage.WORK_CLOSED:
                     messages.info(
                         request,
-                        "Работа закрыта. Чеки оплаты исполнителям разосланы участникам сбора.",
+                        "Работа закрыта. Чеки оплаты исполнителям поставлены в очередь MAX.",
                     )
             except ValueError as exc:
                 messages.error(request, str(exc))
@@ -1852,22 +1844,12 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
         if action == "backfill_payouts":
             from services.contractors import record_contractor_payouts
 
-            token_cache: dict = {}
-
-            def send_media(user, text, images, _cache=token_cache):
-                _notify_user_with_images(user, text, images, _token_cache=_cache)
-
             try:
                 items = _parse_payout_items_from_request(request, campaign)
-                created = record_contractor_payouts(
-                    campaign,
-                    items,
-                    send_fn=_notify_user,
-                    send_media_fn=send_media,
-                )
+                created = record_contractor_payouts(campaign, items)
                 messages.success(
                     request,
-                    f"Дозаполнено оплат: {len(created)}. Чеки разосланы участникам и исполнителям.",
+                    f"Дозаполнено оплат: {len(created)}. Чеки поставлены в очередь MAX.",
                 )
             except ValueError as exc:
                 messages.error(request, str(exc))
@@ -1960,8 +1942,8 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
         if action == "notify_residents_contractors":
             from services.contractors import notify_residents_about_assignments
 
-            n = notify_residents_about_assignments(campaign, send_fn=_notify_user)
-            messages.success(request, f"Статус исполнителя разослан: {n} сообщ.")
+            n = notify_residents_about_assignments(campaign)
+            messages.success(request, f"Статус исполнителя в очередь MAX: {n} сообщ.")
             return redirect("panel:service_campaign_detail", pk=pk)
         if action == "save_peers_flag":
             if not is_panel_admin(request.user):
@@ -1983,13 +1965,11 @@ def service_campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
             else:
                 from services.contractors import auto_offer_priority_contractors_for_campaign
 
-                n = auto_offer_priority_contractors_for_campaign(
-                    campaign, send_fn=_notify_user
-                )
+                n = auto_offer_priority_contractors_for_campaign(campaign)
                 if n:
                     messages.success(
                         request,
-                        f"Предложения отправлены приоритетным исполнителям: {n}.",
+                        f"Предложения приоритетным исполнителям в очередь MAX: {n}.",
                     )
                 else:
                     messages.info(
@@ -2215,9 +2195,12 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
     if eq_filter:
         qs = qs.filter(equipment_type=eq_filter)
 
-    # Нас. пункт: сначала анкета исполнителя, иначе профиль жителя.
+    # Нас. пункт: каноническое имя (Куюки / куюки / адрес в Куюках → одна карточка).
+    from services.locality import locality_bucket_label, localities_match, normalize_locality
+
     def _loc_of(c) -> str:
-        return (c.locality or getattr(c.user, "locality", None) or "").strip() or "Без населённого пункта"
+        raw = (c.locality or getattr(c.user, "locality", None) or "").strip()
+        return locality_bucket_label(raw)
 
     locality_counts: dict[str, int] = {}
     for c in qs:
@@ -2229,7 +2212,20 @@ def contractors_list(request: HttpRequest) -> HttpResponse:
     )
 
     if locality_filter:
-        contractors = [c for c in qs if _loc_of(c) == locality_filter]
+        want = normalize_locality(locality_bucket_label(locality_filter))
+        contractors = [
+            c
+            for c in qs
+            if normalize_locality(_loc_of(c)) == want
+            or localities_match(
+                c.locality or getattr(c.user, "locality", None) or "",
+                locality_filter,
+            )
+        ]
+        for c in contractors:
+            raw = (c.locality or getattr(c.user, "locality", None) or "").strip()
+            c.display_locality = locality_bucket_label(raw)
+            c.raw_locality = raw
     else:
         contractors = []
 
@@ -2346,12 +2342,15 @@ def contractor_detail(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("panel:contractor_detail", pk=profile.id)
 
     loc = (profile.locality or getattr(profile.user, "locality", "") or "").strip()
+    from services.locality import locality_bucket_label
+
     return render(
         request,
         "panel/contractor_detail.html",
         {
             "c": profile,
             "locality": loc,
+            "display_locality": locality_bucket_label(loc) if loc else "",
             "status_verified": ContractorStatus.VERIFIED,
             "status_pending": ContractorStatus.PENDING_REVIEW,
         },
@@ -2387,7 +2386,6 @@ def service_receipt_approve(request: HttpRequest, pk: int) -> HttpResponse:
             receipt,
             comment=comment,
             amount=amount,
-            send_fn=_notify_user,
         )
         receipt.refresh_from_db()
         receipt.invite.refresh_from_db()

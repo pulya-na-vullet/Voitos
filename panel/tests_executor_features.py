@@ -6,8 +6,12 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from django.utils import timezone
+
 from database.models import (
     BotUser,
+    ContractorProfile,
+    ContractorStatus,
     ExecutorRole,
     PanelActionLog,
     PanelProfile,
@@ -203,6 +207,14 @@ class WorkRequestBotTests(TestCase):
         role.save()
         self.user = BotUser.objects.create(max_user_id="wr1", real_name="Аня")
         self.pending, _ = PendingAction.objects.get_or_create(user=self.user)
+        master = BotUser.objects.create(max_user_id="wr-m1", real_name="Мастер")
+        ContractorProfile.objects.create(
+            user=master,
+            role=role,
+            equipment_type=role.code,
+            status=ContractorStatus.VERIFIED,
+            verified_at=timezone.now(),
+        )
 
     def test_work_request_flow(self):
         msg = start_work_request(self.user, self.pending, text="нужен электрик")
@@ -229,6 +241,14 @@ class WorkRequestBotTests(TestCase):
             name="Мастер маникюра",
             requires_work_photos=False,
         )
+        nails_master = BotUser.objects.create(max_user_id="wr-m2", real_name="Нейл-мастер")
+        ContractorProfile.objects.create(
+            user=nails_master,
+            role=nails,
+            equipment_type=nails.code,
+            status=ContractorStatus.VERIFIED,
+            verified_at=timezone.now(),
+        )
         msg = start_work_request(self.user, self.pending, role=nails)
         self.assertIn("маникюра", msg.lower())
         msg = handle_work_request_step(
@@ -239,7 +259,7 @@ class WorkRequestBotTests(TestCase):
         req = WorkRequest.objects.get(user=self.user)
         self.assertEqual(req.role.code, "nails")
         self.assertEqual(req.photos.count(), 0)
-        self.assertEqual(req.status, "pending")
+        self.assertIn(req.status, {"pending", "offering"})
 
 
 class ManagerLogTests(TestCase):

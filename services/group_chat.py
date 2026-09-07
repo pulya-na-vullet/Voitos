@@ -159,6 +159,7 @@ def groups_for_user(user: BotUser) -> list[ServiceGroup]:
     return list(
         ServiceGroup.objects.filter(members=user)
         .annotate(_members_total=Count("members"))
+        .prefetch_related("members")
         .order_by("name", "id")
     )
 
@@ -181,6 +182,7 @@ def group_to_dict(group: ServiceGroup, *, user: BotUser | None = None) -> dict:
     if total is None:
         total = group.members.count()
     from services.service import group_accumulated_budget
+    from services.locality import settlement_for_group
 
     free_balance = float(group_accumulated_budget(group) or 0)
     payload = {
@@ -190,6 +192,7 @@ def group_to_dict(group: ServiceGroup, *, user: BotUser | None = None) -> dict:
         "member_count": int(total or 0),
         "unread_count": 0,
         "free_balance": free_balance,
+        "locality": settlement_for_group(group),
     }
     if user is not None:
         payload["unread_count"] = unread_count_for_group(user, group)

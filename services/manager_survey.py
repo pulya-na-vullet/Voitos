@@ -81,6 +81,8 @@ def start_manager_survey(
     if profile and profile.bot_user_id:
         manager_bot_id = profile.bot_user_id
 
+    from services.outbox import KIND_MANAGER_SURVEY, deliver
+
     for user in group.members.all():
         if manager_bot_id and int(user.id) == int(manager_bot_id):
             continue  # менеджер сам себя не оценивает
@@ -95,15 +97,13 @@ def start_manager_survey(
         elif pending.pending_kind == PENDING_KIND:
             pending.pending_payload = {"period_id": period.id, "step": "score"}
             pending.save(update_fields=["pending_payload", "updated_at"])
-        if send_fn:
-            try:
-                send_fn(user, text)
-            except Exception:
-                logger.exception(
-                    "Failed to send manager survey #%s to %s",
-                    period.id,
-                    user.max_user_id,
-                )
+        deliver(
+            user,
+            text,
+            kind=KIND_MANAGER_SURVEY,
+            meta={"period_id": period.id, "group_id": group.id},
+            send_fn=send_fn,
+        )
     return period
 
 

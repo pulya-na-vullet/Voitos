@@ -23,6 +23,7 @@ from database.models import (
     WorkRequestOfferStatus,
     WorkRequestStatus,
 )
+from services.locality import localities_match, normalize_locality
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +32,6 @@ WORK_OFFER_PENDING = "work_request_offer_reply"
 
 _YES = {"да", "yes", "y", "+", "ага", "угу", "принято", "согласен", "ок", "1"}
 _NO = {"нет", "no", "n", "-", "отказ", "отказаться", "2"}
-
-
-def normalize_locality(value: str) -> str:
-    text = (value or "").lower().replace("ё", "е").strip()
-    text = re.sub(
-        r"\b(г|гор|город|пгт|село|деревня|пос|поселок|посёлок|рп)\b\.?",
-        " ",
-        text,
-    )
-    text = re.sub(r"[^\w\d]+", " ", text, flags=re.UNICODE)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def localities_match(a: str, b: str) -> bool:
-    na, nb = normalize_locality(a), normalize_locality(b)
-    if not na or not nb:
-        return False
-    if na == nb:
-        return True
-    if len(na) >= 3 and len(nb) >= 3 and (na in nb or nb in na):
-        return True
-    return False
 
 
 def request_locality(req: WorkRequest) -> str:

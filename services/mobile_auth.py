@@ -627,6 +627,9 @@ def start_app_registration(
         raise ValueError("address_required")
     if len(loc) < 2:
         raise ValueError("locality_required")
+    from services.locality import apply_canonical_locality
+
+    loc = apply_canonical_locality(loc, extra=addr, use_ai=True) or loc
 
     AppRegistrationDraft.objects.filter(
         phone=phone, consumed_at__isnull=True

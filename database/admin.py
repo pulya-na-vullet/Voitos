@@ -78,7 +78,9 @@ class PaymentReceiptAdmin(admin.ModelAdmin):
 
 @admin.register(ServiceGroup)
 class ServiceGroupAdmin(admin.ModelAdmin):
-    list_display = ("name", "manager", "created_at", "updated_at")
+    list_display = ("name", "locality", "manager", "created_at", "updated_at")
+    list_filter = ("locality",)
+    search_fields = ("name", "locality", "description")
     filter_horizontal = ("members",)
     raw_id_fields = ("manager",)
 

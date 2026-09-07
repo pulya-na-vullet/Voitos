@@ -90,6 +90,15 @@ class SessionStore(context: Context) {
 
     fun isLoggedIn(): Boolean = !accessToken.isNullOrBlank()
 
+    var selectedGroupId: Int?
+        get() {
+            val v = prefs.getInt(KEY_GROUP, 0)
+            return if (v > 0) v else null
+        }
+        set(value) = prefs.edit(commit = true) {
+            if (value != null && value > 0) putInt(KEY_GROUP, value) else remove(KEY_GROUP)
+        }
+
     companion object {
         private const val KEY_TOKEN = "access_token"
         private const val KEY_NAME = "display_name"
@@ -101,5 +110,6 @@ class SessionStore(context: Context) {
         private const val KEY_HAS_PIN = "has_pin_setup"
         private const val KEY_NEEDS_ONBOARDING = "needs_onboarding"
         private const val KEY_LAUNCHED = "has_launched_before"
+        private const val KEY_GROUP = "selected_group_id"
     }
 }

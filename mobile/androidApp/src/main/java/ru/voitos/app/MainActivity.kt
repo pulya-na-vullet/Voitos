@@ -176,7 +176,13 @@ class MainActivity : ComponentActivity() {
                 var crashText by remember { mutableStateOf(lastCrash) }
                 var updateApkUrl by remember { mutableStateOf("") }
                 var paywallGateMessage by remember { mutableStateOf("") }
+                var selectedGroupId by remember { mutableStateOf(session.selectedGroupId) }
                 val scope = rememberCoroutineScope()
+
+                fun rememberGroup(id: Int?) {
+                    selectedGroupId = id
+                    session.selectedGroupId = id
+                }
 
                 fun enterMainWithSplash(splash: Boolean) {
                     playSplash = splash
@@ -564,6 +570,8 @@ class MainActivity : ComponentActivity() {
                                         )
                                         MainTab.CallMaster -> NewWorkRequestScreen(
                                             client = client,
+                                            groupId = selectedGroupId,
+                                            onGroupSelected = { rememberGroup(it) },
                                             onCreated = { id, needsPhotos ->
                                                 screen = if (needsPhotos) {
                                                     Screen.WorkRequestPhotos(id)
@@ -710,6 +718,8 @@ class MainActivity : ComponentActivity() {
 
                             Screen.GroupChat -> GroupChatScreen(
                                 client = client,
+                                initialGroupId = selectedGroupId,
+                                onGroupSelected = { rememberGroup(it) },
                                 onBack = {
                                     scope.launch {
                                         chatUnread = runCatching {
