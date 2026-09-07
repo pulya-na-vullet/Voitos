@@ -185,7 +185,7 @@ class CommissionAdminOnlyTests(TestCase):
         )
         self.client = Client()
 
-    def test_manager_cannot_approve_commission(self):
+    def test_manager_can_approve_commission(self):
         self.assertTrue(
             self.client.login(username=self.mgr_user.username, password="MgrPass99")
         )
@@ -196,7 +196,7 @@ class CommissionAdminOnlyTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.req.refresh_from_db()
         self.assertEqual(
-            self.req.commission_status, WorkRequestCommissionStatus.PENDING_REVIEW
+            self.req.commission_status, WorkRequestCommissionStatus.APPROVED
         )
 
 

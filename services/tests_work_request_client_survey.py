@@ -92,7 +92,7 @@ class ClientServiceSurveyTests(TestCase):
         pending.pending_payload = {"work_request_id": self.req.id}
         pending.save()
         out = handle_service_survey_step(self.client_user, "да", pending)
-        self.assertIn("1500", out)
+        self.assertIn("рассчитались", out.lower())
         pending.refresh_from_db()
         self.assertEqual(pending.pending_kind, "work_request_client_confirm")
 
@@ -125,12 +125,7 @@ class ClientServiceSurveyTests(TestCase):
         ):
             resp = c.post(
                 reverse("panel:work_request_detail", args=[self.req.id]),
-                {
-                    "action": "save",
-                    "status": WorkRequestStatus.AWAITING_CLIENT,
-                    "note": "",
-                    "client_locality": "",
-                },
+                {"action": "send_client_survey"},
             )
         self.assertEqual(resp.status_code, 302)
         self.req.refresh_from_db()

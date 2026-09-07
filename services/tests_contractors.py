@@ -104,10 +104,17 @@ class ContractorFlowTests(TestCase):
         start_contractor_registration(user, pending, role=truck_role)
         handle_contractor_registration_step(user, "Камаз 55111", pending)
         handle_contractor_registration_step(user, "А123ВС116", pending)
+        handle_contractor_registration_step(user, "5 лет", pending)
         handle_contractor_registration_step(user, "89005554433", pending)
         handle_contractor_registration_step(user, "Казань", pending)
         handle_contractor_registration_step(user, "Сбер", pending)
         reply = handle_contractor_registration_step(user, "89006667788", pending)
+        self.assertIn("фото документа", reply.lower())
+        from bot.contractor_registration import handle_contractor_qual_doc_photo
+
+        reply = handle_contractor_qual_doc_photo(
+            user, pending, image_bytes=b"fake-doc", filename="prava.jpg"
+        )
         self.assertIn("на проверку", reply.lower())
         profile = ContractorProfile.objects.get(user=user)
         self.assertEqual(profile.equipment_type, EquipmentType.TRUCK)

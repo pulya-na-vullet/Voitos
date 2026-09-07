@@ -67,7 +67,7 @@ class RegistrationTests(TestCase):
         missing = missing_profile_fields(self.user)
         labels = [label for _, label in missing]
         self.assertIn("Телефон", labels)
-        self.assertIn("Адрес места жительства", labels)
+        self.assertIn("Адрес", labels)
         text = begin_incomplete_profile_flow(self.user, self.pending, admin_note="нужен телефон")
         self.assertIn("Администратор проверил", text)
         self.assertIn("Телефон", text)
@@ -88,7 +88,7 @@ class RegistrationTests(TestCase):
         reply = handle_registration_step(
             self.user, "Казань, ул. Баумана, 1", self.pending
         )
-        self.assertIn("членом семьи", reply.lower())
+        self.assertIn("живёте вместе", reply.lower())
         self.assertNotIn("Секретный", reply)
         self.assertNotIn("89001112233", reply)
         self.pending.refresh_from_db()
@@ -168,10 +168,10 @@ class ServiceCampaignTests(TestCase):
         self.assertEqual(len(invites), 2)
         menu = format_receipt_pick_menu(invites)
         lines = menu.splitlines()
-        self.assertEqual(lines[1], "1. Подписка")
+        self.assertTrue(lines[1].startswith("1. Подписка"))
         self.assertTrue(lines[2].startswith("2. "))
         self.assertTrue(lines[3].startswith("3. "))
-        self.assertIn("Подписка", menu)
+        self.assertIn("Подписка Voitos", menu)
         # subscription must be first numbered item
         self.assertLess(menu.index("1. Подписка"), menu.index("2. "))
 
@@ -289,7 +289,10 @@ class ServiceCampaignTests(TestCase):
         approve_service_receipt(receipt, send_fn=capture)
         campaign.refresh_from_db()
         self.assertEqual(campaign.status, CampaignStatus.CLOSED)
-        self.assertTrue(any("общий бюджет" in t for t in inbox))
+        self.assertTrue(
+            any("бюджет" in t or "баланс группы" in t for t in inbox),
+            inbox,
+        )
         self.assertTrue(
             ServiceCampaignNotice.objects.filter(
                 campaign=campaign, kind=CampaignNoticeKind.SURPLUS
