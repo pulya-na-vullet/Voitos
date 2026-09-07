@@ -1,5 +1,6 @@
 # KMP / Android / iOS build artifacts
 .gradle/
+.kotlin/
 build/
 **/build/
 .idea/
