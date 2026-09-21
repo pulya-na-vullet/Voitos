@@ -1,0 +1,32 @@
+{% extends "panel/base.html" %}
+{% block title %}Лог — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Лог работы{% if bot_user %}: {{ bot_user }}{% endif %}</h1>
+  <form method="get">
+    <select name="kind" onchange="this.form.submit()" style="padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg-soft); color:var(--text);">
+      <option value="">Все типы</option>
+      {% for value, label in kinds %}
+        <option value="{{ value }}" {% if kind == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+<div class="card">
+  <table>
+    <thead><tr><th>Время</th><th>Тип</th><th>Событие</th><th>Детали</th></tr></thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.created_at|date:"d.m.Y H:i:s" }}</td>
+        <td>{{ item.get_kind_display }}</td>
+        <td>{{ item.title }}</td>
+        <td class="muted">{{ item.detail|truncatechars:160 }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">Лог пуст</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,139 @@
+{% extends "panel/base.html" %}
+{% block title %}Сервисные мероприятия — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Сервисные мероприятия</h1>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn secondary small" href="{% url 'panel:services_groups' %}">Группы жителей</a>
+    <a class="btn secondary small" href="{% url 'panel:services_archive' %}">Архив мероприятий</a>
+    <a class="btn secondary small" href="{% url 'panel:services_wishes' %}">Пожелания</a>
+    <a class="btn secondary small" href="{% url 'panel:contractors' %}">Исполнители</a>
+    <a class="btn secondary small" href="{% url 'panel:services_ranking' %}">Рейтинг</a>
+  </div>
+</div>
+{% if tax_warning %}
+<div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ tax_warning }}</div>
+{% endif %}
+<div class="card" style="margin-bottom:16px;">
+  <p style="margin:0;">Реквизиты сборов:
+    <strong>{{ cfg.service_payee_name }}</strong> /
+    <span class="mono">{{ cfg.service_payee_phone }}</span> /
+    {{ cfg.service_payee_status }}
+  </p>
+  <p class="muted" style="margin:6px 0 0;">
+    Лимит самозанятого за {{ tax_stats.year|default:"" }}:
+    <strong>{{ cfg.service_tax_collected }}</strong> / {{ cfg.service_tax_limit }} ₽
+    {% if tax_stats %}
+      <span class="mono">
+        (подписки {{ tax_stats.subscriptions }} ₽ · сборы {{ tax_stats.services }} ₽)
+      </span>
+    {% endif %}
+    {% if pending_service %} · чеков на проверке: {{ pending_service }}{% endif %}
+  </p>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Запустить сбор на группу</h3>
+  <p class="muted">
+    Сообщение уйдёт всем участникам группы автоматически.
+    Для «Детская площадка» и «Ремонт дороги» у каждого будет обязательный вопрос: поможет ли он.
+    <a href="{% url 'panel:services_groups' %}">Управление группами</a>
+  </p>
+  <form method="post" enctype="multipart/form-data" id="launch-campaign-form">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="launch">
+    <div class="grid two">
+      <div class="form-row">
+        <label>Категория</label>
+        <select name="category" id="launch-category" required>
+          {% for value, label in category_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Группа</label>
+        <select name="group_id" id="launch-group" required>
+          <option value="" data-members="0">— выберите —</option>
+          {% for g in groups %}
+          <option value="{{ g.id }}" data-members="{{ g.member_count }}">{{ g.name }} ({{ g.member_count }} чел.)</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Название сбора</label>
+      <input type="text" name="title" placeholder="Чистка снега">
+      <div class="hint">Дата «от ДД.ММ.ГГГГ» добавится сама</div>
+    </div>
+    <div class="form-row">
+      <label>Комментарий / улица</label>
+      <input type="text" name="description" placeholder="Уборка на вашей улице">
+    </div>
+    <div class="form-row">
+      <label>Дата и время мероприятия</label>
+      <input type="datetime-local" name="event_at" required>
+      <div class="hint">Неоплатившим уйдёт напоминание за 3 дня, за 1 день и за 2 часа. При достижении цели — «Сбор закрыт.»</div>
+    </div>
+    <div class="form-row" id="snow-haul-row" hidden>
+      <label class="checkbox-inline">
+        <input type="checkbox" name="needs_snow_haul" id="needs-snow-haul" value="1">
+        <span>Нужен вывоз снега (подобрать водителей камаза / грузовых)</span>
+      </label>
+      <div class="hint">Только для «Чистка снега»: на карточке сбора появятся исполнители с грузовой техникой.</div>
+    </div>
+    <div class="form-row">
+      <label>Фото того, что нужно сделать (необязательно, до 2 шт.)</label>
+      <input type="file" name="offer_photos" accept="image/*" multiple>
+      <div class="hint">Если приложите фото — они уйдут всем участникам вместе с объявлением сбора.</div>
+    </div>
+    <div class="grid two">
+      <div class="form-row">
+        <label>Общая сумма, ₽</label>
+        <input type="number" name="total_amount" id="launch-total" min="1" step="1" required>
+      </div>
+      <div class="form-row">
+        <label>С каждого участника, ₽</label>
+        <input type="number" name="amount_per_user" id="launch-per-user" min="1" step="1" required readonly>
+        <div class="hint">Считается автоматически: общая сумма ÷ число людей в группе</div>
+      </div>
+    </div>
+    <button class="btn" type="submit">Запустить и разослать</button>
+  </form>
+</div>
+<script>
+(function () {
+  var category = document.getElementById("launch-category");
+  var group = document.getElementById("launch-group");
+  var total = document.getElementById("launch-total");
+  var perUser = document.getElementById("launch-per-user");
+  var snowRow = document.getElementById("snow-haul-row");
+  var snowCb = document.getElementById("needs-snow-haul");
+
+  function syncSnowHaul() {
+    var isSnow = category && category.value === "snow";
+    if (!snowRow) return;
+    snowRow.hidden = !isSnow;
+    if (!isSnow && snowCb) snowCb.checked = false;
+  }
+
+  function syncPerUser() {
+    if (!total || !perUser || !group) return;
+    var opt = group.options[group.selectedIndex];
+    var members = parseInt(opt && opt.getAttribute("data-members"), 10) || 0;
+    var sum = parseFloat(total.value);
+    if (!members || !sum || sum <= 0) return;
+    perUser.value = String(Math.ceil(sum / members));
+  }
+
+  if (category) category.addEventListener("change", syncSnowHaul);
+  if (group) group.addEventListener("change", syncPerUser);
+  if (total) {
+    total.addEventListener("input", syncPerUser);
+    total.addEventListener("change", syncPerUser);
+  }
+  syncSnowHaul();
+  syncPerUser();
+})();
+</script>
+{% endblock %}

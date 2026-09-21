@@ -1,0 +1,105 @@
+{% extends "panel/base.html" %}
+{% block title %}Задачи на сегодня — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Задачи на сегодня</h1>
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+    <span id="tasks-total-badge" class="badge {% if total %}bad{% else %}ok{% endif %}">Открыто: {{ total }}</span>
+    <span id="tasks-live-status" class="muted" style="font-size:0.85rem;">● live</span>
+    <form method="post" action="{% url 'panel:admin_address_scan' %}">
+      {% csrf_token %}
+      <input type="hidden" name="use_ai" value="1">
+      <button class="btn" type="submit">Прогнать адреса через ИИ</button>
+    </form>
+    <form method="post" action="{% url 'panel:admin_address_scan' %}">
+      {% csrf_token %}
+      <input type="hidden" name="use_ai" value="0">
+      <button class="btn secondary small" type="submit">Быстрый скан без ИИ</button>
+    </form>
+  </div>
+</div>
+
+<p class="muted" style="margin:0 0 16px;">
+  Единая точка входа: чеки подписки, сервис-чеки, анкеты, семейные заявки и совпадения адресов.
+  Список обновляется автоматически — вручную обновлять страницу не нужно.
+</p>
+
+<div id="tasks-live-root" data-fp="{{ fingerprint }}" data-feed="{{ feed_url }}">
+  {% include "panel/partials/admin_tasks_list.html" %}
+</div>
+
+<script>
+(() => {
+  const root = document.getElementById('tasks-live-root');
+  const badge = document.getElementById('tasks-total-badge');
+  const statusEl = document.getElementById('tasks-live-status');
+  if (!root) return;
+
+  let fp = root.dataset.fp || '';
+  const feedUrl = root.dataset.feed || '/panel/tasks/today/feed/';
+  let timer = null;
+  let inFlight = false;
+
+  const setStatus = (text, ok = true) => {
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.style.color = ok ? 'var(--ok)' : 'var(--warn)';
+  };
+
+  const poll = async () => {
+    if (inFlight) return;
+    if (document.hidden) return;
+    inFlight = true;
+    try {
+      const url = feedUrl + (feedUrl.includes('?') ? '&' : '?') + 'fp=' + encodeURIComponent(fp);
+      const resp = await fetch(url, {
+        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      if (data.fingerprint) fp = data.fingerprint;
+      if (badge && typeof data.total === 'number') {
+        badge.textContent = 'Открыто: ' + data.total;
+        badge.classList.toggle('bad', data.total > 0);
+        badge.classList.toggle('ok', data.total <= 0);
+      }
+      if (data.changed && typeof data.html === 'string') {
+        root.innerHTML = data.html;
+        root.dataset.fp = fp;
+        setStatus('● обновлено только что', true);
+        // brief highlight
+        root.style.outline = '1px solid rgba(45,212,191,0.45)';
+        setTimeout(() => { root.style.outline = ''; }, 700);
+      } else {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        setStatus('● live · ' + hh + ':' + mm + ':' + ss, true);
+      }
+    } catch (err) {
+      setStatus('● нет связи, повтор…', false);
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  const schedule = () => {
+    if (timer) clearInterval(timer);
+    const ms = document.hidden ? 10000 : 1500;
+    timer = setInterval(poll, ms);
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    schedule();
+    if (!document.hidden) poll();
+  });
+
+  schedule();
+  // first sync shortly after open
+  setTimeout(poll, 400);
+})();
+</script>
+{% endblock %}

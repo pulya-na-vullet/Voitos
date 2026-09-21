@@ -1,0 +1,97 @@
+{% extends "panel/base.html" %}
+{% block title %}Прогноз заработка — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Прогноз заработка</h1>
+  <a class="btn secondary small" href="{% url 'panel:clients_map' %}">← Карта клиентов</a>
+</div>
+<p class="muted" style="margin-top:-6px; margin-bottom:16px;">
+  Следующий месяц: <strong style="color:var(--text);">{{ forecast.month_label }}</strong>.
+  Вершина на карте = платящий клиент. Цена месяца: {{ forecast.price }} ₽.
+</p>
+
+<div class="grid stats">
+  <div class="card">
+    <div class="stat-label">Платящих сейчас</div>
+    <div class="stat-value">{{ forecast.payer_count }}</div>
+    <div class="muted">вершин на карте клиентов</div>
+  </div>
+  <div class="card">
+    <div class="stat-label">Если все продлят на месяц</div>
+    <div class="stat-value">{{ forecast.full_renewal_forecast }} ₽</div>
+    <div class="muted">{{ forecast.payer_count }} × {{ forecast.price }} ₽</div>
+  </div>
+  <div class="card">
+    <div class="stat-label">Истекает в {{ forecast.month_label }}</div>
+    <div class="stat-value">{{ forecast.renew_count }}</div>
+    <div class="muted">ожидаемые продления</div>
+  </div>
+  <div class="card">
+    <div class="stat-label">Прогноз сборов в {{ forecast.month_label }}</div>
+    <div class="stat-value" style="color: var(--ok);">{{ forecast.next_month_renewal_forecast }} ₽</div>
+    <div class="muted">{{ forecast.renew_count }} × {{ forecast.price }} ₽</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h2 style="margin-top:0; font-size:1.1rem;">По группам</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Группа</th>
+        <th>Платящих</th>
+        <th>Полное продление</th>
+        <th>Истекает в {{ forecast.month_label }}</th>
+        <th>Прогноз месяца</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in forecast.groups %}
+      <tr>
+        <td>{{ g.name }}</td>
+        <td class="mono">{{ g.payers }}</td>
+        <td class="mono">{{ g.full_forecast }} ₽</td>
+        <td class="mono">{{ g.renew_next_month }}</td>
+        <td class="mono">{{ g.renew_forecast }} ₽</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="muted">Нет платящих клиентов</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h2 style="margin-top:0; font-size:1.1rem;">Платящие клиенты</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Клиент</th>
+        <th>Группы</th>
+        <th>Подписка до</th>
+        <th>В след. месяце</th>
+        <th>Сумма</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in forecast.payers %}
+      <tr>
+        <td><a href="{% url 'panel:user_dashboard' row.user.id %}">{{ row.label }}</a></td>
+        <td>{{ row.groups }}</td>
+        <td class="mono">{{ row.until_s }}</td>
+        <td>
+          {% if row.renews_next_month %}
+            <span class="badge ok">продление</span>
+          {% else %}
+            <span class="muted">позже</span>
+          {% endif %}
+        </td>
+        <td class="mono">{{ row.amount }} ₽</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="muted">Пока нет активных плательщиков</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

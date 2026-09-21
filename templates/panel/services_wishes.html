@@ -1,0 +1,51 @@
+{% extends "panel/base.html" %}
+{% block title %}Пожелания жителей — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Пожелания жителей по темам</h1>
+  <a class="btn secondary small" href="{% url 'panel:services' %}">← Сервисы</a>
+</div>
+<p class="muted" style="margin-top:-6px; margin-bottom:16px;">
+  Соседи пишут в бот, что хотят улучшить у дома — сообщения собираются и группируются по темам
+  (дороги, площадка, собаки…). Так видно, за что «голосуют» люди.
+</p>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Все группы</h3>
+  {% if wish_topics_all %}
+  <table>
+    <thead><tr><th>Тема</th><th>Голосов</th></tr></thead>
+    <tbody>
+    {% for s in wish_topics_all %}
+      <tr>
+        <td>{{ s.label }}</td>
+        <td class="mono"><strong>{{ s.count }}</strong></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0;">Пока пусто — жители ещё не писали пожелания в чат.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">По группам</h3>
+  {% if wish_overview %}
+  <table>
+    <thead><tr><th>Группа</th><th>Всего</th><th>Лидер темы</th></tr></thead>
+    <tbody>
+    {% for row in wish_overview %}
+      <tr>
+        <td><a href="{% url 'panel:service_group_edit' row.group.id %}">{{ row.group.name }}</a></td>
+        <td class="mono">{{ row.total }}</td>
+        <td>{% if row.top %}{{ row.top.label }} — {{ row.top.count }}{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0;">Групп с пожеланиями пока нет.</p>
+  {% endif %}
+</div>
+{% endblock %}
