@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import logging
+import time
+
+import django
+
+django.setup()
+
+from ai.factory import get_runtime_settings
+from bot.client import MaxClient
+from services.service import process_unpaid_reminders
+
+logger = logging.getLogger(__name__)
+
+
+def _notify_via_max(user, text: str, client: MaxClient) -> None:
+    if user.chat_id:
+        try:
+            client.send_message(text, chat_id=user.chat_id)
+            return
+        except Exception:
+            logger.exception("chat_id send failed for %s, fallback user_id", user.max_user_id)
+    client.send_message(text, user_id=user.max_user_id)
+
+
+def run_service_campaign_scheduler(stop_event=None, interval_seconds: int = 60) -> None:
+    """Remind unpaid invitees before campaign event_at (3d / 1d / 2h)."""
+    logger.info("Service campaign scheduler started")
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            logger.info("Service campaign scheduler stopping")
+            return
+        try:
+            cfg = get_runtime_settings()
+            token = (cfg.max_bot_token or "").strip()
+            if token:
+                client = MaxClient(token)
+
+                def send_fn(user, text, _client=client):
+                    _notify_via_max(user, text, _client)
+
+                n = process_unpaid_reminders(send_fn=send_fn)
+                if n:
+                    logger.info("Sent %s unpaid campaign reminder(s)", n)
+        except Exception:
+            logger.exception("Service campaign scheduler loop error")
+        time.sleep(interval_seconds)
+
+
+if __name__ == "__main__":
+    run_service_campaign_scheduler()

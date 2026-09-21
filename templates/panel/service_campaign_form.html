@@ -1,0 +1,34 @@
+{% extends "panel/base.html" %}
+{% block title %}Новое: {{ category_label }} — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Новое мероприятие: {{ category_label }}</h1>
+  <a class="btn secondary small" href="{% url 'panel:services_category' category %}">← Назад</a>
+</div>
+<div class="card" style="max-width:720px;">
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-row">
+      <label>Название</label>
+      <input type="text" name="title" placeholder="{{ category_label }}" value="{{ category_label }}">
+      <div class="hint">Дата «от ДД.ММ.ГГГГ» добавится автоматически, если её нет</div>
+    </div>
+    <div class="form-row">
+      <label>Описание / улица / детали</label>
+      <textarea name="description" rows="3" placeholder="Чистка снега на ул. Баумана"></textarea>
+    </div>
+    <div class="form-row">
+      <label>Населённый пункт</label>
+      <input type="text" name="locality" list="localities" required placeholder="Казань">
+      <datalist id="localities">
+        {% for loc in localities %}<option value="{{ loc }}">{% endfor %}
+      </datalist>
+    </div>
+    <div class="form-row">
+      <label>Общая сумма сбора, ₽</label>
+      <input type="number" name="total_amount" min="1" step="1" required>
+    </div>
+    <button class="btn" type="submit">Создать</button>
+  </form>
+</div>
+{% endblock %}

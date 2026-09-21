@@ -1,0 +1,157 @@
+{% extends "panel/base.html" %}
+{% block title %}Сервисные мероприятия — Voitos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <h1>Сервисные мероприятия</h1>
+  <a class="btn secondary small" href="{% url 'panel:services_ranking' %}">Рейтинг</a>
+</div>
+{% if tax_warning %}
+<div class="flash" style="border-color: rgba(230,192,123,0.45); background: rgba(230,192,123,0.12);">{{ tax_warning }}</div>
+{% endif %}
+<div class="card" style="margin-bottom:16px;">
+  <p style="margin:0;">Реквизиты сборов:
+    <strong>{{ cfg.service_payee_name }}</strong> /
+    <span class="mono">{{ cfg.service_payee_phone }}</span> /
+    {{ cfg.service_payee_status }}
+  </p>
+  <p class="muted" style="margin:6px 0 0;">Лимит: {{ cfg.service_tax_collected }} / {{ cfg.service_tax_limit }} ₽
+    {% if pending_service %} · чеков на проверке: {{ pending_service }}{% endif %}
+  </p>
+</div>
+
+<div class="grid two" style="margin-bottom:16px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Группы жителей</h3>
+    <p class="muted">Объедините людей вручную — потом запустите сбор сразу на всю группу.</p>
+    <table>
+      <thead><tr><th>Группа</th><th>Участников</th><th></th></tr></thead>
+      <tbody>
+      {% for g in groups %}
+        <tr>
+          <td>
+            <strong>{{ g.name }}</strong>
+            {% if g.description %}<div class="muted">{{ g.description|truncatechars:60 }}</div>{% endif %}
+          </td>
+          <td class="mono">{{ g.member_count }}</td>
+          <td><a class="btn small" href="{% url 'panel:service_group_edit' g.id %}">Состав</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="3" class="muted">Групп пока нет — создайте первую справа</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Новая группа</h3>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="create_group">
+      <div class="form-row">
+        <label>Название</label>
+        <input type="text" name="name" required placeholder="ул. Баумана, дом 1–5">
+      </div>
+      <div class="form-row">
+        <label>Описание</label>
+        <input type="text" name="description" placeholder="необязательно">
+      </div>
+      <button class="btn" type="submit">Создать группу</button>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Запустить сбор на группу</h3>
+  <p class="muted">Сообщение уйдёт всем участникам группы автоматически.</p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="launch">
+    <div class="grid two">
+      <div class="form-row">
+        <label>Категория</label>
+        <select name="category" required>
+          {% for value, label in category_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Группа</label>
+        <select name="group_id" required>
+          <option value="">— выберите —</option>
+          {% for g in groups %}
+          <option value="{{ g.id }}">{{ g.name }} ({{ g.member_count }} чел.)</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Название сбора</label>
+      <input type="text" name="title" placeholder="Чистка снега">
+      <div class="hint">Дата «от ДД.ММ.ГГГГ» добавится сама</div>
+    </div>
+    <div class="form-row">
+      <label>Комментарий / улица</label>
+      <input type="text" name="description" placeholder="Уборка на вашей улице">
+    </div>
+    <div class="form-row">
+      <label>Дата и время мероприятия</label>
+      <input type="datetime-local" name="event_at" required>
+      <div class="hint">Неоплатившим уйдёт напоминание за 3 дня, за 1 день и за 2 часа. При достижении цели — «Сбор закрыт.»</div>
+    </div>
+    <div class="form-row">
+      <label>Фото того, что нужно сделать (необязательно, до 2 шт.)</label>
+      <input type="file" name="offer_photos" accept="image/*" multiple>
+      <div class="hint">Если приложите фото — они уйдут всем участникам вместе с объявлением сбора.</div>
+    </div>
+    <div class="grid two">
+      <div class="form-row">
+        <label>Общая сумма, ₽</label>
+        <input type="number" name="total_amount" min="1" step="1" required>
+      </div>
+      <div class="form-row">
+        <label>С каждого участника, ₽</label>
+        <input type="number" name="amount_per_user" min="1" step="1" required>
+      </div>
+    </div>
+    <button class="btn" type="submit">Запустить и разослать</button>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <h3 style="margin-top:0;">Последние сборы</h3>
+  <table>
+    <thead><tr><th>Мероприятие</th><th>Группа</th><th>Собрано</th><th>Сбор</th><th>Этап</th><th></th></tr></thead>
+    <tbody>
+    {% for item in recent_campaigns %}
+      <tr>
+        <td>{{ item.get_category_display }} — {{ item.title }}</td>
+        <td>{% if item.group %}{{ item.group.name }}{% else %}{{ item.locality|default:"—" }}{% endif %}</td>
+        <td style="min-width:160px;">
+          <div class="mono" style="margin-bottom:4px;">{{ item.collected_amount }} / {{ item.total_amount }} ₽ · {{ item.progress_percent }}%</div>
+          <div style="height:8px; background:var(--bg-soft); border-radius:999px; overflow:hidden;">
+            <div style="height:100%; width:{{ item.progress_percent }}%; background:var(--accent-2);"></div>
+          </div>
+        </td>
+        <td><span class="badge {% if item.status == 'active' %}ok{% elif item.status == 'closed' %}bad{% endif %}">{{ item.get_status_display }}</span></td>
+        <td><span class="badge">{{ item.get_work_stage_display }}</span></td>
+        <td><a class="btn small" href="{% url 'panel:service_campaign_detail' item.id %}">Открыть</a></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="muted">Сборов ещё не было</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="grid stats" style="grid-template-columns: repeat(2, minmax(0,1fr));">
+  {% for c in categories %}
+  <div class="card">
+    <div class="stat-label">{{ c.label }}</div>
+    <div class="stat-value">{{ c.count }}</div>
+    <p class="muted">Активных: {{ c.active }}{% if c.pending_receipts %} · чеков: {{ c.pending_receipts }}{% endif %}</p>
+    <a class="btn secondary small" href="{% url 'panel:services_category' c.value %}">Архив категории</a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
