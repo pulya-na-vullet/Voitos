@@ -122,6 +122,55 @@ data class Me(
     @SerialName("profile_status") val profileStatus: String = "",
     @SerialName("onboarding_completed") val onboardingCompleted: Boolean = false,
     @SerialName("avatar_url") val avatarUrl: String = "",
+    /** Счётчик для кнопки «Голосования»: active — всего, unvoted — без голоса. */
+    val ballots: BallotsCounter = BallotsCounter(),
+)
+
+/** Счётчик голосований в личном кабинете. */
+@Serializable
+data class BallotsCounter(
+    val active: Int = 0,
+    val unvoted: Int = 0,
+    @SerialName("has_active") val hasActive: Boolean = false,
+)
+
+@Serializable
+data class BallotOption(
+    val topic: String = "",
+    val label: String = "",
+    @SerialName("wish_count") val wishCount: Int = 0,
+    val samples: List<String> = emptyList(),
+)
+
+@Serializable
+data class BallotMyVote(
+    val topic: String = "",
+    @SerialName("will_do") val willDo: Boolean = false,
+    @SerialName("updated_at") val updatedAt: String = "",
+)
+
+/** Голосование по пожеланиям двора. */
+@Serializable
+data class Ballot(
+    val id: Int = 0,
+    @SerialName("group_id") val groupId: Int = 0,
+    @SerialName("group_name") val groupName: String = "",
+    val status: String = "",
+    val options: List<BallotOption> = emptyList(),
+    @SerialName("voting_ends_at") val votingEndsAt: String = "",
+    @SerialName("winner_label") val winnerLabel: String = "",
+    @SerialName("my_vote") val myVote: BallotMyVote? = null,
+)
+
+@Serializable
+data class BallotList(
+    val items: List<Ballot> = emptyList(),
+)
+
+@Serializable
+data class BallotVoteResult(
+    val ok: Boolean = false,
+    val vote: BallotMyVote? = null,
 )
 
 @Serializable
