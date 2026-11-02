@@ -147,7 +147,9 @@ class ContractorEarningsTests(TestCase):
         )
 
     def test_contractors_page_shows_total_earned(self):
-        resp = self.client.get("/panel/contractors/")
+        resp = self.client.get(
+            "/panel/contractors/", {"locality": "Без населённого пункта"}
+        )
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         self.assertIn("Заработано", body)
@@ -179,7 +181,9 @@ class ContractorEarningsTests(TestCase):
             status=WorkRequestStatus.DONE,
             client_confirmed_at=timezone.now(),
         )
-        resp = self.client.get("/panel/contractors/")
+        resp = self.client.get(
+            "/panel/contractors/", {"locality": "Без населённого пункта"}
+        )
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         # 1500 payout + 1800 work = 3300

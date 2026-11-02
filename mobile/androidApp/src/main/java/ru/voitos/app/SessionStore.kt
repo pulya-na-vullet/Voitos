@@ -90,8 +90,33 @@ class SessionStore(context: Context) {
 
     fun isLoggedIn(): Boolean = !accessToken.isNullOrBlank()
 
+    /**
+     * Стабильный id установки: по нему сервер отличает «мой телефон» от нового.
+     * Генерируется один раз и живёт до переустановки приложения.
+     * PIN на новом устройстве не выдаёт токен — требуется подтверждение через MAX.
+     */
+    var deviceId: String
+        get() {
+            val existing = prefs.getString(KEY_DEVICE_ID, null)
+            if (!existing.isNullOrBlank()) return existing
+            val created = java.util.UUID.randomUUID().toString()
+            prefs.edit(commit = true) { putString(KEY_DEVICE_ID, created) }
+            return created
+        }
+        set(value) = prefs.edit(commit = true) { putString(KEY_DEVICE_ID, value) }
+
+    var selectedGroupId: Int?
+        get() {
+            val v = prefs.getInt(KEY_GROUP, 0)
+            return if (v > 0) v else null
+        }
+        set(value) = prefs.edit(commit = true) {
+            if (value != null && value > 0) putInt(KEY_GROUP, value) else remove(KEY_GROUP)
+        }
+
     companion object {
         private const val KEY_TOKEN = "access_token"
+        private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_NAME = "display_name"
         private const val KEY_BASE = "base_url"
         private const val KEY_CUSTOM_BASE = "has_custom_base_url"
@@ -101,5 +126,6 @@ class SessionStore(context: Context) {
         private const val KEY_HAS_PIN = "has_pin_setup"
         private const val KEY_NEEDS_ONBOARDING = "needs_onboarding"
         private const val KEY_LAUNCHED = "has_launched_before"
+        private const val KEY_GROUP = "selected_group_id"
     }
 }

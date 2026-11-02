@@ -361,7 +361,10 @@ def resend_to_unpaid(campaign: ServiceCampaign, send_fn=None, send_media_fn=None
     """
     Admin resend: remind only users who have not paid yet.
     Does not message invitees with status PAID.
+    Messages go through the MAX outbox (not inline in the HTTP request).
     """
+    from services.outbox import KIND_CAMPAIGN_RESEND, deliver
+
     if campaign.status == CampaignStatus.CLOSED:
         return 0
     amount = Decimal(campaign.amount_per_user or 0)
@@ -372,7 +375,6 @@ def resend_to_unpaid(campaign: ServiceCampaign, send_fn=None, send_media_fn=None
         .select_related("user")
     )
     text = resend_offer_message(campaign, amount)
-    image_payloads = campaign_offer_image_payloads(campaign)
     sent = 0
     for inv in unpaid:
         ActivityLog.objects.create(
@@ -382,21 +384,15 @@ def resend_to_unpaid(campaign: ServiceCampaign, send_fn=None, send_media_fn=None
             detail=campaign.title,
             meta={"campaign_id": campaign.id, "invite_id": inv.id},
         )
-        try:
-            if image_payloads and send_media_fn:
-                send_media_fn(inv.user, text, image_payloads)
-                sent += 1
-            elif send_fn:
-                send_fn(inv.user, text)
-                sent += 1
-            else:
-                sent += 1
-        except Exception:
-            logger.exception(
-                "Failed resend to user %s about campaign %s",
-                inv.user.max_user_id,
-                campaign.id,
-            )
+        if deliver(
+            inv.user,
+            text,
+            kind=KIND_CAMPAIGN_RESEND,
+            meta={"campaign_id": campaign.id, "offer_photos_campaign_id": campaign.id},
+            send_fn=send_fn,
+            send_media_fn=send_media_fn,
+        ):
+            sent += 1
     return sent
 
 
@@ -417,38 +413,37 @@ def _record_notice(campaign: ServiceCampaign, user: BotUser, kind: str) -> None:
 def broadcast_campaign_message(
     campaign: ServiceCampaign,
     text: str,
-    send_fn,
+    send_fn=None,
     *,
     kind: str | None = None,
     users=None,
 ) -> int:
-    """Send text to campaign invitees (or given users). Optionally de-dupe by kind."""
-    if not send_fn:
-        return 0
+    """Queue text to campaign invitees (or given users). Optionally de-dupe by kind."""
+    from services.outbox import KIND_CAMPAIGN_NOTICE, deliver
+
     if users is None:
         users = [inv.user for inv in campaign.invites.select_related("user").all()]
     sent = 0
     for user in users:
         if kind and _notice_already_sent(campaign, user, kind):
             continue
-        try:
-            send_fn(user, text)
-            if kind:
-                _record_notice(campaign, user, kind)
+        if kind:
+            _record_notice(campaign, user, kind)
+        ActivityLog.objects.create(
+            user=user,
+            kind=ActivityKind.SERVICE_NOTICE,
+            title="Уведомление по сбору",
+            detail=text[:200],
+            meta={"campaign_id": campaign.id, "kind": kind or ""},
+        )
+        if deliver(
+            user,
+            text,
+            kind=KIND_CAMPAIGN_NOTICE,
+            meta={"campaign_id": campaign.id, "notice_kind": kind or ""},
+            send_fn=send_fn,
+        ):
             sent += 1
-            ActivityLog.objects.create(
-                user=user,
-                kind=ActivityKind.SERVICE_NOTICE,
-                title="Уведомление по сбору",
-                detail=text[:200],
-                meta={"campaign_id": campaign.id, "kind": kind or ""},
-            )
-        except Exception:
-            logger.exception(
-                "Failed campaign broadcast to %s (campaign %s)",
-                user.max_user_id,
-                campaign.id,
-            )
     return sent
 
 
@@ -567,39 +562,32 @@ def advance_work_stage(
     campaign.save(update_fields=update_fields)
 
     if nxt == WorkStage.WORK_DONE:
+        from services.outbox import KIND_CAMPAIGN_WORK_DONE, deliver
+
         text = work_done_message(campaign, photo_count=len(saved_photos))
-        image_payloads = []
-        for photo in saved_photos:
-            try:
-                with photo.image.open("rb") as fh:
-                    image_payloads.append(
-                        (fh.read(), Path(photo.image.name).name)
-                    )
-            except Exception:
-                logger.exception("Could not read result photo %s", photo.id)
         users = [inv.user for inv in campaign.invites.select_related("user").all()]
         for user in users:
-            try:
-                if image_payloads and send_media_fn:
-                    send_media_fn(user, text, image_payloads)
-                elif send_fn:
-                    send_fn(user, text)
-                ActivityLog.objects.create(
-                    user=user,
-                    kind=ActivityKind.SERVICE_NOTICE,
-                    title="Работа выполнена",
-                    detail=campaign.title,
-                    meta={
-                        "campaign_id": campaign.id,
-                        "photos": len(image_payloads),
-                    },
-                )
-            except Exception:
-                logger.exception(
-                    "Failed work-done notice to %s (campaign %s)",
-                    user.max_user_id,
-                    campaign.id,
-                )
+            ActivityLog.objects.create(
+                user=user,
+                kind=ActivityKind.SERVICE_NOTICE,
+                title="Работа выполнена",
+                detail=campaign.title,
+                meta={
+                    "campaign_id": campaign.id,
+                    "photos": len(saved_photos),
+                },
+            )
+            deliver(
+                user,
+                text,
+                kind=KIND_CAMPAIGN_WORK_DONE,
+                meta={
+                    "campaign_id": campaign.id,
+                    "result_photos_campaign_id": campaign.id,
+                },
+                send_fn=send_fn,
+                send_media_fn=send_media_fn,
+            )
 
     return WorkStage(nxt)
 
@@ -658,8 +646,8 @@ def process_unpaid_reminders(send_fn=None, *, now=None) -> int:
     """
     from datetime import timedelta
 
-    if not send_fn:
-        return 0
+    from services.outbox import KIND_UNPAID_REMIND, deliver
+
     now = now or timezone.now()
     # От более срочного к более раннему — за один проход не больше одного
     # напоминания на (сбор, пользователь).
@@ -695,10 +683,16 @@ def process_unpaid_reminders(send_fn=None, *, now=None) -> int:
                 if campaign.id not in text_cache:
                     text_cache[campaign.id] = unpaid_reminder_message(campaign)
                 try:
-                    send_fn(inv.user, text_cache[campaign.id])
-                    _record_notice(campaign, inv.user, kind)
-                    sent_total += 1
-                    sent_for_user = True
+                    if deliver(
+                        inv.user,
+                        text_cache[campaign.id],
+                        kind=KIND_UNPAID_REMIND,
+                        meta={"campaign_id": campaign.id, "notice_kind": kind},
+                        send_fn=send_fn,
+                    ):
+                        _record_notice(campaign, inv.user, kind)
+                        sent_total += 1
+                        sent_for_user = True
                     ActivityLog.objects.create(
                         user=inv.user,
                         kind=ActivityKind.SERVICE_NOTICE,
@@ -744,7 +738,7 @@ def offer_to_users(
     send_fn=None,
     send_media_fn=None,
 ) -> int:
-    """Create invites and notify users via send_fn / send_media_fn(user, text, images)."""
+    """Create invites and notify users via the MAX outbox (tests may pass send_fn)."""
     cfg = AppSettings.load()
     users = BotUser.objects.filter(id__in=user_ids)
     campaign.amount_per_user = amount_per_user
@@ -794,17 +788,21 @@ def offer_to_users(
             )
         except Exception:
             logger.exception("app inbox collection.offer campaign=%s", campaign.id)
-        try:
-            if image_payloads and send_media_fn:
-                send_media_fn(user, text, image_payloads)
-                sent += 1
-            elif send_fn:
-                send_fn(user, text)
-                sent += 1
-            else:
-                sent += 1
-        except Exception:
-            logger.exception("Failed to notify user %s about campaign", user.max_user_id)
+        from services.outbox import KIND_CAMPAIGN_OFFER, deliver
+
+        if deliver(
+            user,
+            text,
+            kind=KIND_CAMPAIGN_OFFER,
+            meta={
+                "campaign_id": campaign.id,
+                "invite_id": invite.id,
+                "offer_photos_campaign_id": campaign.id,
+            },
+            send_fn=send_fn,
+            send_media_fn=send_media_fn,
+        ):
+            sent += 1
 
         from services.volunteer import ask_volunteer_help
 
@@ -883,24 +881,29 @@ def notify_members_added_to_group(
     user_ids: list[int],
     send_fn=None,
 ) -> int:
-    """Send MAX notice to newly added members: which group + full group list."""
-    if not user_ids or not send_fn:
+    """Queue MAX notice to newly added members: which group + full group list."""
+    from services.outbox import KIND_GROUP_ADDED, deliver
+
+    if not user_ids:
         return 0
     sent = 0
     for user in BotUser.objects.filter(id__in=user_ids):
         text = user_groups_list_message(user, added_group=group)
-        try:
-            send_fn(user, text)
+        ActivityLog.objects.create(
+            user=user,
+            kind=ActivityKind.SERVICE_OFFER,
+            title="Добавлен в группу",
+            detail=group.name,
+            meta={"group_id": group.id},
+        )
+        if deliver(
+            user,
+            text,
+            kind=KIND_GROUP_ADDED,
+            meta={"group_id": group.id},
+            send_fn=send_fn,
+        ):
             sent += 1
-            ActivityLog.objects.create(
-                user=user,
-                kind=ActivityKind.SERVICE_OFFER,
-                title="Добавлен в группу",
-                detail=group.name,
-                meta={"group_id": group.id},
-            )
-        except Exception:
-            logger.exception("Failed to notify user %s about group %s", user.max_user_id, group.id)
     return sent
 
 
@@ -964,23 +967,23 @@ def invite_new_members_to_group_campaigns(
                     "photos": len(image_payloads),
                 },
             )
-            try:
-                if image_payloads and send_media_fn:
-                    send_media_fn(user, text, image_payloads)
-                    sent += 1
-                elif send_fn:
-                    send_fn(user, text)
-                    sent += 1
-                else:
-                    sent += 1
-            except Exception:
-                logger.exception(
-                    "Failed to notify new member %s about campaign %s",
-                    user.max_user_id,
-                    campaign.id,
-                )
+            from services.outbox import KIND_CAMPAIGN_OFFER, deliver
             from services.volunteer import ask_volunteer_help
 
+            if deliver(
+                user,
+                text,
+                kind=KIND_CAMPAIGN_OFFER,
+                meta={
+                    "campaign_id": campaign.id,
+                    "invite_id": invite.id,
+                    "group_id": group.id,
+                    "offer_photos_campaign_id": campaign.id,
+                },
+                send_fn=send_fn,
+                send_media_fn=send_media_fn,
+            ):
+                sent += 1
             ask_volunteer_help(campaign, user, send_fn=send_fn)
     return sent
 

@@ -113,12 +113,10 @@ def ask_volunteer_help(
         pending.pending_payload = {"ask_id": ask.id, "queue": []}
         pending.save(update_fields=["pending_kind", "pending_payload", "updated_at"])
 
+    from services.outbox import KIND_VOLUNTEER_ASK, deliver
+
     text = volunteer_ask_message(campaign)
-    if send_fn:
-        try:
-            send_fn(user, text)
-        except Exception:
-            logger.exception("Failed to ask volunteer help user %s", user.max_user_id)
+    deliver(user, text, kind=KIND_VOLUNTEER_ASK, meta={"campaign_id": campaign.id, "ask_id": ask.id}, send_fn=send_fn)
     return ask
 
 

@@ -296,11 +296,15 @@ def free_slots_for_contractor(
     return slots
 
 
-def list_masters_for_role(role, client_user: BotUser) -> list[dict]:
+def list_masters_for_role(
+    role, client_user: BotUser, *, locality: str | None = None
+) -> list[dict]:
     """Мастера роли в НП клиента (или все verified, если НП пуст)."""
     from services.work_request_dispatch import verified_contractors_for_role
 
-    client_loc = (getattr(client_user, "locality", None) or "").strip()
+    client_loc = (
+        locality if locality is not None else getattr(client_user, "locality", None) or ""
+    ).strip()
     items: list[dict] = []
     for c in verified_contractors_for_role(role):
         if is_self_assignment(client_user.id, c):
@@ -337,13 +341,17 @@ def list_masters_for_role(role, client_user: BotUser) -> list[dict]:
     return items
 
 
-def role_has_local_masters(role, client_user: BotUser) -> bool:
+def role_has_local_masters(
+    role, client_user: BotUser, *, locality: str | None = None
+) -> bool:
     """Есть ли в НП клиента хотя бы один verified-мастер роли (не сам клиент)."""
     from services.work_request_dispatch import verified_contractors_for_role
 
     if role is None or client_user is None:
         return False
-    client_loc = (getattr(client_user, "locality", None) or "").strip()
+    client_loc = (
+        locality if locality is not None else getattr(client_user, "locality", None) or ""
+    ).strip()
     for c in verified_contractors_for_role(role):
         if is_self_assignment(client_user.id, c):
             continue
@@ -356,13 +364,14 @@ def role_has_local_masters(role, client_user: BotUser) -> bool:
     return False
 
 
-def roles_for_client_call(client_user: BotUser):
+def roles_for_client_call(client_user: BotUser, *, locality: str | None = None):
     """
     Активные роли, у которых в НП клиента есть другой мастер.
 
     Если пользователь сам единственный электрик в посёлке — роль «Электрик»
     ему не показываем (иначе «нет мастеров этой роли»).
     Полный каталог (регистрация исполнителем) — без этого фильтра.
+    locality — канонический НП выбранной группы; иначе анкета жителя.
     """
     from database.models import ExecutorRole
 
@@ -373,7 +382,9 @@ def roles_for_client_call(client_user: BotUser):
         return roles
 
     client_id = int(client_user.id)
-    client_loc = (getattr(client_user, "locality", None) or "").strip()
+    client_loc = (
+        locality if locality is not None else getattr(client_user, "locality", None) or ""
+    ).strip()
     profiles = list(
         ContractorProfile.objects.filter(status=ContractorStatus.VERIFIED)
         .exclude(user_id=client_id)
@@ -411,6 +422,7 @@ def create_client_booking(
     description: str,
     contractor_id: int,
     slot_label: str,
+    client_locality: str | None = None,
 ) -> WorkRequest:
     """Создать заявку с предварительным окном у выбранного мастера."""
     if not role_uses_client_booking(role):
@@ -482,7 +494,10 @@ def create_client_booking(
             role=role,
             description=desc[:4000],
             status=status,
-            client_locality=(client.locality or "").strip()[:255],
+            client_locality=(
+                (client_locality if client_locality is not None else client.locality)
+                or ""
+            ).strip()[:255],
             assigned_contractor=contractor,
             agreed_slot=slot[:255],
             proposed_slots=[],

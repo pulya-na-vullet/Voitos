@@ -57,3 +57,4 @@ class ContractorsLocalityBrowseTests(TestCase):
         self.assertContains(resp, "Мастер Куюки")
         self.assertNotContains(resp, "Мастер Казань")
         self.assertContains(resp, "Все населённые пункты")
+        self.assertContains(resp, "Нас. пункт")

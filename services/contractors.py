@@ -328,11 +328,9 @@ def notify_peer_contractors(
     *,
     send_fn=None,
 ) -> int:
-    """Если на задаче ≥2 исполнителей — разослать им контакты друг друга."""
-    if send_fn is None:
-        send_fn = _default_send_fn()
-    if not send_fn:
-        return 0
+    """Если на задаче ≥2 исполнителей — поставить в очередь контакты друг друга."""
+    from services.outbox import deliver
+
     active = active_peer_assignments(campaign)
     if len(active) < 2:
         return 0
@@ -342,25 +340,25 @@ def notify_peer_contractors(
         if not peers:
             continue
         text = peers_contacts_message(campaign, peers)
-        try:
-            send_fn(assignment.contractor.user, text)
+        ActivityLog.objects.create(
+            user=assignment.contractor.user,
+            kind=ActivityKind.CONTRACTOR_OFFER,
+            title="Контакты коллег-исполнителей",
+            detail=f"{campaign.title}: {len(peers)} чел.",
+            meta={
+                "campaign_id": campaign.id,
+                "assignment_id": assignment.id,
+                "peer_ids": [p.id for p in peers],
+            },
+        )
+        if deliver(
+            assignment.contractor.user,
+            text,
+            kind="campaign.peer_contacts",
+            meta={"campaign_id": campaign.id, "assignment_id": assignment.id},
+            send_fn=send_fn,
+        ):
             sent += 1
-            ActivityLog.objects.create(
-                user=assignment.contractor.user,
-                kind=ActivityKind.CONTRACTOR_OFFER,
-                title="Контакты коллег-исполнителей",
-                detail=f"{campaign.title}: {len(peers)} чел.",
-                meta={
-                    "campaign_id": campaign.id,
-                    "assignment_id": assignment.id,
-                    "peer_ids": [p.id for p in peers],
-                },
-            )
-        except Exception:
-            logger.exception(
-                "Failed to notify peer contacts for contractor %s",
-                assignment.contractor_id,
-            )
     return sent
 
 
@@ -417,11 +415,15 @@ def assign_contractor(
         detail=f"{campaign.title} @ {_fmt_dt(when)}",
         meta={"assignment_id": assignment.id, "campaign_id": campaign.id},
     )
-    if send_fn:
-        try:
-            send_fn(contractor.user, text)
-        except Exception:
-            logger.exception("Failed to notify contractor %s", contractor.id)
+    from services.outbox import KIND_CONTRACTOR_OFFER, deliver
+
+    deliver(
+        contractor.user,
+        text,
+        kind=KIND_CONTRACTOR_OFFER,
+        meta={"assignment_id": assignment.id, "campaign_id": campaign.id},
+        send_fn=send_fn,
+    )
 
     # Pending reply state for bot
     from database.models import PendingAction
@@ -752,19 +754,22 @@ def notify_residents_about_assignments(
     text = residents_status_message(campaign)
     if not text or not campaign.group_id:
         return 0
+    from services.outbox import KIND_RESIDENTS_ASSIGN, deliver
+
     members = list(campaign.group.members.all())
     if not members:
         return 0
-    send = send_fn or _default_send_fn()
     sent = 0
     now = timezone.now()
     for user in members:
-        if send:
-            try:
-                send(user, text)
-                sent += 1
-            except Exception:
-                logger.exception("Failed to notify resident %s", user.id)
+        if deliver(
+            user,
+            text,
+            kind=KIND_RESIDENTS_ASSIGN,
+            meta={"campaign_id": campaign.id},
+            send_fn=send_fn,
+        ):
+            sent += 1
     campaign.assignments.filter(status=AssignmentStatus.ACCEPTED).update(
         residents_notified_at=now
     )
@@ -946,23 +951,14 @@ def notify_contractor_payouts(
     send_fn=None,
     send_media_fn=None,
 ) -> tuple[int, int]:
-    """Notify paid residents + each contractor. Returns (residents, contractors)."""
+    """Notify paid residents + each contractor via outbox. Returns (residents, contractors)."""
+    from services.outbox import KIND_CAMPAIGN_PAYOUT, deliver
+
     if not payouts:
         return 0, 0
-    send = send_fn or _default_send_fn()
-    media = send_media_fn
-
-    image_payloads: list[tuple[bytes, str]] = []
-    for p in payouts:
-        try:
-            with p.receipt_image.open("rb") as fh:
-                image_payloads.append(
-                    (fh.read(), Path(p.receipt_image.name).name)
-                )
-        except Exception:
-            logger.exception("Could not read payout receipt %s", p.id)
 
     resident_text = _payout_resident_message(campaign, payouts)
+    payout_ids = [p.id for p in payouts]
     # Who collected money: paid invites, else all group members
     residents = list(
         BotUser.objects.filter(
@@ -977,39 +973,30 @@ def notify_contractor_payouts(
     r_sent = 0
     now = timezone.now()
     for user in residents:
-        if not send and not media:
-            break
-        try:
-            if image_payloads and media:
-                media(user, resident_text, image_payloads)
-            elif send:
-                send(user, resident_text)
+        if deliver(
+            user,
+            resident_text,
+            kind=KIND_CAMPAIGN_PAYOUT,
+            meta={"campaign_id": campaign.id, "payout_ids": payout_ids},
+            send_fn=send_fn,
+            send_media_fn=send_media_fn,
+        ):
             r_sent += 1
-        except Exception:
-            logger.exception("Failed payout notice to resident %s", user.id)
 
     c_sent = 0
     for p in payouts:
         msg = _payout_contractor_message(p)
-        payloads = []
-        try:
-            with p.receipt_image.open("rb") as fh:
-                payloads = [(fh.read(), Path(p.receipt_image.name).name)]
-        except Exception:
-            logger.exception("Could not re-read payout %s for contractor", p.id)
-        try:
-            if payloads and media:
-                media(p.contractor.user, msg, payloads)
-            elif send:
-                send(p.contractor.user, msg)
+        if deliver(
+            p.contractor.user,
+            msg,
+            kind=KIND_CAMPAIGN_PAYOUT,
+            meta={"campaign_id": campaign.id, "payout_id": p.id},
+            send_fn=send_fn,
+            send_media_fn=send_media_fn,
+        ):
             c_sent += 1
             p.contractor_notified_at = now
             p.save(update_fields=["contractor_notified_at"])
-        except Exception:
-            logger.exception(
-                "Failed payout notice to contractor %s", p.contractor_id
-            )
-
     ContractorPayout.objects.filter(id__in=[p.id for p in payouts]).update(
         residents_notified_at=now
     )

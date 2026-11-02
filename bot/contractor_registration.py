@@ -284,6 +284,12 @@ def _finish(
     payout = (payload.get("payout_phone") or contact)[:32]
     # Одна роль = одна запись; повторная регистрация той же роли обновляет анкету,
     # другие роли того же пользователя сохраняются.
+    locality_raw = (payload.get("locality") or user.locality or "").strip()
+    from services.locality import apply_canonical_locality
+
+    locality = apply_canonical_locality(
+        locality_raw, extra=user.address or "", use_ai=True
+    ) or locality_raw
     profile, _created = ContractorProfile.objects.update_or_create(
         user=user,
         equipment_type=role.code,
@@ -295,7 +301,7 @@ def _finish(
             "phone": contact,
             "payout_phone": payout,
             "bank_name": (payload.get("bank_name") or "")[:255],
-            "locality": (payload.get("locality") or user.locality or "")[:255],
+            "locality": locality[:255],
             "status": ContractorStatus.PENDING_REVIEW,
             "submitted_at": timezone.now(),
             "verified_at": None,
@@ -309,9 +315,18 @@ def _finish(
         fname = payload.get("qual_filename") or "doc.jpg"
         profile.qualification_doc.save(fname, ContentFile(raw), save=True)
 
-    if not (user.locality or "").strip() and profile.locality:
-        user.locality = profile.locality
-        user.save(update_fields=["locality", "last_seen_at"])
+    if profile.locality:
+        from services.locality import looks_like_address, localities_match
+
+        current = (user.locality or "").strip()
+        if (
+            not current
+            or looks_like_address(current)
+            or localities_match(current, profile.locality)
+        ):
+            if current != profile.locality:
+                user.locality = profile.locality
+                user.save(update_fields=["locality", "last_seen_at"])
 
     if pending is not None:
         pending.clear_pending()
@@ -372,9 +387,14 @@ def submit_contractor_registration_api(user: BotUser, data: dict) -> tuple[Contr
     phone = normalize_phone(str(data.get("phone") or user.phone or ""))
     if len(phone) < 10:
         raise ValueError("phone_required")
-    locality = (str(data.get("locality") or user.locality or "")).strip()
-    if len(locality) < 2:
+    from services.locality import apply_canonical_locality
+
+    raw_loc = (str(data.get("locality") or user.locality or "")).strip()
+    if len(raw_loc) < 2:
         raise ValueError("locality_required")
+    locality = apply_canonical_locality(
+        raw_loc, extra=user.address or "", use_ai=True
+    ) or raw_loc
     bank = (str(data.get("bank_name") or "")).strip()
     if len(bank) < 2:
         raise ValueError("bank_required")

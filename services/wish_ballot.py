@@ -162,6 +162,8 @@ def start_ballot(
         options=options,
         voting_ends_at=now + VOTING_DURATION,
     )
+    from services.outbox import KIND_WISH_BALLOT, deliver
+
     members = list(group.members.all())
     text = ballot_message(ballot)
     for user in members:
@@ -175,15 +177,13 @@ def start_ballot(
         elif pending.pending_kind == PENDING_KIND:
             pending.pending_payload = {"ballot_id": ballot.id}
             pending.save(update_fields=["pending_payload", "updated_at"])
-        if send_fn:
-            try:
-                send_fn(user, text)
-            except Exception:
-                logger.exception(
-                    "Failed to send wish ballot #%s to user %s",
-                    ballot.id,
-                    user.max_user_id,
-                )
+        deliver(
+            user,
+            text,
+            kind=KIND_WISH_BALLOT,
+            meta={"ballot_id": ballot.id, "group_id": group.id},
+            send_fn=send_fn,
+        )
     return ballot
 
 

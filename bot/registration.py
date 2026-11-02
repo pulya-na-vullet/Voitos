@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from django.utils import timezone
 
 from database.models import (
@@ -145,17 +143,12 @@ def begin_incomplete_profile_flow(
 
 
 def _extract_locality(address: str) -> str:
+    from services.locality import apply_canonical_locality
+
     address = (address or "").strip()
     if not address:
         return ""
-    first = address.split(",")[0].strip()
-    first = re.sub(
-        r"^(г\.|гор\.|город|п\.|пос\.|поселок|посёлок|с\.|село|д\.|деревня)\s*",
-        "",
-        first,
-        flags=re.IGNORECASE,
-    ).strip()
-    return first or address[:80]
+    return apply_canonical_locality(address, use_ai=True) or address.split(",")[0].strip()[:80]
 
 
 def _finish_if_complete(user: BotUser, pending: PendingAction) -> str | None:
@@ -290,7 +283,11 @@ def handle_registration_step(user: BotUser, text: str, pending: PendingAction) -
     if step == "locality":
         if len(value) < 2:
             return "Укажите населённый пункт."
-        user.locality = value
+        from services.locality import apply_canonical_locality
+
+        user.locality = apply_canonical_locality(
+            value, extra=user.address or "", use_ai=True
+        ) or value
         user.save(update_fields=["locality", "last_seen_at"])
         # Address may already be set; check family before finish
         if (user.address or "").strip():

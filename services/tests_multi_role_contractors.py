@@ -77,7 +77,7 @@ class MultiRoleContractorTests(TestCase):
             1,
         )
         p = ContractorProfile.objects.get(user=self.user, equipment_type=self.elec.code)
-        self.assertEqual(p.equipment_label, "новое описание")
+        self.assertEqual(p.experience_text, "новое описание")
 
 
 class AcceptOfferContactsTests(TestCase):

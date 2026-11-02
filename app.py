@@ -2,7 +2,8 @@
 """
 Voitos entrypoint.
 
-Starts Django web panel + MAX bot worker + reminder/service schedulers + daily DB dumps.
+Starts Django web panel + MAX bot worker + reminder/service schedulers +
+MAX outbox worker + daily DB dumps.
 Runs migrations on every launch and restarts child processes if they crash.
 """
 
@@ -238,6 +239,12 @@ def run_service_notices(stop_event: threading.Event) -> None:
     run_service_campaign_scheduler(stop_event)
 
 
+def run_outbox(stop_event: threading.Event) -> None:
+    from services.outbox import run_outbox_loop
+
+    run_outbox_loop(stop_event)
+
+
 def run_dumps(stop_event: threading.Event) -> None:
     from database.dump import run_daily_dump_loop
 
@@ -284,6 +291,7 @@ def main() -> int:
         ManagedProcess("bot", run_bot),
         ManagedProcess("reminders", run_reminders),
         ManagedProcess("service_notices", run_service_notices),
+        ManagedProcess("outbox", run_outbox),
         ManagedProcess("dumps", run_dumps),
     ]
     for proc in processes:

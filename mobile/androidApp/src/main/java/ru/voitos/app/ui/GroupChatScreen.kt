@@ -59,6 +59,7 @@ fun GroupChatScreen(
     client: VoitosApiClient,
     onBack: () -> Unit,
     initialGroupId: Int? = null,
+    onGroupSelected: (Int) -> Unit = {},
 ) {
     var groups by remember { mutableStateOf<List<ServiceGroupBrief>>(emptyList()) }
     var selectedGroupId by remember { mutableStateOf(initialGroupId) }
@@ -112,6 +113,11 @@ fun GroupChatScreen(
     }
 
     LaunchedEffect(Unit) { loadGroups() }
+
+    LaunchedEffect(selectedGroupId) {
+        val gid = selectedGroupId ?: return@LaunchedEffect
+        onGroupSelected(gid)
+    }
 
     LaunchedEffect(selectedGroupId) {
         if (selectedGroupId != null) {
@@ -216,6 +222,7 @@ fun GroupChatScreen(
                                 },
                                 onClick = {
                                     selectedGroupId = g.id
+                                    onGroupSelected(g.id)
                                     menuOpen = false
                                 },
                             )

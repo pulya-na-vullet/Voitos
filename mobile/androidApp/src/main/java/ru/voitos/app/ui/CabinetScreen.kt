@@ -64,6 +64,7 @@ fun CabinetScreen(
     onRegisterExecutor: () -> Unit,
     onOpenFeedback: () -> Unit,
     onOpenWishes: () -> Unit,
+    onOpenBallots: () -> Unit,
     onChangePin: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -276,6 +277,38 @@ fun CabinetScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = voitosSecondaryButtonColors(),
             ) { Text("Оставить пожелание") }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // «Голосования»: счётчик встроен в кнопку — сколько голосований
+            // идёт и в скольких житель ещё не голосовал.
+            val unvoted = me?.ballots?.unvoted ?: 0
+            Button(
+                onClick = onOpenBallots,
+                modifier = Modifier.fillMaxWidth(),
+                colors = voitosSecondaryButtonColors(),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Голосования")
+                    if (unvoted > 0) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(VoitosColors.Danger),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = if (unvoted > 9) "9+" else unvoted.toString(),
+                                color = VoitosColors.Text,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 

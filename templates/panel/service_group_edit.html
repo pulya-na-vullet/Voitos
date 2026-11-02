@@ -20,10 +20,24 @@
       <input type="text" name="name" value="{{ group.name }}" required>
     </div>
     <div class="form-row">
+      <label>Населённый пункт</label>
+      <input type="text" name="locality" list="known-settlements" value="{{ group.locality }}" placeholder="Куюки" autocomplete="off">
+      {% if not group.locality and settlement %}
+      <p class="muted" style="margin:6px 0 0;">Пока не задан — по жителям определяется как <strong>{{ settlement }}</strong>. Сохраните НП явно.</p>
+      {% else %}
+      <p class="muted" style="margin:6px 0 0;">По этому НП жители группы видят мастеров в приложении.</p>
+      {% endif %}
+    </div>
+    <div class="form-row">
       <label>Описание</label>
       <input type="text" name="description" value="{{ group.description }}">
     </div>
-    <button class="btn secondary small" type="submit" style="margin-bottom:12px;">Сохранить название</button>
+    <button class="btn secondary small" type="submit" style="margin-bottom:12px;">Сохранить группу</button>
+    <datalist id="known-settlements">
+      {% for loc in known_settlements %}
+      <option value="{{ loc }}"></option>
+      {% endfor %}
+    </datalist>
 
     <details class="members-fold" style="border:1px solid var(--line); border-radius:12px; background:var(--bg-soft); padding:0 12px 12px;">
       <summary style="cursor:pointer; list-style:none; padding:14px 4px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">

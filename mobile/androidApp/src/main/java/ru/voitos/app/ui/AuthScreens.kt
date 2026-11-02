@@ -128,6 +128,8 @@ fun LoginScreen(
     var maxBotUrl by remember { mutableStateOf("https://max.ru/se13602985_1_bot") }
     var canRegister by remember { mutableStateOf(false) }
     var debugHint by remember { mutableStateOf<String?>(null) }
+    /** Текст-предупреждение: PIN на новом телефоне требует подтверждения через MAX. */
+    var newDeviceNotice by remember { mutableStateOf<String?>(null) }
     var serverStatus by remember {
         mutableStateOf(
             if (restoredFromDisk) "Проверяем сохранённый адрес…" else "Ищем сервер в Wi‑Fi…",
@@ -705,6 +707,19 @@ fun LoginScreen(
                                         apkUrl = health?.apkUrl.orEmpty(),
                                         latestName = health?.latestAppVersionName.orEmpty(),
                                     )
+                                } else if (e.code == "max_verification_required") {
+                                    // Новый телефон: PIN верный, но вход не выдан.
+                                    // Переключаемся на вход кодом из MAX и объясняем почему.
+                                    showPin = false
+                                    step = 0
+                                    code = ""
+                                    pin = ""
+                                    canRegister = false
+                                    debugHint = null
+                                    newDeviceNotice = e.message
+                                        ?.takeIf { it.isNotBlank() }
+                                        ?: "Вход с нового телефона — подтвердите через MAX"
+                                    error = null
                                 } else {
                                     error = friendlyNetworkError(e, fallback = "Неверный PIN")
                                 }
@@ -724,6 +739,30 @@ fun LoginScreen(
                 }
             }
             return@Column
+        }
+
+        // PIN на новом телефоне не выдаёт токен — объясняем и ведём в код из MAX.
+        newDeviceNotice?.let { notice ->
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { },
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, VoitosColors.Accent2),
+            ) {
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        "Вход с нового телефона",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = VoitosColors.Accent2,
+                    )
+                    Text(
+                        notice,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VoitosColors.Text,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
         OutlinedTextField(
@@ -824,7 +863,13 @@ fun LoginScreen(
                 ) { Text("Регистрация") }
             }
             if (preferPinLogin && initialPhone.isNotBlank()) {
-                TextButton(onClick = { showPin = true }) {
+                TextButton(
+                    onClick = {
+                        showPin = true
+                        newDeviceNotice = null
+                        error = null
+                    },
+                ) {
                     Text("Войти по PIN", color = VoitosColors.Muted)
                 }
             }

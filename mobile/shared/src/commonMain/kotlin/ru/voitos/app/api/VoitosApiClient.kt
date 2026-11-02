@@ -31,6 +31,9 @@ import ru.voitos.app.model.ApiException
 import ru.voitos.app.model.AuthConfig
 import ru.voitos.app.model.AuthSession
 import ru.voitos.app.model.AvatarUploadResult
+import ru.voitos.app.model.BallotList
+import ru.voitos.app.model.BallotVoteResult
+import ru.voitos.app.model.BallotsCounter
 import ru.voitos.app.model.CollectionDetail
 import ru.voitos.app.model.CollectionList
 import ru.voitos.app.model.CollectionReceiptResult
@@ -97,6 +100,13 @@ class VoitosApiClient(
 
     /** versionCode установленного APK — уходит в X-Voitos-App-Version и login body. */
     var appVersionCode: Int? = null
+
+    /**
+     * Стабильный id установки приложения (UUID, живёт в SharedPreferences).
+     * Бэкенд по нему отличает «мой телефон» от нового: на новом PIN не выдаёт
+     * токен и требует подтверждения через MAX.
+     */
+    var deviceId: String? = null
 
     /**
      * Вызывается один раз при 401 на запросе с токеном (пользователь удалён/деактивирован,
@@ -237,6 +247,7 @@ class VoitosApiClient(
                     put("phone", phone)
                     put("code", code)
                     appVersionCode?.let { put("version_code", it) }
+                    deviceId?.takeIf { it.isNotBlank() }?.let { put("device_id", it) }
                 },
             )
         }
@@ -297,6 +308,7 @@ class VoitosApiClient(
                 buildJsonObject {
                     put("phone", phone)
                     put("code", code)
+                    deviceId?.takeIf { it.isNotBlank() }?.let { put("device_id", it) }
                 },
             )
         }
@@ -319,6 +331,7 @@ class VoitosApiClient(
                 buildJsonObject {
                     put("phone", phone)
                     put("code", code)
+                    deviceId?.takeIf { it.isNotBlank() }?.let { put("device_id", it) }
                 },
             )
         }.body()
@@ -335,6 +348,7 @@ class VoitosApiClient(
                     put("phone", phone)
                     put("pin", pin)
                     appVersionCode?.let { put("version_code", it) }
+                    deviceId?.takeIf { it.isNotBlank() }?.let { put("device_id", it) }
                 },
             )
         }
@@ -419,6 +433,42 @@ class VoitosApiClient(
         }.body()
 
     suspend fun me(): Me = authedGet("/me")
+
+    /** Счётчик для кнопки «Голосования» в личном кабинете. */
+    suspend fun ballotsCounter(): BallotsCounter = authedGet("/ballots/counter")
+
+    /** Голосования в группах жителя. */
+    suspend fun ballots(): BallotList = authedGet("/ballots")
+
+    /**
+     * Отдать голос: [topic] — ключ варианта или null для отказа («пока не делаем»).
+     * Повторный голос перезаписывает предыдущий.
+     */
+    suspend fun ballotVote(ballotId: Int, topic: String?): BallotVoteResult {
+        val response: HttpResponse = http.post("$baseUrl/ballots/$ballotId/vote") {
+            applyAuth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                buildJsonObject {
+                    if (topic.isNullOrBlank()) {
+                        put("will_do", false)
+                    } else {
+                        put("topic", topic)
+                    }
+                },
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val err = runCatching { response.body<ApiErrorBody>() }.getOrNull()
+            throw ApiException(
+                err?.error?.ifBlank { null } ?: "vote_failed",
+                err?.detail?.ifBlank { null }
+                    ?: err?.error?.ifBlank { null }
+                    ?: "Не удалось сохранить голос",
+            )
+        }
+        return response.body()
+    }
 
     suspend fun uploadAvatar(
         contentBase64: String,
@@ -548,13 +598,18 @@ class VoitosApiClient(
             )
         }.body()
 
-    suspend fun executorRoles(forCall: Boolean = false): ExecutorRoleList {
-        val path = if (forCall) "/executor-roles?for=call" else "/executor-roles"
+    suspend fun executorRoles(forCall: Boolean = false, groupId: Int? = null): ExecutorRoleList {
+        val parts = mutableListOf<String>()
+        if (forCall) parts.add("for=call")
+        if (groupId != null && groupId > 0) parts.add("group_id=$groupId")
+        val path = if (parts.isEmpty()) "/executor-roles" else "/executor-roles?${parts.joinToString("&")}"
         return authedGet(path)
     }
 
-    suspend fun roleMasters(roleId: Int): RoleMastersResponse =
-        authedGet("/executor-roles/$roleId/masters")
+    suspend fun roleMasters(roleId: Int, groupId: Int? = null): RoleMastersResponse {
+        val q = if (groupId != null && groupId > 0) "?group_id=$groupId" else ""
+        return authedGet("/executor-roles/$roleId/masters$q")
+    }
 
     suspend fun contractorFreeSlots(contractorId: Int, days: Int = 2): FreeSlotsResponse {
         val response: HttpResponse = http.get("$baseUrl/contractors/$contractorId/free-slots") {
@@ -576,6 +631,7 @@ class VoitosApiClient(
         description: String,
         contractorId: Int? = null,
         slot: String? = null,
+        groupId: Int? = null,
     ): WorkRequestCreated {
         val response: HttpResponse = http.post("$baseUrl/work-requests") {
             applyAuth()
@@ -589,6 +645,9 @@ class VoitosApiClient(
                     }
                     if (!slot.isNullOrBlank()) {
                         put("slot", slot)
+                    }
+                    if (groupId != null && groupId > 0) {
+                        put("group_id", groupId)
                     }
                 },
             )

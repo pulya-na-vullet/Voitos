@@ -45,6 +45,7 @@ import ru.voitos.app.nav.DeepLinks
 import ru.voitos.app.push.DevPushTokenProvider
 import ru.voitos.app.ui.CabinetScreen
 import ru.voitos.app.ui.ChangePinScreen
+import ru.voitos.app.ui.BallotsScreen
 import ru.voitos.app.ui.CollectionDetailScreen
 import ru.voitos.app.ui.CollectionsScreen
 import ru.voitos.app.ui.RateMasterScreen
@@ -104,6 +105,9 @@ class MainActivity : ComponentActivity() {
     private fun newApiClient(baseUrl: String, token: String?): VoitosApiClient =
         VoitosApiClient(baseUrl = baseUrl).also { api ->
             api.appVersionCode = AppVersion.code
+            // Стабильный id установки: сервер по нему понимает, что PIN вводят
+            // на «своём» телефоне, а не на новом.
+            if (::session.isInitialized) api.deviceId = session.deviceId
             api.accessToken = token
             api.onUnauthorized = { sessionExpired.tryEmit(Unit) }
             api.onUpdateRequired = { apk -> forceUpdateEvents.tryEmit(apk) }
@@ -115,6 +119,8 @@ class MainActivity : ComponentActivity() {
         data object SetPin : Screen()
         data object ChangePin : Screen()
         data object Wish : Screen()
+        /** Голосования по пожеланиям двора. */
+        data object Ballots : Screen()
         /** Проверка онбординга перед сплэшем / главной. */
         data object Bootstrapping : Screen()
         /** Обязательный онбординг (ещё не пройден на бэкенде). */
@@ -176,7 +182,13 @@ class MainActivity : ComponentActivity() {
                 var crashText by remember { mutableStateOf(lastCrash) }
                 var updateApkUrl by remember { mutableStateOf("") }
                 var paywallGateMessage by remember { mutableStateOf("") }
+                var selectedGroupId by remember { mutableStateOf(session.selectedGroupId) }
                 val scope = rememberCoroutineScope()
+
+                fun rememberGroup(id: Int?) {
+                    selectedGroupId = id
+                    session.selectedGroupId = id
+                }
 
                 fun enterMainWithSplash(splash: Boolean) {
                     playSplash = splash
@@ -323,7 +335,7 @@ class MainActivity : ComponentActivity() {
                             moveTaskToBack(true)
                         is Screen.CollectionDetail, Screen.GroupChat ->
                             goMain(MainTab.Collections, refreshCollections = true)
-                        Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister, Screen.ChangePin, Screen.Wish ->
+                        Screen.Subscription, Screen.Onboarding, Screen.Feedback, Screen.ExecutorRegister, Screen.ChangePin, Screen.Wish, Screen.Ballots ->
                             goMain(MainTab.Cabinet)
                         is Screen.WorkRequestPhotos -> goMain(MainTab.CallMaster)
                         is Screen.WorkRequestDetail -> goMain(current.returnTab)
@@ -564,6 +576,8 @@ class MainActivity : ComponentActivity() {
                                         )
                                         MainTab.CallMaster -> NewWorkRequestScreen(
                                             client = client,
+                                            groupId = selectedGroupId,
+                                            onGroupSelected = { rememberGroup(it) },
                                             onCreated = { id, needsPhotos ->
                                                 screen = if (needsPhotos) {
                                                     Screen.WorkRequestPhotos(id)
@@ -588,6 +602,7 @@ class MainActivity : ComponentActivity() {
                                             },
                                             onOpenFeedback = { screen = Screen.Feedback },
                                             onOpenWishes = { screen = Screen.Wish },
+                                            onOpenBallots = { screen = Screen.Ballots },
                                             onChangePin = { screen = Screen.ChangePin },
                                             onLogout = { logoutToLogin() },
                                         )
@@ -700,6 +715,14 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
 
+                            Screen.Ballots -> BallotsScreen(
+                                client = client,
+                                onBack = {
+                                    tab = MainTab.Cabinet
+                                    screen = Screen.Main
+                                },
+                            )
+
                             Screen.ChangePin -> ChangePinScreen(
                                 client = client,
                                 onBack = {
@@ -710,6 +733,8 @@ class MainActivity : ComponentActivity() {
 
                             Screen.GroupChat -> GroupChatScreen(
                                 client = client,
+                                initialGroupId = selectedGroupId,
+                                onGroupSelected = { rememberGroup(it) },
                                 onBack = {
                                     scope.launch {
                                         chatUnread = runCatching {

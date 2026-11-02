@@ -81,9 +81,9 @@ class WorkRequestDispatchTests(TestCase):
         pending.pending_payload = {"offer_id": offer.id}
         pending.save()
         msg = handle_work_offer_reply(self.exec_user, "да", pending)
-        self.assertIn("закреплена", msg.lower())
+        self.assertIn("заявка ваша", msg.lower())
         req.refresh_from_db()
-        self.assertEqual(req.status, WorkRequestStatus.IN_PROGRESS)
+        self.assertEqual(req.status, WorkRequestStatus.SCHEDULING)
         self.assertEqual(req.assigned_contractor_id, self.contractor.id)
 
     def test_timeout_goes_to_next_or_notifies_client(self):

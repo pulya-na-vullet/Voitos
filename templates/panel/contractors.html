@@ -59,6 +59,7 @@
     <thead>
       <tr>
         <th>Мастер</th>
+        <th>Нас. пункт</th>
         <th>Роль</th>
         <th>Описание</th>
         <th>Документ</th>
@@ -76,6 +77,16 @@
       <tr>
         <td><a href="{% url 'panel:contractor_detail' c.id %}">{{ c.user }}</a>
           <div class="muted"><a href="{% url 'panel:user_dashboard' c.user_id %}">профиль</a></div>
+        </td>
+        <td>
+          {% if c.display_locality %}
+            <strong>{{ c.display_locality }}</strong>
+            {% if c.raw_locality and c.raw_locality != c.display_locality %}
+            <div class="muted">{{ c.raw_locality }}</div>
+            {% endif %}
+          {% else %}
+            <span class="muted">не указан</span>
+          {% endif %}
         </td>
         <td>{{ c.role_label }}</td>
         <td>{{ c.equipment_label|default:"—" }}
@@ -164,7 +175,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="11" class="muted">В этом населённом пункте мастеров нет{% if type_filter %} (для выбранной роли){% endif %}.</td></tr>
+      <tr><td colspan="12" class="muted">В этом населённом пункте мастеров нет{% if type_filter %} (для выбранной роли){% endif %}.</td></tr>
     {% endfor %}
     </tbody>
   </table>

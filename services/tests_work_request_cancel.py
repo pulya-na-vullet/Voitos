@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from django.test import TestCase
+from django.utils import timezone
 
 from bot.work_request import handle_work_request_step, start_work_request
 from database.models import (
     BotUser,
+    ContractorProfile,
+    ContractorStatus,
     ExecutorRole,
     PendingAction,
     WorkRequest,
@@ -26,6 +29,15 @@ class RolePickAndCancelTests(TestCase):
         )
         self.user = BotUser.objects.create(max_user_id="cx1", real_name="Клиент")
         self.pending, _ = PendingAction.objects.get_or_create(user=self.user)
+        for role, uid in ((self.comp, "cx-m1"), (self.elec, "cx-m2")):
+            master = BotUser.objects.create(max_user_id=uid, real_name=f"Мастер {role.name}")
+            ContractorProfile.objects.create(
+                user=master,
+                role=role,
+                equipment_type=role.code,
+                status=ContractorStatus.VERIFIED,
+                verified_at=timezone.now(),
+            )
 
     def test_call_master_shows_role_list(self):
         self.assertIsNone(extract_role_from_call_phrase("вызвать мастера"))
